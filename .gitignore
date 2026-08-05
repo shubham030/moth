@@ -1,0 +1,16 @@
+# Dart
+.dart_tool/
+pubspec.lock
+build/
+
+# C / ESP-IDF
+sdkconfig
+sdkconfig.old
+managed_components/
+dependencies.lock
+
+# moth artifacts
+*.mothb
+
+# OS
+.DS_Store
