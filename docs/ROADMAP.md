@@ -55,6 +55,19 @@ Architecture, decisions, and scope documented. This directory.
 - [ ] Contributor docs; golden tests wired to CI (simulator, no hardware)
 - [ ] Publish: GitHub + pub.dev for the CLI and `package:moth`
 
+## Track R — moth_render (parallel, best-effort)
+
+The native backend (ADR-008). Runs alongside M1–M4, never blocks them.
+Desktop-first; no Dart dependency until the framework exists.
+
+- [x] R0 — Backend contract (docs/BACKEND.md) + component scaffold with SDL harness
+- [ ] R1 — Flex layout per §4 of the contract, passing the layout goldens;
+      flat-color software paint (boxes visible in the harness)
+- [ ] R2 — ThorVG integration: rounded rects, borders, text, images
+- [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one)
+- [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
+- [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
+
 ## Later / help wanted
 
 Deliberately out of v0.x scope — meaty, self-contained problems for contributors:

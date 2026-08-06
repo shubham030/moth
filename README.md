@@ -73,6 +73,7 @@ scope for now.
 ## Docs
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — VM, bytecode, GC, bindings, widget layer
+- [BACKEND.md](docs/BACKEND.md) — the rendering-backend contract (nodes, layout, events)
 - [ROADMAP.md](docs/ROADMAP.md) — milestones and help-wanted
 - [DECISIONS.md](docs/DECISIONS.md) — why it's built this way (ADRs)
 

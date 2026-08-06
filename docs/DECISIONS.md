@@ -79,3 +79,39 @@ open, but scoped selfishly: v0.x exists to serve the author's own hardware
 until there's something worth contributing to. The contributor on-ramp is the
 desktop simulator (no hardware required) plus golden-file tests that make small
 PRs reviewable.
+
+## ADR-007: moth owns layout/style semantics; backends are conformance-tested
+
+**Decision:** Layout and style behavior is specified by moth (docs/BACKEND.md),
+not inherited from any rendering engine. A backend is a conformance-tested
+implementation of the contract; the contract speaks in semantic nodes (`label`,
+`slider`) rather than drawing primitives.
+
+**Why:** the original design said "map Row/Column to LVGL flex", which quietly
+makes LVGL's flex quirks the de-facto spec and any second backend a
+bug-for-bug chase. Owning the semantics makes backends independently buildable
+against the layout-golden suite. Semantic-level nodes (not primitives) let the
+LVGL backend keep using LVGL's mature native widgets while moth_render
+composes its own.
+
+**Cost accepted:** the LVGL backend must *compensate* wherever LVGL disagrees
+with the spec, and we maintain a spec + conformance suite. Kept cheap by
+scoping v1 layout to a small flex subset (no wrap/percent/margins).
+
+## ADR-008: moth_render is a parallel native backend; pixels stay native
+
+**Decision:** A second backend, `moth_render` (scene graph + moth flex layout +
+ThorVG rasterization + damage tracking), is developed as **track two** —
+desktop/SDL-first, best-effort, never blocking the LVGL-path milestones M1–M4.
+ThorVG remains upstream C++ consumed as a component; no Dart port of any
+rasterizer, ever: per-pixel work is 20–100× too slow interpreted. The split is
+Flutter's own — engine native, framework Dart.
+
+**Why build it at all:** full visual control beyond LVGL's ceiling, an
+implementation-side pressure test of the backend contract (avoids designing an
+abstraction with one consumer), and independence from LVGL LLC's
+commercialization direction. **Why not primary:** partial-redraw maturity and
+text quality are multi-year efforts LVGL already has; the P4 vendor
+acceleration path (esp_lcd/PPA) is maintained for LVGL. moth_render graduates
+to primary only if it passes conformance and beats LVGL where it matters on
+hardware; if it stalls, nothing else is blocked.
