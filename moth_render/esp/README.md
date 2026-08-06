@@ -1,12 +1,26 @@
-# ESP-IDF port (R4 — not started)
+# moth_render on ESP32-P4 (carplay board)
 
-Plan: wrap the core library (`src/`, which has no platform dependencies) as an
-ESP-IDF component; the platform layer replaces the SDL harness with:
+R4-lite bring-up: the same demo scene as the SDL harness on the board's 3.5"
+ST7796 panel. The core (`../src`) compiles unchanged — this directory is only
+the platform shim (SPI panel + BOOT button + FreeRTOS loop).
 
-- `esp_lcd` panel handle + DMA transfer of `mr_framebuffer()` damage regions
-- PPA (ESP32-P4 2D accelerator) for blits/fills where profitable
-- touch driver feeding `mr_pointer()`
-- a FreeRTOS timer task driving `mr_tick()` / `mr_commit()`
+- Panel: ST7796 over SPI2 @ 80MHz, landscape 480×320, wiring lifted from the
+  mapcast firmware (`carplay/firmware/mapcast/main/display.c`). If the image
+  is mirrored on your unit, adjust `MIRROR_X/MIRROR_Y` in `panel.c`.
+- No touch on this board: the BOOT button (GPIO35) rotates the cards'
+  `flex_grow` factors and re-fires the pulse animation.
+- Present path: `mr_commit()` returns true → ARGB8888 → byte-swapped RGB565
+  scratch in PSRAM → full-frame `esp_lcd_panel_draw_bitmap` (~30ms).
+  Idle frames flush nothing. Real damage tracking is R3.
 
-Blocked on: R1 (layout goldens green) and R3 (damage tracking — full-frame
-repaint over DMA at panel refresh is not viable on the P4).
+## Build & flash
+
+```
+. ~/esp/esp-idf/export.sh
+idf.py build
+idf.py dfu          # board flashes via DFU only (UART is damaged)
+```
+
+Then put the board in DFU mode and `dfu-util -d 303a:0011 -D build/dfu.bin`
+(or `idf.py dfu-flash`). Serial monitor still works for logs if USB-Serial-JTAG
+is up: `idf.py monitor`.

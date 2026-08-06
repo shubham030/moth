@@ -19,8 +19,9 @@ conformance suite (§7).
   engine — never the reverse. If LVGL flex and this spec disagree, the LVGL
   backend must compensate; the spec does not bend to an engine.
 - **Batched frames.** Mutations (`create/attach/set_*`) are cheap and deferred;
-  `commit()` applies them: layout → damage → paint. One commit per event-loop
-  tick, at most.
+  `commit()` applies them: layout → damage → paint, and returns whether a
+  repaint occurred — platforms skip the display flush (expensive over SPI)
+  when it didn't. One commit per event-loop tick, at most.
 - **The VM is never in the frame loop.** Continuous animation runs inside the
   backend (§6); the contract only starts/stops it.
 

@@ -83,9 +83,8 @@ int main(void) {
     uint32_t now = SDL_GetTicks();
     mr_tick(now - prev);
     prev = now;
-    mr_commit();
-
-    SDL_UpdateTexture(tex, NULL, mr_framebuffer(), W * 4);
+    if (mr_commit())
+      SDL_UpdateTexture(tex, NULL, mr_framebuffer(), W * 4);
     SDL_RenderClear(ren);
     SDL_RenderCopy(ren, tex, NULL, NULL);
     SDL_RenderPresent(ren);

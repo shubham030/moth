@@ -125,7 +125,7 @@ void mr_anim_stop(uint32_t anim_id);
 /* ---- frame ------------------------------------------------------------ */
 
 void mr_tick(uint32_t dt_ms);              /* advance animations */
-void mr_commit(void);                      /* layout -> damage -> paint */
+bool mr_commit(void);                      /* layout -> damage -> paint; true if repainted */
 const uint32_t *mr_framebuffer(void);      /* ARGB8888, width*height */
 void mr_damage(int *x, int *y, int *w, int *h); /* region repainted by last commit */
 

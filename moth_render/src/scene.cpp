@@ -214,12 +214,13 @@ void mr_tick(uint32_t dt_ms) {
       s.anims.end());
 }
 
-void mr_commit(void) {
+bool mr_commit(void) {
   Scene &s = scene();
-  if (!s.dirty) return;
+  if (!s.dirty) return false;
   layout_run(s);
   paint_run(s);
   s.dirty = false;
+  return true;
 }
 
 const uint32_t *mr_framebuffer(void) { return scene().framebuffer.data(); }
