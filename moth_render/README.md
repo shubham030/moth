@@ -30,5 +30,6 @@ src/scene.cpp           tree ops, props, hit-testing, events, animation, frame
 src/layout.cpp          moth flex subset (BACKEND.md §4)
 src/paint.cpp           v0 software fills — ThorVG lands here in R2
 harness/main.c          SDL2 dev loop driving the contract from plain C
-esp/                    ESP-IDF port notes (R4, not started)
+esp/                    ESP32-P4 port (carplay board, ST7796 SPI, BOOT-button demo)
+esp-s3/                 ESP32-S3 port (Waveshare AMOLED 1.75C / MOMO board, touch demo)
 ```
