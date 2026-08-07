@@ -524,6 +524,7 @@ class FunctionCompiler {
       case ListLiteral():
         _listLiteral(expr);
       case IndexExpression():
+        _rejectNullAware(expr.question, expr.offset);
         _expression(expr.target!);
         _expression(expr.index);
         _emit(Op.indexGet);
@@ -568,16 +569,20 @@ class FunctionCompiler {
     _emitU16(count);
   }
 
-  /// `a?.b` must skip the access when `a` is null. moth would instead trap,
-  /// so it is rejected rather than compiled to the wrong thing.
-  void _rejectNullAware(Token? operator, int offset) {
-    if (operator != null && operator.lexeme == '?.') {
-      throw CompileError(
-        'the null-aware operator ?. is not supported yet',
-        offset,
-        hint: 'guard explicitly: if (x != null) x.method();',
-      );
-    }
+  /// `a?.b` and `a?[i]` must skip the access when `a` is null. moth would
+  /// instead trap, so they are rejected rather than compiled to the wrong
+  /// thing. Covers `?.` operators and the `?` of a null-aware index.
+  void _rejectNullAware(Token? token, int offset) {
+    if (token == null) return;
+    final lexeme = token.lexeme;
+    if (lexeme != '?.' && lexeme != '?') return;
+    throw CompileError(
+      'null-aware access ($lexeme) is not supported yet',
+      offset,
+      hint: lexeme == '?.'
+          ? 'guard explicitly: if (x != null) x.method();'
+          : 'guard explicitly: if (x != null) x[i];',
+    );
   }
 
   /// Property reads are resolved by name at run time — the compiler has no
@@ -770,6 +775,7 @@ class FunctionCompiler {
   /// `list[i] = v` and `list[i] += v`. The compound form evaluates the target
   /// and index twice; both are simple expressions in practice.
   void _indexAssignment(AssignmentExpression expr, IndexExpression target) {
+    _rejectNullAware(target.question, target.offset);
     final op = expr.operator.lexeme;
     _expression(target.target!);
     _expression(target.index);
@@ -1027,7 +1033,8 @@ class FunctionCompiler {
       final ctorIndex = unit.classCtorIndex[classIdx];
       // Arity is checked here so a wrong count is a compile error with a
       // location, not a runtime trap reported as "corrupt program".
-      _checkArgc(name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
+      _checkArgc(
+          name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
       if (ctorIndex == null) {
         return; // default constructor: the fresh instance is the result
       }

@@ -1,3 +1,7 @@
+Instance of 'Point'
+[Instance of 'Point', 1]
+[[Instance of 'Reading'], Instance of 'Point']
+obj: Instance of 'Point'
 [1, 2, 3]
 []
 [[1, 2], [3]]
