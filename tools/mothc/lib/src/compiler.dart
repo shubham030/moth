@@ -51,6 +51,14 @@ class Compiler {
   /// start of construction, before the constructor body.
   final List<List<(String, Expression)>> classFieldInits = [];
 
+  /// class index -> superclass index, or null. Inheritance is flattened at
+  /// compile time: a subclass carries its superclass's fields and methods,
+  /// with its own overriding by name. Because dispatch is by name at run
+  /// time, an inherited method calling an overridden one lands on the
+  /// override automatically — virtual dispatch with no runtime machinery.
+  final List<int?> classSuper = [];
+  final List<String?> _pendingSuperNames = [];
+
   /// Reserved slots come first (top-level functions, then class members);
   /// lambdas are appended as they are compiled.
   final List<FunctionBlob?> functions = [];
@@ -93,6 +101,7 @@ class Compiler {
       );
     }
 
+    _resolveInheritance();
     _reserveMemberIndices();
 
     // Slots for the top-level functions and every class member are reserved
@@ -167,6 +176,97 @@ class Compiler {
     }
   }
 
+  void _resolveInheritance() {
+    for (var i = 0; i < _pendingSuperNames.length; i++) {
+      final superName = _pendingSuperNames[i];
+      if (superName == null) continue;
+      final superIdx = classIndex[superName];
+      if (superIdx == null) {
+        throw CompileError(
+          "'$superName' is not a class in this file",
+          classDeclarations[i].offset,
+          hint: 'moth has no imports yet, so a superclass must be declared here',
+        );
+      }
+      if (superIdx == i) {
+        throw CompileError(
+          'a class cannot extend itself',
+          classDeclarations[i].offset,
+        );
+      }
+      classSuper[i] = superIdx;
+    }
+
+    // A cycle would make the field/method walks below run forever.
+    for (var i = 0; i < classSuper.length; i++) {
+      var seen = <int>{i};
+      var walk = classSuper[i];
+      while (walk != null) {
+        if (!seen.add(walk)) {
+          throw CompileError(
+            'these classes extend each other in a circle',
+            classDeclarations[i].offset,
+          );
+        }
+        walk = classSuper[walk];
+      }
+    }
+
+    // A superclass constructor body cannot be chained to yet, so reject the
+    // combination rather than silently skipping it.
+    for (var i = 0; i < classSuper.length; i++) {
+      final superIdx = classSuper[i];
+      if (superIdx == null) continue;
+      final superCtor = classDeclarations[superIdx]
+          .members
+          .whereType<ConstructorDeclaration>()
+          .firstOrNull;
+      if (superCtor != null) {
+        throw CompileError(
+          'extending a class that declares a constructor is not supported yet',
+          classDeclarations[i].offset,
+          hint: 'give the superclass only field initializers, '
+              'or set things up in a method the subclass calls',
+        );
+      }
+    }
+  }
+
+  /// Superclass fields come first, then the subclass's own.
+  List<String> effectiveFields(int index) {
+    final superIdx = classSuper[index];
+    final inherited = superIdx == null ? <String>[] : effectiveFields(superIdx);
+    final own = classFields[index];
+    for (final f in own) {
+      if (inherited.contains(f)) {
+        throw CompileError(
+          "'$f' is already a field of the superclass",
+          classDeclarations[index].offset,
+        );
+      }
+    }
+    return [...inherited, ...own];
+  }
+
+  List<(String, Expression)> effectiveFieldInits(int index) {
+    final superIdx = classSuper[index];
+    final inherited =
+        superIdx == null ? <(String, Expression)>[] : effectiveFieldInits(superIdx);
+    return [...inherited, ...classFieldInits[index]];
+  }
+
+  /// Inherited methods, with the subclass's own replacing them by name.
+  Map<String, int> effectiveMethodSlots(int index) {
+    final superIdx = classSuper[index];
+    final merged = superIdx == null
+        ? <String, int>{}
+        : effectiveMethodSlots(superIdx);
+    for (final (name, slot) in classMethodSlots[index]) {
+      merged[name] = slot;
+    }
+    return merged;
+  }
+
   /// Constructors and methods are appended after the top-level functions, so
   /// their indices are predictable before any body is lowered.
   void _reserveMemberIndices() {
@@ -192,15 +292,14 @@ class Compiler {
 
   ClassBlob _compileClass(int index, List<FunctionBlob?> functions) {
     final decl = classDeclarations[index];
-    final fields = classFields[index];
-    final methodNames = <String>[
-      for (final m in decl.members)
-        if (m is MethodDeclaration) m.name.lexeme,
-    ];
+    // Methods see the inherited members too, so a subclass method can reach
+    // a superclass field or call a superclass method without qualification.
+    final fields = effectiveFields(index);
+    final inheritedMethods = effectiveMethodSlots(index);
+    final methodNames = inheritedMethods.keys.toList();
 
     var ctor = noCtor;
-    final methods = <(int, int)>[];
-    final fieldInits = classFieldInits[index];
+    final fieldInits = effectiveFieldInits(index);
     final declaredCtor =
         decl.members.whereType<ConstructorDeclaration>().firstOrNull;
 
@@ -269,7 +368,6 @@ class Compiler {
         final reserved = classMethodSlots[index]
             .firstWhere((s) => s.$1 == member.name.lexeme)
             .$2;
-        methods.add((constants.addString(member.name.lexeme), reserved));
         functions[reserved] = FunctionCompiler.member(this, fields, methodNames,
                 isConstructor: false)
             .compileMember(
@@ -288,7 +386,11 @@ class Compiler {
     return ClassBlob(
       constants.addString(decl.name.lexeme),
       [for (final f in fields) constants.addString(f)],
-      methods,
+      // Inherited entries included, own ones already replacing them by name.
+      [
+        for (final entry in inheritedMethods.entries)
+          (constants.addString(entry.key), entry.value),
+      ],
       ctor,
     );
   }
@@ -300,11 +402,11 @@ class Compiler {
         globalIndex.containsKey(name)) {
       throw CompileError("'$name' is already defined", decl.offset);
     }
-    if (decl.extendsClause != null || decl.withClause != null) {
+    if (decl.withClause != null || decl.implementsClause != null) {
       throw CompileError(
-        'inheritance is not supported yet',
+        'mixins and implements are not supported yet',
         decl.offset,
-        hint: 'classes stand alone for now — compose instead of extending',
+        hint: 'single inheritance with "extends" works',
       );
     }
 
@@ -347,6 +449,8 @@ class Compiler {
     classDeclarations.add(decl);
     classFields.add(fields);
     classFieldInits.add(inits);
+    classSuper.add(null);
+    _pendingSuperNames.add(decl.extendsClause?.superclass.name2.lexeme);
   }
 
   void _collectGlobals(TopLevelVariableDeclaration decl) {

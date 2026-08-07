@@ -38,6 +38,7 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
 - [x] `List`: literals, index get/set, `.length`, `add`/`removeLast`/`clear`, `for-in`
 - [x] Classes: fields with initializers, constructors (including `this.x`
       parameters), methods, implicit `this`
+- [x] Single inheritance with method overriding
 - [ ] Named parameters and enums
 - [ ] **`package:moth` device API** — the idiomatic Dart layer over the native
       boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
