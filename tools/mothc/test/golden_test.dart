@@ -14,12 +14,12 @@ void main() {
       ? Directory.current.parent.parent.path
       : Directory.current.path;
   final casesDir = Directory('$repoRoot/test/cases');
-  final mothrun = File('$repoRoot/vm/build/mothrun');
+  final mothrun = File('$repoRoot/build/vm/mothrun');
 
   if (!mothrun.existsSync()) {
     test('vm is built', () {
-      fail('vm/build/mothrun not found — run: cmake -B vm/build vm && '
-          'cmake --build vm/build');
+      fail('build/vm/mothrun not found — run: cmake -B build . && '
+          'cmake --build build');
     });
     return;
   }

@@ -40,17 +40,27 @@ class FunctionCompiler {
   /// A constructor returns `this` and may have initializing formals.
   final bool isConstructor;
 
+  /// True when slot 0 holds a receiver — methods, constructors and lambdas.
+  /// A lambda written inside one captures that receiver.
+  final bool isMember;
+
+  /// Locals of the enclosing function, when this is a lambda. Naming one is
+  /// an error rather than a silent copy: moth cannot capture locals yet.
+  final Set<String> outerLocals = {};
+
   FunctionCompiler(this.unit, this.decl)
       : globalInits = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
-        isConstructor = false;
+        isConstructor = false,
+        isMember = false;
 
   FunctionCompiler.globalsInit(this.unit, this.globalInits)
       : decl = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
-        isConstructor = false;
+        isConstructor = false,
+        isMember = false;
 
   FunctionCompiler.member(
     this.unit,
@@ -58,7 +68,8 @@ class FunctionCompiler {
     this._enclosingMethods, {
     required this.isConstructor,
   })  : decl = null,
-        globalInits = null;
+        globalInits = null,
+        isMember = true;
 
   FunctionBlob compile() {
     if (globalInits != null) return _compileGlobalsInit();
@@ -537,6 +548,16 @@ class FunctionCompiler {
         _property(expr.identifier, expr.prefix, expr.offset);
       case ThisExpression():
         _emitThis();
+      case FunctionExpression():
+        _lambda(expr);
+      case FunctionExpressionInvocation():
+        // `handlers[0]()` — the callee is an expression, not a name
+        _expression(expr.function);
+        for (final a in expr.argumentList.arguments) {
+          _expression(a);
+        }
+        _emit(Op.callValue);
+        _emit(expr.argumentList.arguments.length);
       case ConditionalExpression():
         _conditional(expr);
       case MethodInvocation():
@@ -697,6 +718,14 @@ class FunctionCompiler {
       _emitU16(unit.constants.addString(id.name));
       return;
     }
+    if (slot == null && outerLocals.contains(id.name)) {
+      throw CompileError(
+        "a closure cannot use '${id.name}' from the enclosing function yet",
+        id.offset,
+        hint: 'capture is not implemented — make it a top-level variable '
+            'or a field, which closures can reach',
+      );
+    }
     if (slot == null) {
       throw CompileError(
         "'${id.name}' is not defined",
@@ -713,6 +742,14 @@ class FunctionCompiler {
       throw CompileError('only variables can be assigned to', target.offset);
     }
     final slot = _resolve(target.name);
+    if (slot == null && outerLocals.contains(target.name)) {
+      throw CompileError(
+        "a closure cannot use '${target.name}' from the enclosing function yet",
+        target.offset,
+        hint: 'capture is not implemented — make it a top-level variable '
+            'or a field, which closures can reach',
+      );
+    }
     if (slot == null) {
       throw CompileError("'${target.name}' is not defined", target.offset);
     }
@@ -887,6 +924,36 @@ class FunctionCompiler {
     }
   }
 
+  /// `() { ... }` becomes an ordinary function whose slot 0 is the receiver,
+  /// plus a closure object binding it. Capturing locals is not supported, so
+  /// the lambda is compiled with the enclosing locals listed as forbidden.
+  void _lambda(FunctionExpression expr) {
+    final outer = <String>{};
+    for (final scope in _scopes) {
+      outer.addAll(scope.keys);
+    }
+    outer.remove('this');
+
+    final sub = FunctionCompiler.member(
+      unit,
+      enclosingFields,
+      _enclosingMethods,
+      isConstructor: false,
+    );
+    sub.outerLocals.addAll(outer);
+
+    final blob = sub.compileMember(
+      name: '<closure>',
+      params: expr.parameters?.parameters ?? <FormalParameter>[],
+      body: expr.body,
+      offset: expr.offset,
+    );
+
+    _emit(Op.closure);
+    _emitU16(unit.addFunction(blob));
+    _emit(isMember ? 1 : 0); // only a lambda inside a member has a receiver
+  }
+
   void _conditional(ConditionalExpression expr) {
     _expression(expr.condition);
     final toElse = _emitJump(Op.jumpIfFalse);
@@ -1026,6 +1093,29 @@ class FunctionCompiler {
 
     // `Point(3, 4)` — with no `new` and no type resolution, a constructor
     // call is indistinguishable from a function call until we check the name.
+    // A variable holding a function: `handler()`, or a field `onTap()`.
+    final asValue = _resolve(name);
+    if (asValue != null) {
+      _emitLoadSlot(asValue);
+      for (final a in args) {
+        _expression(a);
+      }
+      _emit(Op.callValue);
+      _emit(args.length);
+      return;
+    }
+    if (_isField(name)) {
+      _emitThis();
+      _emit(Op.getProp);
+      _emitU16(unit.constants.addString(name));
+      for (final a in args) {
+        _expression(a);
+      }
+      _emit(Op.callValue);
+      _emit(args.length);
+      return;
+    }
+
     final classIdx = unit.classIndex[name];
     if (classIdx != null) {
       _emit(Op.newInstance);

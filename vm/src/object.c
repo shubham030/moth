@@ -136,6 +136,17 @@ moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields)
   return v;
 }
 
+moth_value moth_closure_new(moth_vm *vm, uint16_t func_index, moth_value receiver) {
+  moth_closure *c = (moth_closure *)allocate_object(vm, sizeof(moth_closure), OBJ_CLOSURE);
+  if (!c) return moth_null();
+  c->func_index = func_index;
+  c->receiver = receiver;
+  moth_value v;
+  v.type = MV_OBJ;
+  v.as.obj = (moth_obj *)c;
+  return v;
+}
+
 /* ---- Dart-compatible formatting ---------------------------------------- */
 
 /* Dart prints the shortest decimal that reads back as the same double, so
@@ -240,6 +251,10 @@ static void format_value(moth_vm *vm, strbuf *sb, moth_value v, int depth) {
     sb_add(sb, "]", 1);
     return;
   }
+  if (IS_CLOSURE(v)) {
+    sb_add(sb, "Closure", 7);
+    return;
+  }
   if (IS_INSTANCE(v)) {
     /* Dart writes Instance of 'Point'; the class name is already in the
      * constant pool, reached through the instance's class index. */
@@ -291,6 +306,10 @@ static void mark_object(moth_obj *o) {
       for (int i = 0; i < l->count; i++) mark_value(l->items[i]);
       break;
     }
+    case OBJ_CLOSURE:
+      /* keeps its receiver alive for as long as the callback exists */
+      mark_value(((moth_closure *)o)->receiver);
+      break;
     case OBJ_INSTANCE: {
       moth_instance *inst = (moth_instance *)o;
       /* the field count lives on the class, reached through the owning vm */
@@ -332,6 +351,9 @@ static void free_object(moth_vm *vm, moth_obj *o) {
       free(l->items);
       break;
     }
+    case OBJ_CLOSURE:
+      vm->bytes_allocated -= sizeof(moth_closure);
+      break;
     case OBJ_INSTANCE: {
       moth_instance *inst = (moth_instance *)o;
       if (inst->fields && inst->class_index < vm->nclasses) {

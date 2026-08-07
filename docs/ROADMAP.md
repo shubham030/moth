@@ -58,8 +58,18 @@ Dart program draws in a desktop window and on the board.
       path is testable without a mouse
 - [x] `ui/esp-s3` — the same VM, renderer and bindings on the CO5300 panel
       with CST9217 touch
-- [ ] Callbacks instead of polling — needs closures
+- [x] Callbacks instead of polling — `onTap(() { ... })`, dispatched in
+      Dart because a native cannot re-enter the VM
 - [ ] ESP32-P4 host (blocked on the carplay board being free)
+
+## M2.5 — Closures (done)
+
+**Demo: `box.onTap(() { ... })` running on the panel.**
+
+- [x] Function values, lambdas, closures in lists, functions as arguments
+- [x] A lambda inside a method captures `this`, reaching fields and methods
+- [ ] Capturing a local of the enclosing function — rejected at compile time
+      for now; needs boxed cells or upvalues
 
 ## M3 — Widgets and setState
 

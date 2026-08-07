@@ -51,6 +51,18 @@ class Compiler {
   /// start of construction, before the constructor body.
   final List<List<(String, Expression)>> classFieldInits = [];
 
+  /// Reserved slots come first (top-level functions, then class members);
+  /// lambdas are appended as they are compiled.
+  final List<FunctionBlob?> functions = [];
+  var _reservedCount = 0;
+
+  /// Appends a function compiled on the fly (a lambda, or the globals
+  /// initializer) and returns its index.
+  int addFunction(FunctionBlob blob) {
+    functions.add(blob);
+    return functions.length - 1;
+  }
+
   final Map<String, int> _nativeIndex = {};
   final List<NativeRef> natives = [];
 
@@ -83,9 +95,12 @@ class Compiler {
 
     _reserveMemberIndices();
 
-    final functions = <FunctionBlob>[];
-    for (final decl in _declarations) {
-      functions.add(FunctionCompiler(this, decl).compile());
+    // Slots for the top-level functions and every class member are reserved
+    // up front; lambdas are appended past them as they are encountered.
+    functions.addAll(List<FunctionBlob?>.filled(_reservedCount, null));
+
+    for (var i = 0; i < _declarations.length; i++) {
+      functions[i] = FunctionCompiler(this, _declarations[i]).compile();
     }
 
     // Classes: constructors and methods become ordinary functions whose
@@ -98,14 +113,20 @@ class Compiler {
     // Top-level initializers become a synthetic function the VM runs first.
     var init = noInit;
     if (globalInits.isNotEmpty) {
-      init = functions.length;
-      functions.add(FunctionCompiler.globalsInit(this, globalInits).compile());
+      init = addFunction(
+          FunctionCompiler.globalsInit(this, globalInits).compile());
+    }
+
+    for (var i = 0; i < functions.length; i++) {
+      if (functions[i] == null) {
+        throw StateError('function slot $i was reserved but never filled');
+      }
     }
 
     final blob = writeBlob(
       constants: constants,
       natives: natives,
-      functions: functions,
+      functions: [for (final f in functions) f!],
       entry: functionIndex['main']!,
       globalCount: globalIndex.length,
       init: init,
@@ -166,9 +187,10 @@ class Compiler {
       }
       classMethodSlots.add(slots);
     }
+    _reservedCount = next;
   }
 
-  ClassBlob _compileClass(int index, List<FunctionBlob> functions) {
+  ClassBlob _compileClass(int index, List<FunctionBlob?> functions) {
     final decl = classDeclarations[index];
     final fields = classFields[index];
     final methodNames = <String>[
@@ -186,18 +208,15 @@ class Compiler {
     // it appears among the members (and exists even when synthesized).
     if (classCtorIndex.containsKey(index)) {
       ctor = classCtorIndex[index]!;
-      assert(
-          ctor == functions.length, 'reserved index must match append order');
-      functions.add(
-        FunctionCompiler.member(this, fields, methodNames, isConstructor: true)
-            .compileMember(
-          name: '${decl.name.lexeme}()',
-          params: declaredCtor?.parameters.parameters ?? <FormalParameter>[],
-          body: declaredCtor?.body,
-          offset: declaredCtor?.offset ?? decl.offset,
-          fieldInits: fieldInits,
-        ),
-      );
+      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames,
+              isConstructor: true)
+          .compileMember(
+        name: '${decl.name.lexeme}()',
+        params: declaredCtor?.parameters.parameters ?? <FormalParameter>[],
+        body: declaredCtor?.body,
+        offset: declaredCtor?.offset ?? decl.offset,
+        fieldInits: fieldInits,
+      ));
     }
 
     for (final member in decl.members) {
@@ -250,18 +269,14 @@ class Compiler {
         final reserved = classMethodSlots[index]
             .firstWhere((s) => s.$1 == member.name.lexeme)
             .$2;
-        assert(reserved == functions.length,
-            'reserved index must match append order');
         methods.add((constants.addString(member.name.lexeme), reserved));
-        functions.add(
-          FunctionCompiler.member(this, fields, methodNames,
-                  isConstructor: false)
-              .compileMember(
-            name: '${decl.name.lexeme}.${member.name.lexeme}',
-            params: member.parameters?.parameters ?? const [],
-            body: member.body,
-            offset: member.offset,
-          ),
+        functions[reserved] = FunctionCompiler.member(this, fields, methodNames,
+                isConstructor: false)
+            .compileMember(
+          name: '${decl.name.lexeme}.${member.name.lexeme}',
+          params: member.parameters?.parameters ?? const [],
+          body: member.body,
+          offset: member.offset,
         );
         continue;
       }

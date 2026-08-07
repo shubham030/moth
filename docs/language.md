@@ -42,6 +42,21 @@ for (final v in window) {
 print('avg ${total ~/ window.length}');
 ```
 
+**Closures** — function values, lambdas, and functions passed around or kept
+in lists. A lambda written inside a method captures `this`, so it can reach
+that object's fields and methods.
+
+```dart
+button.onTap(() {
+  count += 1;          // a field, reached through the captured `this`
+  refresh();
+});
+```
+
+Capturing a **local** of the enclosing function is not supported yet, and is
+a compile error rather than a silent copy. Use a top-level variable or a
+field — both are reachable from any closure.
+
 **Classes** — fields with initializers, one constructor (with `this.x`
 parameters), methods, and implicit `this`. Also supported: the ternary
 `a ? b : c` and the null assertion `x!` (which passes through, since moth
@@ -128,7 +143,6 @@ for (var i = 0; i < 10; i++) {
 | Feature | Milestone |
 | --- | --- |
 | Maps | M1b |
-| Closures and function values | after M1b |
 | Inheritance, getters/setters, static members | after M1b |
 | `async` / `await`, `Future` | after M2 |
 | Mixins, generics, extensions, records | not planned for v1 |

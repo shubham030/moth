@@ -506,6 +506,52 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         break;
       }
 
+      case OP_CLOSURE: {
+        NEED(3);
+        uint16_t fn_index = read_u16(&fr->ip);
+        uint8_t captures_this = *fr->ip++;
+        if (fn_index >= vm->nfuncs) {
+          return trap(vm, fr, MOTH_ERR_BAD_OP, "closure over an unknown function");
+        }
+        /* Slot 0 is the receiver in every function the compiler emits for a
+         * closure, so a closure made outside a method carries null there. */
+        moth_value receiver = captures_this ? fr->slots[0] : moth_null();
+        moth_value fn = moth_closure_new(vm, fn_index, receiver);
+        if (fn.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+        PUSH(fn);
+        break;
+      }
+      case OP_CALL_VALUE: {
+        NEED(1);
+        uint8_t argc = *fr->ip++;
+        NEED_STACK(argc + 1);
+        moth_value callee = PEEK_AT(argc);
+        if (!IS_CLOSURE(callee)) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "'%s' is not something you can call",
+                      type_name(callee));
+        }
+        moth_closure *cl = AS_CLOSURE(callee);
+        const moth_func *fn = &vm->funcs[cl->func_index];
+        if (fn->arity != argc + 1) { /* +1 for the receiver in slot 0 */
+          return trap(vm, fr, MOTH_ERR_BAD_OP, "this function takes %d argument%s, but got %d",
+                      fn->arity - 1, fn->arity == 2 ? "" : "s", argc);
+        }
+        if (vm->nframes >= MOTH_FRAMES_MAX) {
+          return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
+        }
+        /* Overwrite the callee slot with the receiver: the frame then has
+         * exactly the layout a method call produces. */
+        moth_value *slots = vm->sp - argc - 1;
+        slots[0] = cl->receiver;
+        for (int i = fn->arity; i < fn->nlocals; i++) PUSH(moth_null());
+        moth_frame *nf = &vm->frames[vm->nframes++];
+        nf->fn = fn;
+        nf->ip = fn->code;
+        nf->slots = slots;
+        fr = nf;
+        break;
+      }
+
       default:
         return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown opcode 0x%02x", op);
     }
@@ -523,6 +569,7 @@ static const char *type_name(moth_value v) {
     case MV_OBJ:
       if (moth_is_string(v)) return "text";
       if (IS_LIST(v)) return "a list";
+      if (IS_CLOSURE(v)) return "a function";
       return "an object";
   }
   return "a value";
