@@ -1,5 +1,5 @@
-// Callbacks, not a polling switch: each card gets a closure, and tapping it
-// runs that closure. This is the shape the widget layer is built from.
+// Callbacks, not a polling switch: each view owns its handler, and tapping
+// it runs that handler. This is the shape the widget layer is built from.
 //
 //   dart run tools/mothc/bin/mothc.dart examples/ui/callbacks.dart
 //   ./build/mothsim examples/ui/callbacks.mothb --tap 120,250 --tap 300,250
@@ -23,13 +23,14 @@ final directionRow = 1;
 final easeInOut = 2;
 final eventClicked = 2;
 
-// Every registered handler, as [nodeId, closure]. The event loop looks a
-// tapped node up here — the VM cannot call back into Dart from a native, so
-// dispatch happens in Dart.
-var handlers = [];
+/// Every view that can receive events. The renderer reports a node id, so
+/// something has to map ids back to objects; dispatch happens in Dart
+/// because a native cannot re-enter the VM.
+var views = [];
 
 class Box {
   int id;
+  Function? handler;
 
   Box(this.id);
 
@@ -46,9 +47,14 @@ class Box {
     uiAnimate(id, propOpacity, fromPercent / 100, toPercent / 100, ms, easeInOut);
   }
 
-  /// The Flutter-shaped bit: hand the view a function to run when tapped.
-  void onTap(Function handler) {
-    handlers.add([id, handler]);
+  /// Hand the view a function to run when tapped — it keeps it itself.
+  void onTap(Function fn) {
+    handler = fn;
+    views.add(this);
+  }
+
+  void fireTap() {
+    if (handler != null) handler!();
   }
 }
 
@@ -70,10 +76,8 @@ void dispatchEvents() {
     var node = packed ~/ 8;
     var kind = packed % 8;
     if (kind == eventClicked) {
-      for (final entry in handlers) {
-        if (entry[0] == node) {
-          entry[1]();
-        }
+      for (final view in views) {
+        if (view.id == node) view.fireTap();
       }
     }
     packed = uiPoll();
@@ -89,7 +93,7 @@ var pulse = Box(0);
 var taps = 0;
 
 /// Holds its own index as a field, so the closure it registers only needs to
-/// capture `this` — which is exactly what moth supports today.
+/// capture `this` — which is what moth supports today.
 class Card {
   Box box;
   int index;
@@ -145,7 +149,7 @@ void main() {
   root.add(pulse);
   pulse.fade(100, 20, 900);
 
-  print('display ${uiWidth()}x${uiHeight()} — ${handlers.length} handlers');
+  print('display ${uiWidth()}x${uiHeight()} — ${views.length} tappable views');
 
   var last = millis();
   while (true) {
