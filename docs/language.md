@@ -42,6 +42,25 @@ for (final v in window) {
 print('avg ${total ~/ window.length}');
 ```
 
+**Classes** — fields with initializers, one constructor (with `this.x`
+parameters), methods, and implicit `this`. No inheritance yet.
+
+```dart
+class DigitalPin {
+  int number;
+  bool state = false;
+
+  DigitalPin(this.number) {
+    pinOutput(number);
+  }
+
+  void toggle() {
+    state = !state;
+    digitalWrite(number, state);
+  }
+}
+```
+
 **Top-level variables** — shared by every function in the file, initialized
 before `main` runs. Locals shadow them, as in Dart.
 
@@ -97,8 +116,8 @@ for (var i = 0; i < 10; i++) {
 | Feature | Milestone |
 | --- | --- |
 | Maps | M1b |
-| Classes, methods, constructors | M1b |
-| Closures and function values | M1b |
+| Closures and function values | after M1b |
+| Inheritance, getters/setters, static members | after M1b |
 | `async` / `await`, `Future` | after M2 |
 | Mixins, generics, extensions, records | not planned for v1 |
 | `import` of other files | not planned for v1 |

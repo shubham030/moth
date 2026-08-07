@@ -28,36 +28,46 @@ class FunctionCompiler {
   int _nextSlot = 0;
   int _maxSlots = 0;
 
-  FunctionCompiler(this.unit, this.decl) : globalInits = null;
+  /// Fields of the enclosing class, so a bare name inside a method can mean
+  /// `this.name`. Empty for top-level functions.
+  final List<String> enclosingFields;
 
-  FunctionCompiler.globalsInit(this.unit, this.globalInits) : decl = null;
+  /// Method names of the enclosing class, so a bare call inside a method can
+  /// mean `this.name(...)`.
+  final List<String> _enclosingMethods;
+
+  /// A constructor returns `this` and may have initializing formals.
+  final bool isConstructor;
+
+  FunctionCompiler(this.unit, this.decl)
+      : globalInits = null,
+        enclosingFields = const [],
+        _enclosingMethods = const [],
+        isConstructor = false;
+
+  FunctionCompiler.globalsInit(this.unit, this.globalInits)
+      : decl = null,
+        enclosingFields = const [],
+        _enclosingMethods = const [],
+        isConstructor = false;
+
+  FunctionCompiler.member(
+    this.unit,
+    this.enclosingFields,
+    this._enclosingMethods, {
+    required this.isConstructor,
+  })  : decl = null,
+        globalInits = null;
 
   FunctionBlob compile() {
     if (globalInits != null) return _compileGlobalsInit();
     final decl = this.decl!;
-    final params = decl.functionExpression.parameters?.parameters ?? const [];
-    for (final p in params) {
-      if (p is! SimpleFormalParameter) {
-        throw CompileError(
-          'only plain positional parameters are supported yet',
-          p.offset,
-          hint: 'optional and named parameters arrive in a later milestone',
-        );
-      }
-      _declare(p.name!.lexeme, p.offset);
-    }
-    final arity = params.length;
+    final params =
+        decl.functionExpression.parameters?.parameters ?? <FormalParameter>[];
+    final arity = _declareParams(params);
 
     final body = decl.functionExpression.body;
-    if (body is BlockFunctionBody) {
-      _block(body.block);
-    } else if (body is ExpressionFunctionBody) {
-      _expression(body.expression);
-      _emit(Op.ret);
-    } else {
-      throw CompileError('this function has no body', decl.offset);
-    }
-    _emit(Op.retNull);
+    _compileBody(body, decl.offset);
 
     return FunctionBlob(
       unit.constants.addString(decl.name.lexeme),
@@ -65,6 +75,90 @@ class FunctionCompiler {
       _maxSlots,
       code,
     );
+  }
+
+  /// Methods and constructors: slot 0 is the receiver, so `this` is free.
+  FunctionBlob compileMember({
+    required String name,
+    required List<FormalParameter> params,
+    required FunctionBody? body,
+    required int offset,
+    List<(String, Expression)> fieldInits = const [],
+  }) {
+    _declare('this', offset);
+    final arity = 1 + _declareParams(params);
+
+    // Field initializers run first, exactly as Dart orders them.
+    for (final (field, init) in fieldInits) {
+      _emitThis();
+      _expression(init);
+      _emit(Op.setProp);
+      _emitU16(unit.constants.addString(field));
+      _emit(Op.pop);
+    }
+
+    // `Pin(this.number)` assigns straight into the field before the body runs.
+    for (final p in params) {
+      final inner = p is DefaultFormalParameter ? p.parameter : p;
+      if (inner is FieldFormalParameter) {
+        final fieldName = inner.name.lexeme;
+        _emit(Op.load);
+        _emit(0); // this
+        _emit(Op.load);
+        _emit(_lookup(fieldName)!);
+        _emit(Op.setProp);
+        _emitU16(unit.constants.addString(fieldName));
+        _emit(Op.pop);
+      }
+    }
+
+    if (body != null) _compileBodyStatements(body, offset);
+
+    if (isConstructor) {
+      _emit(Op.load);
+      _emit(0);
+      _emit(Op.ret); // constructors evaluate to the new instance
+    } else {
+      _emit(Op.retNull);
+    }
+
+    return FunctionBlob(unit.constants.addString(name), arity, _maxSlots, code);
+  }
+
+  int _declareParams(List<FormalParameter> params) {
+    for (final p in params) {
+      final inner = p is DefaultFormalParameter ? p.parameter : p;
+      if (inner is SimpleFormalParameter) {
+        _declare(inner.name!.lexeme, inner.offset);
+      } else if (inner is FieldFormalParameter) {
+        _declare(inner.name.lexeme, inner.offset);
+      } else {
+        throw CompileError(
+          'only plain positional parameters are supported yet',
+          p.offset,
+          hint: 'optional and named parameters arrive in a later milestone',
+        );
+      }
+    }
+    return params.length;
+  }
+
+  void _compileBody(FunctionBody body, int offset) {
+    _compileBodyStatements(body, offset);
+    _emit(Op.retNull);
+  }
+
+  void _compileBodyStatements(FunctionBody body, int offset) {
+    if (body is BlockFunctionBody) {
+      _block(body.block);
+    } else if (body is ExpressionFunctionBody) {
+      _expression(body.expression);
+      _emit(Op.ret);
+    } else if (body is EmptyFunctionBody) {
+      // a constructor with no body, e.g. Pin(this.number);
+    } else {
+      throw CompileError('this function has no body', offset);
+    }
   }
 
   FunctionBlob _compileGlobalsInit() {
@@ -345,7 +439,8 @@ class FunctionCompiler {
     _emit(indexSlot);
     _emit(Op.load);
     _emit(listSlot);
-    _emit(Op.len);
+    _emit(Op.getProp);
+    _emitU16(unit.constants.addString('length'));
     _emit(Op.lt);
     final exit = _emitJump(Op.jumpIfFalse);
 
@@ -433,6 +528,8 @@ class FunctionCompiler {
         // `list.length` parses as a prefixed identifier when the target is a
         // plain name rather than an expression.
         _property(expr.identifier, expr.prefix, expr.offset);
+      case ThisExpression():
+        _emitThis();
       case MethodInvocation():
         _call(expr);
       default:
@@ -463,16 +560,46 @@ class FunctionCompiler {
     _emitU16(count);
   }
 
+  /// Property reads are resolved by name at run time — the compiler has no
+  /// type information, so `x.foo` cannot be turned into a slot here.
   void _property(SimpleIdentifier name, Expression target, int offset) {
-    if (name.name != 'length') {
-      throw CompileError(
-        "'.${name.name}' is not supported yet",
-        offset,
-        hint: 'lists and text have .length; other properties need classes',
-      );
-    }
     _expression(target);
-    _emit(Op.len);
+    _emit(Op.getProp);
+    _emitU16(unit.constants.addString(name.name));
+  }
+
+  /// [emitTarget] is a callback because the receiver may be an expression
+  /// (`sensor.pin = 4`) or an implicit `this` (`pin = 4` inside a method).
+  void _propertyAssignment(
+    AssignmentExpression expr,
+    SimpleIdentifier name,
+    void Function() emitTarget,
+  ) {
+    final op = expr.operator.lexeme;
+    emitTarget();
+    if (op == '=') {
+      _expression(expr.rightHandSide);
+    } else {
+      final arith = _compoundOps[op];
+      if (arith == null) {
+        throw CompileError("'$op' is not supported yet", expr.operator.offset);
+      }
+      emitTarget();
+      _emit(Op.getProp);
+      _emitU16(unit.constants.addString(name.name));
+      _expression(expr.rightHandSide);
+      _emit(arith);
+    }
+    _emit(Op.setProp);
+    _emitU16(unit.constants.addString(name.name));
+  }
+
+  /// A bare name inside a method that matches a field means `this.name`.
+  bool _isField(String name) => enclosingFields.contains(name);
+
+  void _emitThis() {
+    _emit(Op.load);
+    _emit(0);
   }
 
   /// `'temp $t C'` lowers to a left-to-right chain of concatenations, with
@@ -539,6 +666,12 @@ class FunctionCompiler {
 
   void _identifier(SimpleIdentifier id) {
     final slot = _resolve(id.name);
+    if (slot == null && _isField(id.name)) {
+      _emitThis();
+      _emit(Op.getProp);
+      _emitU16(unit.constants.addString(id.name));
+      return;
+    }
     if (slot == null) {
       throw CompileError(
         "'${id.name}' is not defined",
@@ -565,6 +698,22 @@ class FunctionCompiler {
     final target = expr.leftHandSide;
     if (target is IndexExpression) {
       _indexAssignment(expr, target);
+      return;
+    }
+    if (target is PropertyAccess) {
+      _propertyAssignment(
+          expr, target.propertyName, () => _expression(target.target!));
+      return;
+    }
+    if (target is PrefixedIdentifier) {
+      _propertyAssignment(
+          expr, target.identifier, () => _expression(target.prefix));
+      return;
+    }
+    if (target is SimpleIdentifier &&
+        _resolve(target.name) == null &&
+        _isField(target.name)) {
+      _propertyAssignment(expr, target, _emitThis);
       return;
     }
     final slot = _assignableSlot(target);
@@ -729,22 +878,58 @@ class FunctionCompiler {
     final name = call.methodName.name;
     final args = call.argumentList.arguments;
 
-    if (call.target != null) {
-      final builtin = kBuiltinMethods[name];
-      if (builtin == null) {
-        throw CompileError(
-          "'.$name(...)' is not supported yet",
-          call.offset,
-          hint: 'lists have ${kBuiltinMethods.keys.join(', ')}; '
-              'other methods need classes',
-        );
+    for (final a in args) {
+      if (a is NamedExpression) {
+        throw CompileError('named arguments are not supported yet', a.offset);
       }
-      _checkArgc(name, args.length, builtin.argc, call.offset);
+    }
+
+    // Method call: the receiver and its class are only known at run time.
+    if (call.target != null) {
       _expression(call.target!);
       for (final a in args) {
         _expression(a);
       }
-      _emit(builtin.op);
+      _emit(Op.invoke);
+      _emitU16(unit.constants.addString(name));
+      _emit(args.length);
+      return;
+    }
+
+    // A bare call inside a method may be another method on this object.
+    if (enclosingFields.isNotEmpty || unit.classIndex.isNotEmpty) {
+      if (!unit.functionIndex.containsKey(name) &&
+          !kNatives.containsKey(name) &&
+          !unit.classIndex.containsKey(name) &&
+          _enclosingMethods.contains(name)) {
+        _emitThis();
+        for (final a in args) {
+          _expression(a);
+        }
+        _emit(Op.invoke);
+        _emitU16(unit.constants.addString(name));
+        _emit(args.length);
+        return;
+      }
+    }
+
+    // `Point(3, 4)` — with no `new` and no type resolution, a constructor
+    // call is indistinguishable from a function call until we check the name.
+    final classIdx = unit.classIndex[name];
+    if (classIdx != null) {
+      _emit(Op.newInstance);
+      _emitU16(classIdx);
+      final ctorIndex = unit.classCtorIndex[classIdx];
+      if (ctorIndex == null) {
+        _checkArgc(name, args.length, 0, call.offset);
+        return; // default constructor: the fresh instance is the result
+      }
+      for (final a in args) {
+        _expression(a);
+      }
+      _emit(Op.call);
+      _emitU16(ctorIndex);
+      _emit(args.length + 1); // slot 0 is the new instance
       return;
     }
 

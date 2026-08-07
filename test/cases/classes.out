@@ -1,0 +1,19 @@
+5
+0
+10
+20
+true
+false
+100
+105
+fan: 34C
+case: 21C
+true
+false
+7
+3
+fan: 34C
+case: 21C
+cpu: 55C
+hottest cpu
+probe 499: 499C

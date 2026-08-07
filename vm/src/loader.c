@@ -79,6 +79,17 @@ static const moth_native_reg *find_reg(moth_vm *vm, moth_str name) {
   return NULL;
 }
 
+static uint16_t find_string_const(moth_vm *vm, const char *name) {
+  size_t n = strlen(name);
+  for (uint16_t i = 0; i < vm->nconsts; i++) {
+    if (vm->const_strs[i].chars && vm->const_strs[i].len == n &&
+        memcmp(vm->const_strs[i].chars, name, n) == 0) {
+      return i;
+    }
+  }
+  return 0xFFFF; /* not present in this program */
+}
+
 moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
   reader r = {blob, blob + len, true};
 
@@ -155,6 +166,37 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
     for (uint16_t i = 0; i < vm->nglobals; i++) vm->globals[i] = moth_null();
   }
 
+  /* classes */
+  vm->nclasses = rd_u16(&r);
+  if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated class table");
+  if (vm->nclasses > 0) {
+    vm->classes = calloc(vm->nclasses, sizeof *vm->classes);
+    if (!vm->classes) return fail(vm, MOTH_ERR_OOM, "out of memory");
+  }
+  for (uint16_t i = 0; i < vm->nclasses; i++) {
+    moth_class *c = &vm->classes[i];
+    c->name_const = rd_u16(&r);
+    c->nfields = rd_u8(&r);
+    if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated class %u", i);
+    if (c->nfields > 0) {
+      c->field_names = calloc(c->nfields, sizeof *c->field_names);
+      if (!c->field_names) return fail(vm, MOTH_ERR_OOM, "out of memory");
+      for (uint8_t f = 0; f < c->nfields; f++) c->field_names[f] = rd_u16(&r);
+    }
+    c->nmethods = rd_u16(&r);
+    if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated class %u", i);
+    if (c->nmethods > 0) {
+      c->methods = calloc(c->nmethods, sizeof *c->methods);
+      if (!c->methods) return fail(vm, MOTH_ERR_OOM, "out of memory");
+      for (uint16_t m = 0; m < c->nmethods; m++) {
+        c->methods[m].name_const = rd_u16(&r);
+        c->methods[m].func_index = rd_u16(&r);
+      }
+    }
+    c->ctor = rd_u16(&r);
+    if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated class %u", i);
+  }
+
   /* functions */
   vm->nfuncs = rd_u16(&r);
   if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated function table");
@@ -187,6 +229,13 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
     return fail(vm, MOTH_ERR_FORMAT, "initializer index out of range");
   }
 
+  /* Cache the built-in member names so property access compares integers.
+   * 0xFFFF means the program never mentions that name, which can never match. */
+  vm->k_length = find_string_const(vm, "length");
+  vm->k_add = find_string_const(vm, "add");
+  vm->k_remove_last = find_string_const(vm, "removeLast");
+  vm->k_clear = find_string_const(vm, "clear");
+
   vm->blob = blob;
   vm->blob_len = len;
   vm->loaded = true;
@@ -214,6 +263,11 @@ void moth_free(moth_vm *vm) {
   free(vm->natives);
   free(vm->funcs);
   free(vm->globals);
+  for (uint16_t i = 0; i < vm->nclasses; i++) {
+    free(vm->classes[i].field_names);
+    free(vm->classes[i].methods);
+  }
+  free(vm->classes);
   free(vm);
 }
 

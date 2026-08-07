@@ -7,6 +7,10 @@
 #include <stdio.h>
 #include <string.h>
 
+static const char *type_name(moth_value v);
+static const char *const_name(moth_vm *vm, uint16_t idx);
+static int field_slot(moth_vm *vm, uint16_t class_index, uint16_t name_const);
+
 static moth_status trap(moth_vm *vm, moth_frame *fr, moth_status st, const char *fmt, ...) {
   char msg[128];
   va_list ap;
@@ -381,38 +385,112 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         PUSH(value); /* assignment is an expression */
         break;
       }
-      case OP_LEN: {
-        moth_value target = POP();
-        if (IS_LIST(target)) PUSH(moth_int(AS_LIST(target)->count));
-        else if (moth_is_string(target)) PUSH(moth_int(AS_STRING(target)->len));
-        else return trap(vm, fr, MOTH_ERR_TYPE, "only lists and text have a length");
+      case OP_NEW_INSTANCE: {
+        NEED(2);
+        uint16_t cls = read_u16(&fr->ip);
+        if (cls >= vm->nclasses) return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown class");
+        moth_value inst = moth_instance_new(vm, cls, vm->classes[cls].nfields);
+        if (inst.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+        PUSH(inst);
         break;
       }
-      case OP_LIST_ADD: {
-        /* item stays on the stack until it is inside the list */
-        moth_value target = PEEK_AT(1);
-        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "add() needs a list");
-        if (!moth_list_push(vm, target, PEEK_AT(0))) {
-          return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+      case OP_GET_PROP: {
+        NEED(2);
+        uint16_t name = read_u16(&fr->ip);
+        moth_value target = POP();
+        if (name == vm->k_length) {
+          if (IS_LIST(target)) { PUSH(moth_int(AS_LIST(target)->count)); break; }
+          if (moth_is_string(target)) { PUSH(moth_int(AS_STRING(target)->len)); break; }
         }
-        (void)POP();
-        (void)POP();
-        PUSH(moth_null());
+        if (!IS_INSTANCE(target)) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no property '%s'",
+                      type_name(target), const_name(vm, name));
+        }
+        moth_instance *inst = AS_INSTANCE(target);
+        int slot = field_slot(vm, inst->class_index, name);
+        if (slot < 0) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no field named '%s'", const_name(vm, name));
+        }
+        PUSH(inst->fields[slot]);
         break;
       }
-      case OP_LIST_REMOVE_LAST: {
-        moth_value target = POP();
-        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "removeLast() needs a list");
-        moth_list *l = AS_LIST(target);
-        if (l->count == 0) return trap(vm, fr, MOTH_ERR_TYPE, "removeLast() on an empty list");
-        PUSH(l->items[--l->count]);
+      case OP_SET_PROP: {
+        NEED(2);
+        uint16_t name = read_u16(&fr->ip);
+        moth_value value = POP(), target = POP();
+        if (!IS_INSTANCE(target)) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no property '%s' to set",
+                      type_name(target), const_name(vm, name));
+        }
+        moth_instance *inst = AS_INSTANCE(target);
+        int slot = field_slot(vm, inst->class_index, name);
+        if (slot < 0) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no field named '%s'", const_name(vm, name));
+        }
+        inst->fields[slot] = value;
+        PUSH(value); /* assignment is an expression */
         break;
       }
-      case OP_LIST_CLEAR: {
-        moth_value target = POP();
-        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "clear() needs a list");
-        AS_LIST(target)->count = 0;
-        PUSH(moth_null());
+      case OP_INVOKE: {
+        NEED(3);
+        uint16_t name = read_u16(&fr->ip);
+        uint8_t argc = *fr->ip++;
+        moth_value target = PEEK_AT(argc);
+
+        if (IS_LIST(target)) {
+          moth_list *l = AS_LIST(target);
+          if (name == vm->k_add && argc == 1) {
+            /* the item stays on the stack until it is inside the list */
+            if (!moth_list_push(vm, target, PEEK_AT(0))) {
+              return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+            }
+            (void)POP();
+            (void)POP();
+            PUSH(moth_null());
+          } else if (name == vm->k_remove_last && argc == 0) {
+            if (l->count == 0) {
+              return trap(vm, fr, MOTH_ERR_TYPE, "removeLast() on an empty list");
+            }
+            (void)POP();
+            PUSH(l->items[--l->count]);
+          } else if (name == vm->k_clear && argc == 0) {
+            l->count = 0;
+            (void)POP();
+            PUSH(moth_null());
+          } else {
+            return trap(vm, fr, MOTH_ERR_TYPE, "a list has no method '%s'",
+                        const_name(vm, name));
+          }
+          break;
+        }
+        if (!IS_INSTANCE(target)) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no method '%s'",
+                      type_name(target), const_name(vm, name));
+        }
+        moth_class *cls = &vm->classes[AS_INSTANCE(target)->class_index];
+        uint16_t fn_index = 0xFFFF;
+        for (uint16_t i = 0; i < cls->nmethods; i++) {
+          if (cls->methods[i].name_const == name) { fn_index = cls->methods[i].func_index; break; }
+        }
+        if (fn_index == 0xFFFF) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no method named '%s'", const_name(vm, name));
+        }
+        const moth_func *callee = &vm->funcs[fn_index];
+        /* slot 0 is the receiver, so the method takes argc + 1 slots */
+        if (callee->arity != argc + 1) {
+          return trap(vm, fr, MOTH_ERR_BAD_OP, "wrong argument count for '%s'",
+                      const_name(vm, name));
+        }
+        if (vm->nframes >= MOTH_FRAMES_MAX) {
+          return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
+        }
+        moth_value *slots = vm->sp - argc - 1;
+        for (int i = callee->arity; i < callee->nlocals; i++) PUSH(moth_null());
+        moth_frame *nf = &vm->frames[vm->nframes++];
+        nf->fn = callee;
+        nf->ip = callee->code;
+        nf->slots = slots;
+        fr = nf;
         break;
       }
 
@@ -420,6 +498,48 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown opcode 0x%02x", op);
     }
   }
+}
+
+/* ---- helpers used by the property/method opcodes ---------------------- */
+
+static const char *type_name(moth_value v) {
+  switch (v.type) {
+    case MV_NULL: return "null";
+    case MV_BOOL: return "a boolean";
+    case MV_INT: return "a number";
+    case MV_DOUBLE: return "a number";
+    case MV_OBJ:
+      if (moth_is_string(v)) return "text";
+      if (IS_LIST(v)) return "a list";
+      return "an object";
+  }
+  return "a value";
+}
+
+/* Constant names are not NUL-terminated; copy into a rotating buffer so the
+ * error message can use %s. Only ever called on the error path. */
+static const char *const_name(moth_vm *vm, uint16_t idx) {
+  static char buf[4][48];
+  static int which;
+  char *out = buf[which = (which + 1) & 3];
+  if (idx < vm->nconsts && vm->const_strs[idx].chars) {
+    uint16_t n = vm->const_strs[idx].len;
+    if (n > sizeof buf[0] - 1) n = sizeof buf[0] - 1;
+    memcpy(out, vm->const_strs[idx].chars, n);
+    out[n] = '\0';
+  } else {
+    snprintf(out, sizeof buf[0], "?");
+  }
+  return out;
+}
+
+static int field_slot(moth_vm *vm, uint16_t class_index, uint16_t name_const) {
+  if (class_index >= vm->nclasses) return -1;
+  moth_class *cls = &vm->classes[class_index];
+  for (uint8_t i = 0; i < cls->nfields; i++) {
+    if (cls->field_names[i] == name_const) return i;
+  }
+  return -1;
 }
 
 moth_status moth_run(moth_vm *vm) {
