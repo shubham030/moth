@@ -71,6 +71,11 @@ const char *moth_string_chars(moth_value v, int *len_out);
 /* Allocates a string the collector owns. Safe to call from a native. */
 moth_value moth_new_string(moth_vm *vm, const char *chars, int len);
 
+/* Renders any value the way Dart's print() would — including lists and
+ * shortest-round-trip doubles. Hosts should use this so print(x) and '$x'
+ * can never disagree. */
+moth_value moth_to_string(moth_vm *vm, moth_value v);
+
 /* A native receives its arguments left-to-right. Returning moth_null() is
  * the convention for void. Natives must not re-enter the VM, but may
  * allocate through the vm handle. */

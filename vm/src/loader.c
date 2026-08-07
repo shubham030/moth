@@ -229,6 +229,31 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
     return fail(vm, MOTH_ERR_FORMAT, "initializer index out of range");
   }
 
+  /* The class table is read before the function table, so its function
+   * references can only be checked now. OP_INVOKE indexes vm->funcs with
+   * these directly — an unchecked value would read out of bounds and then
+   * execute through a garbage code pointer. */
+  for (uint16_t i = 0; i < vm->nclasses; i++) {
+    moth_class *c = &vm->classes[i];
+    if (c->ctor != MOTH_NO_CTOR) {
+      if (c->ctor >= vm->nfuncs) {
+        return fail(vm, MOTH_ERR_FORMAT, "class %u: constructor index out of range", i);
+      }
+      if (vm->funcs[c->ctor].arity < 1) {
+        return fail(vm, MOTH_ERR_FORMAT, "class %u: constructor has no receiver slot", i);
+      }
+    }
+    for (uint16_t m = 0; m < c->nmethods; m++) {
+      if (c->methods[m].func_index >= vm->nfuncs) {
+        return fail(vm, MOTH_ERR_FORMAT, "class %u: method %u index out of range", i, m);
+      }
+      /* slot 0 is the receiver, so a method always takes at least one slot */
+      if (vm->funcs[c->methods[m].func_index].arity < 1) {
+        return fail(vm, MOTH_ERR_FORMAT, "class %u: method %u has no receiver slot", i, m);
+      }
+    }
+  }
+
   /* Cache the built-in member names so property access compares integers.
    * 0xFFFF means the program never mentions that name, which can never match. */
   vm->k_length = find_string_const(vm, "length");

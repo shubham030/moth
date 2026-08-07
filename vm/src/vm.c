@@ -46,6 +46,14 @@ static moth_status trap(moth_vm *vm, moth_frame *fr, moth_status st, const char 
       return trap(vm, fr, MOTH_ERR_BAD_OP, "truncated instruction");  \
   } while (0)
 
+/* Operand-driven pops (call arity, list length) must not run off the bottom
+ * of the value stack when the operand comes from a malformed blob. */
+#define NEED_STACK(n)                                                      \
+  do {                                                                     \
+    if (vm->sp - vm->stack < (long)(n))                                    \
+      return trap(vm, fr, MOTH_ERR_BAD_OP, "stack underflow");             \
+  } while (0)
+
 static uint16_t read_u16(const uint8_t **ip) {
   uint16_t v = (uint16_t)((*ip)[0] | ((*ip)[1] << 8));
   *ip += 2;
@@ -304,6 +312,7 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         if (argc != callee->arity) {
           return trap(vm, fr, MOTH_ERR_BAD_OP, "wrong argument count");
         }
+        NEED_STACK(argc);
         if (vm->nframes >= MOTH_FRAMES_MAX) {
           return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
         }
@@ -323,6 +332,7 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         if (nidx >= vm->nnatives) return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown native");
         moth_native_slot *ns = &vm->natives[nidx];
         if (argc != ns->argc) return trap(vm, fr, MOTH_ERR_BAD_OP, "wrong native argument count");
+        NEED_STACK(argc);
         /* Arguments stay on the stack across the call so a native that
          * allocates cannot have them collected underneath it. */
         moth_value *argv = vm->sp - argc;
@@ -347,6 +357,7 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
       case OP_NEW_LIST: {
         NEED(2);
         uint16_t count = read_u16(&fr->ip);
+        NEED_STACK(count);
         /* Elements stay on the stack while the list is allocated. */
         moth_value list = moth_list_new(vm);
         if (list.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
@@ -435,6 +446,7 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         NEED(3);
         uint16_t name = read_u16(&fr->ip);
         uint8_t argc = *fr->ip++;
+        NEED_STACK(argc + 1);
         moth_value target = PEEK_AT(argc);
 
         if (IS_LIST(target)) {

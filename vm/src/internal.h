@@ -116,8 +116,8 @@ moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b);
 moth_value moth_list_new(moth_vm *vm);
 bool moth_list_push(moth_vm *vm, moth_value list, moth_value item);
 moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields);
-moth_value moth_to_string(moth_vm *vm, moth_value v);
 bool moth_string_equal(moth_value a, moth_value b);
+int moth_format_double(char *buf, size_t n, double d);
 void moth_collect(moth_vm *vm);
 void moth_free_objects(moth_vm *vm);
 
