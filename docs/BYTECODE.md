@@ -18,11 +18,17 @@ All multi-byte integers are little-endian.
 
 ```
 magic        4 bytes   "MOTH"
-version      u16       MOTH_BYTECODE_VERSION (currently 2)
+version      u16       MOTH_BYTECODE_VERSION (currently 3)
 flags        u16       reserved, 0
 constants    u16 count, then each: tag u8 + payload
 natives      u16 count, then each: name_const u16 + argc u8
 globals      u16       number of top-level variable slots
+classes      u16 count, then each:
+               name_const  u16
+               nfields     u8
+               field_names nfields × u16 (constant indices)
+               nmethods    u16, then each: name_const u16 + func_index u16
+               ctor        u16  constructor function index, or 0xFFFF
 functions    u16 count, then each:
                name_const  u16
                arity       u8
@@ -43,10 +49,15 @@ Constant tags: `0 = int` (i64), `1 = double` (f64), `2 = string`
 Strings appear in the pool for names even when the VM has no string *values*
 yet (M1a) — they are used for native resolution and diagnostics.
 
-## Values (M1a)
+## Values
 
-`null`, `bool`, `int` (64-bit signed), `double`. Heap objects, strings as
-values, and GC arrive in M1b; opcodes are numbered leaving room for them.
+`null`, `bool`, `int` (64-bit signed), `double`, and heap objects: strings,
+lists and class instances. Heap objects are garbage collected (mark-sweep);
+constant strings borrow the blob's bytes and are never freed.
+
+Fields and methods are looked up by **constant index**, not by string: the
+pool deduplicates, so identical names always share one index and lookup is an
+integer scan. Instance layout is the class's field order.
 
 ## Instruction set
 
@@ -95,6 +106,18 @@ Operands are shown after the mnemonic. Stack effect is written
 | `NATIVE` | 0x41 | u16 ref, u8 argc | `[args… → result]` call host native |
 | `RET` | 0x42 | — | `[v →]` return top of stack |
 | `RET_NULL` | 0x43 | — | return null |
+| `TO_STRING` | 0x1D | — | `[v → text]` render as Dart's `print` would |
+| `NEW_LIST` | 0x50 | u16 count | `[items… → list]` |
+| `INDEX_GET` | 0x51 | — | `[list i → v]` bounds-checked |
+| `INDEX_SET` | 0x52 | — | `[list i v → v]` bounds-checked |
+| `NEW_INSTANCE` | 0x57 | u16 class | `[→ obj]` fields start null |
+| `GET_PROP` | 0x58 | u16 name | `[obj → v]` field, or `.length` |
+| `SET_PROP` | 0x59 | u16 name | `[obj v → v]` |
+| `INVOKE` | 0x5A | u16 name, u8 argc | `[obj args… → result]` |
+
+`INVOKE` resolves the method on the receiver's class at run time, since the
+compiler has no type information. Slot 0 of a method or constructor is the
+receiver, so its arity is one more than its declared parameter count.
 
 Arithmetic and comparison are numeric-only in M1a: `int op int → int`
 (except `/`), any `double` operand promotes to double. Type errors are
@@ -127,8 +150,10 @@ the host's registration table; **an unresolved native fails the load** with
 the offending name, rather than trapping later at the call site. This makes
 "this blob needs a peripheral your board doesn't expose" a startup error.
 
-A native receives `(argc, argv)` and returns a value. Natives must not
-re-enter the VM in M1a.
+A native receives `(vm, argc, argv, user)` and returns a value. It may
+allocate through the vm handle — its arguments stay on the stack for the
+duration of the call, so a collection cannot free them underneath it — but it
+must not re-enter the interpreter.
 
 ## Trusting a blob
 
@@ -145,8 +170,7 @@ jumps. Before M4 accepts blobs over the network, this needs a real
 verification pass — abstract interpretation of stack depth along every path —
 or the push channel needs to be authenticated. Tracked on the roadmap.
 
-## Not in M1a
+## Not yet
 
-Heap objects, strings as values, closures, classes, GC, exceptions, `async`.
-Opcode space is left free at 0x50+ for them. The format version bumps on any
-change that invalidates existing blobs.
+Closures, inheritance, getters/setters, static members, exceptions, `async`.
+The format version bumps on any change that invalidates existing blobs.
