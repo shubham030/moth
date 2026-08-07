@@ -1,7 +1,7 @@
 ---
 title: Roadmap
-nav_order: 8
-permalink: /roadmap/
+sidebar_position: 7
+slug: /roadmap
 ---
 
 # Roadmap
@@ -36,7 +36,10 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
 - [ ] Heap objects, string values, concatenation and interpolation
 - [ ] Mark-sweep GC over a fixed arena
 - [ ] `List`, index/length, `for-in`
-- [ ] Classes: fields, methods, constructors (unlocks `Gpio(38)` style APIs)
+- [ ] Classes: fields, methods, constructors; named parameters; enums
+- [ ] **`package:moth` device API** — the idiomatic Dart layer over the native
+      boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
+      ADR-009. Examples and docs get rewritten around it.
 
 ## M2 — LVGL from Dart (imperative)
 

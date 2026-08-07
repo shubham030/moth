@@ -21,3 +21,8 @@ dependencies.lock
 docs/_site/
 docs/.jekyll-cache/
 docs/vendor/
+
+# Docusaurus
+website/node_modules/
+website/build/
+website/.docusaurus/

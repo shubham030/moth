@@ -1,7 +1,7 @@
 ---
 title: Decisions (ADRs)
-nav_order: 13
-permalink: /decisions/
+sidebar_position: 12
+slug: /decisions
 ---
 
 # Decision records
@@ -103,6 +103,38 @@ composes its own.
 **Cost accepted:** the LVGL backend must *compensate* wherever LVGL disagrees
 with the spec, and we maintain a spec + conformance suite. Kept cheap by
 scoping v1 layout to a small flex subset (no wrap/percent/margins).
+
+## ADR-009: idiomatic Dart is the API; natives are a boundary, not a style
+
+**Decision:** The user-facing device API is **idiomatic Dart** — classes,
+named parameters, enums, getters and setters. Arduino's naming is used only
+where it happens to also be good Dart, never as a design target. The flat
+`digitalWrite(pin, value)` functions are the *native boundary*: minimal,
+C-shaped, and eventually not what anyone writes.
+
+```dart
+// the boundary (generated, low-level, stable)   -> what the VM calls
+digitalWrite(38, true);
+
+// the API (package:moth, written in Dart)       -> what people write
+final led = DigitalPin(38, mode: PinMode.output);
+led.toggle();
+```
+
+**Why:** moth's entire premise is that the user already knows Dart — most of
+them will never have written Arduino. Optimizing names for Arduino
+familiarity serves the audience we are *not* targeting, and teaches Dart
+developers a procedural style their own language abandoned. MicroPython made
+the right call here (`machine.Pin` over a flat C surface) and it is the reason
+its API reads like Python rather than like wrapped C.
+
+**Why the flat functions exist today:** M1a has no classes, because classes
+need the heap. They are provisional, and the docs say so rather than
+presenting them as the destination.
+
+**What stays from Arduino:** *capability* parity — the checklist of what a
+beginner can build — and the pin/bus semantics themselves. Those are real
+requirements. The spelling is not.
 
 ## ADR-008: moth_render is a parallel native backend; pixels stay native
 

@@ -1,12 +1,12 @@
 ---
-permalink: /testing/
 title: Testing
-nav_order: 6
+sidebar_position: 5
+slug: /testing
 ---
 
 # Testing
 
-Every capability claimed on the [parity page]({{ site.baseurl }}/arduino-parity/) has an executable
+Every capability claimed on the [parity page](/docs/arduino-parity) has an executable
 test. None of them need hardware.
 
 ## Run the suite
@@ -86,4 +86,4 @@ touch controller.
 - The ESP host's natives are exercised by hand, not in CI — there is no
   hardware-in-the-loop runner.
 - `moth_render` has no conformance suite yet (see the
-  [backend contract]({{ site.baseurl }}/backend/), §7).
+  [backend contract](/docs/backend), §7).

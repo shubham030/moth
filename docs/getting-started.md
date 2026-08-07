@@ -1,7 +1,7 @@
 ---
-permalink: /getting-started/
 title: Getting started
-nav_order: 2
+sidebar_position: 1
+slug: /getting-started
 ---
 
 # Getting started
@@ -155,6 +155,6 @@ touch controller at 0x5A.
 
 ## Next
 
-- [Arduino parity]({{ site.baseurl }}/arduino-parity/) — the full list of what works
-- [Built-ins]({{ site.baseurl }}/builtins/) — every function you can call
-- [Testing]({{ site.baseurl }}/testing/) — how to prove your change didn't break anything
+- [Arduino parity](/docs/arduino-parity) — the full list of what works
+- [Built-ins](/docs/builtins) — every function you can call
+- [Testing](/docs/testing) — how to prove your change didn't break anything

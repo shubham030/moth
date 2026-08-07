@@ -1,7 +1,7 @@
 ---
 title: Prior art
-nav_order: 9
-permalink: /prior-art/
+sidebar_position: 8
+slug: /prior-art
 ---
 
 # Prior art

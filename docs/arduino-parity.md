@@ -1,17 +1,19 @@
 ---
-permalink: /arduino-parity/
 title: Arduino parity
-nav_order: 5
+sidebar_position: 4
+slug: /arduino-parity
 ---
 
-# Arduino parity
+# Hardware capabilities
 
-The v1 goal is simple: **anything an Arduino tutorial teaches, you can do in
+The v1 goal is simple: **anything an Arduino tutorial teaches, you can build in
 Dart.** This page tracks that claim honestly — every ✅ has an executable test
 behind it, and every ❌ says what it is waiting on.
 
-Built-in names deliberately mirror Arduino's, so a tutorial translates line for
-line.
+The Arduino column is a translation aid, not a design target. moth copies
+Arduino's *capabilities*, not its spelling — see
+[the API this is heading toward](#the-api-this-is-heading-toward) below, and
+[ADR-009](/docs/decisions) for why.
 
 ## Digital I/O — done
 
@@ -104,6 +106,39 @@ int map(int v, int inMin, int inMax, int outMin, int outMax) {
 Everything in that table depends on the same milestone: **M1b adds the heap**,
 which unlocks strings, lists and classes together. Nothing there needs new VM
 architecture — it needs the allocator and collector.
+
+## The API this is heading toward
+
+Everything above is the **native boundary** — deliberately flat and C-shaped,
+because that is what a bytecode VM calls efficiently. It is not meant to be
+what you write.
+
+Once classes land in M1b, `package:moth` wraps that boundary in ordinary Dart:
+
+```dart
+final led = DigitalPin(38, mode: PinMode.output);
+led.toggle();
+
+final knob = AnalogPin(4);
+print(knob.read());
+
+final buzzer = PwmPin(6);
+buzzer.tone(440);
+
+final bus = I2c(sda: 15, scl: 14);
+for (final addr in bus.scan()) {
+  print('found 0x${addr.toRadixString(16)}');
+}
+bus.device(0x5a).writeRegister(0x01, 200);
+```
+
+Named parameters, enums instead of magic booleans, real objects you can pass
+around and test. The same reason MicroPython gives you `machine.Pin` instead of
+a pile of loose functions: the low-level surface is an implementation detail,
+not the language you should have to think in.
+
+The flat functions will keep working underneath — but the tutorials, examples
+and this page will all be rewritten around the class API when it exists.
 
 ## What moth already does that Arduino cannot
 

@@ -1,13 +1,19 @@
 ---
-permalink: /builtins/
 title: Built-ins
-nav_order: 4
+sidebar_position: 3
+slug: /builtins
 ---
 
 # Built-in functions
 
-Every function below is available to any moth program without an import. Names
-follow Arduino's where an equivalent exists.
+{: .warning }
+These are the **low-level native boundary**, not the API you are meant to write
+long-term. They are flat functions because M1a has no classes yet. Once classes
+land, `package:moth` wraps all of this in idiomatic Dart —
+`DigitalPin(38, mode: PinMode.output).toggle()` — and these become an
+implementation detail. See [ADR-009](/docs/decisions).
+
+Every function below is available to any moth program without an import.
 
 Built-ins are resolved **when the program loads**, not when they are called. If
 your board doesn't provide one, you get a clear failure at startup —

@@ -1,7 +1,7 @@
 ---
 title: Architecture
-nav_order: 10
-permalink: /architecture/
+sidebar_position: 9
+slug: /architecture
 ---
 
 # moth architecture
