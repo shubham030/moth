@@ -288,49 +288,66 @@ moth_value moth_to_string(moth_vm *vm, moth_value v) {
 
 /* ---- collector --------------------------------------------------------- */
 
-/* Instances need their class's field count to be traced, and mark_object has
- * no vm parameter. The collector is single-threaded and non-reentrant, so a
- * file-scope handle set for the duration of a collection is sufficient. */
-static moth_vm *g_marking_vm;
-
-static void mark_value(moth_value v);
-
-static void mark_object(moth_obj *o) {
+/* Marking is iterative: reachable objects go on a worklist and are processed
+ * in a loop, so nesting depth costs heap rather than C stack. A widget tree
+ * or a long linked list would otherwise overflow an ESP-IDF task stack. */
+static void gray_push(moth_vm *vm, moth_obj *o) {
   if (!o || o->marked) return;
-  o->marked = true; /* set before recursing, so cycles terminate */
+  o->marked = true;
+  if (vm->gray_count == vm->gray_cap) {
+    int cap = vm->gray_cap ? vm->gray_cap * 2 : 64;
+    moth_obj **grown = realloc(vm->gray, (size_t)cap * sizeof *grown);
+    if (!grown) {
+      /* Out of memory while marking. Skipping the sweep wastes a cycle but
+       * never frees something reachable, which is the only unsafe outcome. */
+      vm->gray_overflow = true;
+      return;
+    }
+    vm->gray = grown;
+    vm->gray_cap = cap;
+  }
+  vm->gray[vm->gray_count++] = o;
+}
+
+static void mark_value(moth_vm *vm, moth_value v) {
+  if (v.type == MV_OBJ) gray_push(vm, v.as.obj);
+}
+
+/* Pushes everything the object references; it is already marked. */
+static void blacken(moth_vm *vm, moth_obj *o) {
   switch (o->type) {
     case OBJ_STRING:
       break; /* references nothing */
     case OBJ_LIST: {
       moth_list *l = (moth_list *)o;
-      for (int i = 0; i < l->count; i++) mark_value(l->items[i]);
+      for (int i = 0; i < l->count; i++) mark_value(vm, l->items[i]);
       break;
     }
     case OBJ_CLOSURE:
-      /* keeps its receiver alive for as long as the callback exists */
-      mark_value(((moth_closure *)o)->receiver);
+      mark_value(vm, ((moth_closure *)o)->receiver);
       break;
     case OBJ_INSTANCE: {
       moth_instance *inst = (moth_instance *)o;
-      /* the field count lives on the class, reached through the owning vm */
-      if (inst->fields && g_marking_vm && inst->class_index < g_marking_vm->nclasses) {
-        uint8_t n = g_marking_vm->classes[inst->class_index].nfields;
-        for (uint8_t i = 0; i < n; i++) mark_value(inst->fields[i]);
+      if (inst->fields && inst->class_index < vm->nclasses) {
+        uint8_t n = vm->classes[inst->class_index].nfields;
+        for (uint8_t i = 0; i < n; i++) mark_value(vm, inst->fields[i]);
       }
       break;
     }
   }
 }
 
-static void mark_value(moth_value v) {
-  if (v.type == MV_OBJ) mark_object(v.as.obj);
+static void mark_roots(moth_vm *vm) {
+  for (moth_value *slot = vm->stack; slot < vm->sp; slot++) mark_value(vm, *slot);
+  for (uint16_t i = 0; i < vm->nglobals; i++) mark_value(vm, vm->globals[i]);
+  /* Constant strings live on the heap but must outlive every collection. */
+  for (uint16_t i = 0; i < vm->nconsts; i++) mark_value(vm, vm->consts[i]);
 }
 
-static void mark_roots(moth_vm *vm) {
-  for (moth_value *slot = vm->stack; slot < vm->sp; slot++) mark_value(*slot);
-  for (uint16_t i = 0; i < vm->nglobals; i++) mark_value(vm->globals[i]);
-  /* Constant strings live on the heap but must outlive every collection. */
-  for (uint16_t i = 0; i < vm->nconsts; i++) mark_value(vm->consts[i]);
+static void drain_gray(moth_vm *vm) {
+  while (vm->gray_count > 0) {
+    blacken(vm, vm->gray[--vm->gray_count]);
+  }
 }
 
 static void free_object(moth_vm *vm, moth_obj *o) {
@@ -383,15 +400,28 @@ static void sweep(moth_vm *vm) {
 }
 
 void moth_collect(moth_vm *vm) {
-  g_marking_vm = vm;
+  vm->gray_overflow = false;
+  vm->gray_count = 0;
   mark_roots(vm);
-  g_marking_vm = NULL;
+  drain_gray(vm);
+
+  if (vm->gray_overflow) {
+    /* The mark is incomplete, so sweeping could free a live object. Clear
+     * the marks and try again after more memory frees up. */
+    for (moth_obj *o = vm->objects; o; o = o->next) o->marked = false;
+    vm->next_gc = vm->bytes_allocated * MOTH_GC_GROWTH;
+    return;
+  }
   sweep(vm);
   vm->next_gc = vm->bytes_allocated * MOTH_GC_GROWTH;
   if (vm->next_gc < MOTH_GC_INITIAL) vm->next_gc = MOTH_GC_INITIAL;
 }
 
 void moth_free_objects(moth_vm *vm) {
+  free(vm->gray);
+  vm->gray = NULL;
+  vm->gray_cap = 0;
+  vm->gray_count = 0;
   moth_obj *o = vm->objects;
   while (o) {
     moth_obj *next = o->next;
