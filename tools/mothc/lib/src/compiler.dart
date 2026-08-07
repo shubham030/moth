@@ -29,6 +29,10 @@ class Compiler {
   final Map<String, int> functionIndex = {};
   final List<FunctionDeclaration> _declarations = [];
 
+  /// Top-level variables get one slot each, initialized before `main` runs.
+  final Map<String, int> globalIndex = {};
+  final List<(int, Expression)> globalInits = [];
+
   final Map<String, int> _nativeIndex = {};
   final List<NativeRef> natives = [];
 
@@ -64,23 +68,35 @@ class Compiler {
       functions.add(FunctionCompiler(this, decl).compile());
     }
 
+    // Top-level initializers become a synthetic function the VM runs first.
+    var init = noInit;
+    if (globalInits.isNotEmpty) {
+      init = functions.length;
+      functions.add(FunctionCompiler.globalsInit(this, globalInits).compile());
+    }
+
     final blob = writeBlob(
       constants: constants,
       natives: natives,
       functions: functions,
       entry: functionIndex['main']!,
+      globalCount: globalIndex.length,
+      init: init,
     );
     return CompileResult(blob, lineInfo);
   }
 
   void _collectDeclarations(CompilationUnit unit) {
     for (final decl in unit.declarations) {
+      if (decl is TopLevelVariableDeclaration) {
+        _collectGlobals(decl);
+        continue;
+      }
       if (decl is! FunctionDeclaration) {
         throw CompileError(
-          'only top-level functions are supported yet',
+          'only top-level functions and variables are supported yet',
           decl.offset,
-          hint:
-              'classes, mixins and top-level variables arrive in a later milestone',
+          hint: 'classes and mixins arrive in a later milestone',
         );
       }
       final name = decl.name.lexeme;
@@ -95,6 +111,26 @@ class Compiler {
       }
       functionIndex[name] = _declarations.length;
       _declarations.add(decl);
+    }
+  }
+
+  void _collectGlobals(TopLevelVariableDeclaration decl) {
+    for (final v in decl.variables.variables) {
+      final name = v.name.lexeme;
+      if (kNatives.containsKey(name) || functionIndex.containsKey(name)) {
+        throw CompileError("'$name' is already defined", v.offset);
+      }
+      if (globalIndex.containsKey(name)) {
+        throw CompileError("'$name' is already defined", v.offset);
+      }
+      if (globalIndex.length >= 0xFFFF) {
+        throw CompileError('too many top-level variables', v.offset);
+      }
+      final slot = globalIndex.length;
+      globalIndex[name] = slot;
+      if (v.initializer != null) {
+        globalInits.add((slot, v.initializer!));
+      }
     }
   }
 

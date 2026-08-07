@@ -15,7 +15,7 @@
 extern "C" {
 #endif
 
-#define MOTH_BYTECODE_VERSION 1
+#define MOTH_BYTECODE_VERSION 2
 
 #ifndef MOTH_STACK_MAX
 #define MOTH_STACK_MAX 256

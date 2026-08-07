@@ -10,6 +10,8 @@ class Op {
   static const dup = 0x07;
   static const load = 0x08;
   static const store = 0x09;
+  static const loadGlobal = 0x0A;
+  static const storeGlobal = 0x0B;
 
   static const add = 0x10;
   static const sub = 0x11;

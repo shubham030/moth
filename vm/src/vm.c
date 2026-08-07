@@ -61,18 +61,12 @@ static double dart_mod_double(double a, double b) {
   return r;
 }
 
-moth_status moth_run(moth_vm *vm) {
-  if (!vm->loaded) {
-    snprintf(vm->err, sizeof vm->err, "no program loaded");
-    return MOTH_ERR_FORMAT;
-  }
-
+static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
   vm->sp = vm->stack;
   vm->nframes = 0;
-  vm->err[0] = '\0';
 
   moth_frame *fr = &vm->frames[vm->nframes++];
-  fr->fn = &vm->funcs[vm->entry];
+  fr->fn = &vm->funcs[fn_index];
   fr->ip = fr->fn->code;
   fr->slots = vm->sp;
   for (int i = 0; i < fr->fn->nlocals; i++) PUSH(moth_null());
@@ -112,6 +106,20 @@ moth_status moth_run(moth_vm *vm) {
         uint8_t slot = *fr->ip++;
         if (slot >= fr->fn->nlocals) return trap(vm, fr, MOTH_ERR_BAD_OP, "local out of range");
         fr->slots[slot] = POP();
+        break;
+      }
+      case OP_LOAD_GLOBAL: {
+        NEED(2);
+        uint16_t slot = read_u16(&fr->ip);
+        if (slot >= vm->nglobals) return trap(vm, fr, MOTH_ERR_BAD_OP, "global out of range");
+        PUSH(vm->globals[slot]);
+        break;
+      }
+      case OP_STORE_GLOBAL: {
+        NEED(2);
+        uint16_t slot = read_u16(&fr->ip);
+        if (slot >= vm->nglobals) return trap(vm, fr, MOTH_ERR_BAD_OP, "global out of range");
+        vm->globals[slot] = POP();
         break;
       }
 
@@ -306,4 +314,19 @@ moth_status moth_run(moth_vm *vm) {
         return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown opcode 0x%02x", op);
     }
   }
+}
+
+moth_status moth_run(moth_vm *vm) {
+  if (!vm->loaded) {
+    snprintf(vm->err, sizeof vm->err, "no program loaded");
+    return MOTH_ERR_FORMAT;
+  }
+  vm->err[0] = '\0';
+
+  /* Top-level variable initializers run before main, in declaration order. */
+  if (vm->init != MOTH_NO_INIT) {
+    moth_status st = run_function(vm, vm->init);
+    if (st != MOTH_OK) return st;
+  }
+  return run_function(vm, vm->entry);
 }

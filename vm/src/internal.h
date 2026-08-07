@@ -15,6 +15,8 @@ enum {
   OP_DUP = 0x07,
   OP_LOAD = 0x08,
   OP_STORE = 0x09,
+  OP_LOAD_GLOBAL = 0x0A,
+  OP_STORE_GLOBAL = 0x0B,
 
   OP_ADD = 0x10,
   OP_SUB = 0x11,
@@ -50,6 +52,8 @@ enum {
 };
 
 enum { CONST_INT = 0, CONST_DOUBLE = 1, CONST_STRING = 2, CONST_BOOL = 3, CONST_NULL = 4 };
+
+#define MOTH_NO_INIT 0xFFFF
 
 typedef struct {
   const char *chars; /* into the blob; not NUL-terminated */
@@ -97,7 +101,10 @@ struct moth_vm {
   uint16_t nfuncs;
   moth_native_slot *natives;
   uint16_t nnatives;
+  moth_value *globals;
+  uint16_t nglobals;
   uint16_t entry;
+  uint16_t init; /* MOTH_NO_INIT when the program has no top-level initializers */
   bool loaded;
 
   moth_value stack[MOTH_STACK_MAX];

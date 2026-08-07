@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-const int bytecodeVersion = 1;
+const int bytecodeVersion = 2;
+
+/// Sentinel for "this program has no top-level initializers to run".
+const int noInit = 0xFFFF;
 
 const int _tagInt = 0;
 const int _tagDouble = 1;
@@ -66,6 +69,8 @@ Uint8List writeBlob({
   required List<NativeRef> natives,
   required List<FunctionBlob> functions,
   required int entry,
+  int globalCount = 0,
+  int init = noInit,
 }) {
   final out = BytesBuilder();
   void u8(int v) => out.addByte(v & 0xFF);
@@ -120,6 +125,8 @@ Uint8List writeBlob({
     u8(n.argc);
   }
 
+  u16(globalCount);
+
   u16(functions.length);
   for (final f in functions) {
     u16(f.nameConst);
@@ -130,5 +137,6 @@ Uint8List writeBlob({
   }
 
   u16(entry);
+  u16(init);
   return out.toBytes();
 }
