@@ -117,6 +117,24 @@ bool moth_list_push(moth_vm *vm, moth_value list, moth_value item) {
   return true;
 }
 
+moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields) {
+  moth_instance *inst =
+      (moth_instance *)allocate_object(vm, sizeof(moth_instance), OBJ_INSTANCE);
+  if (!inst) return moth_null();
+  inst->class_index = class_index;
+  inst->fields = NULL;
+  if (nfields > 0) {
+    inst->fields = malloc((size_t)nfields * sizeof(moth_value));
+    if (!inst->fields) return moth_null();
+    for (uint8_t i = 0; i < nfields; i++) inst->fields[i] = moth_null();
+    vm->bytes_allocated += (size_t)nfields * sizeof(moth_value);
+  }
+  moth_value v;
+  v.type = MV_OBJ;
+  v.as.obj = (moth_obj *)inst;
+  return v;
+}
+
 /* Dart's own formatting: doubles keep a decimal point, ints never gain one. */
 moth_value moth_to_string(moth_vm *vm, moth_value v) {
   char buf[40];
@@ -131,13 +149,22 @@ moth_value moth_to_string(moth_vm *vm, moth_value v) {
       break;
     case MV_OBJ:
       if (moth_is_string(v)) return v; /* already a string */
-      n = snprintf(buf, sizeof buf, "Instance");
+      if (IS_LIST(v)) {
+        n = snprintf(buf, sizeof buf, "[%d items]", AS_LIST(v)->count);
+      } else {
+        n = snprintf(buf, sizeof buf, "Instance");
+      }
       break;
   }
   return moth_new_string(vm, buf, n);
 }
 
 /* ---- collector --------------------------------------------------------- */
+
+/* Instances need their class's field count to be traced, and mark_object has
+ * no vm parameter. The collector is single-threaded and non-reentrant, so a
+ * file-scope handle set for the duration of a collection is sufficient. */
+static moth_vm *g_marking_vm;
 
 static void mark_value(moth_value v);
 
@@ -150,6 +177,15 @@ static void mark_object(moth_obj *o) {
     case OBJ_LIST: {
       moth_list *l = (moth_list *)o;
       for (int i = 0; i < l->count; i++) mark_value(l->items[i]);
+      break;
+    }
+    case OBJ_INSTANCE: {
+      moth_instance *inst = (moth_instance *)o;
+      /* the field count lives on the class, reached through the owning vm */
+      if (inst->fields && g_marking_vm && inst->class_index < g_marking_vm->nclasses) {
+        uint8_t n = g_marking_vm->classes[inst->class_index].nfields;
+        for (uint8_t i = 0; i < n; i++) mark_value(inst->fields[i]);
+      }
       break;
     }
   }
@@ -184,6 +220,16 @@ static void free_object(moth_vm *vm, moth_obj *o) {
       free(l->items);
       break;
     }
+    case OBJ_INSTANCE: {
+      moth_instance *inst = (moth_instance *)o;
+      if (inst->fields && inst->class_index < vm->nclasses) {
+        vm->bytes_allocated -=
+            (size_t)vm->classes[inst->class_index].nfields * sizeof(moth_value);
+      }
+      vm->bytes_allocated -= sizeof(moth_instance);
+      free(inst->fields);
+      break;
+    }
   }
   free(o);
 }
@@ -203,7 +249,9 @@ static void sweep(moth_vm *vm) {
 }
 
 void moth_collect(moth_vm *vm) {
+  g_marking_vm = vm;
   mark_roots(vm);
+  g_marking_vm = NULL;
   sweep(vm);
   vm->next_gc = vm->bytes_allocated * MOTH_GC_GROWTH;
   if (vm->next_gc < MOTH_GC_INITIAL) vm->next_gc = MOTH_GC_INITIAL;

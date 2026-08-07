@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-const int bytecodeVersion = 2;
+const int bytecodeVersion = 3;
 
 /// Sentinel for "this program has no top-level initializers to run".
 const int noInit = 0xFFFF;
@@ -63,6 +63,19 @@ class NativeRef {
   NativeRef(this.nameConst, this.argc);
 }
 
+const int noCtor = 0xFFFF;
+
+class ClassBlob {
+  final int nameConst;
+  final List<int> fieldNameConsts;
+
+  /// name constant -> function index
+  final List<(int, int)> methods;
+  final int ctor;
+
+  ClassBlob(this.nameConst, this.fieldNameConsts, this.methods, this.ctor);
+}
+
 /// Serializes a program to the .mothb format (docs/BYTECODE.md).
 Uint8List writeBlob({
   required ConstantPool constants,
@@ -71,6 +84,7 @@ Uint8List writeBlob({
   required int entry,
   int globalCount = 0,
   int init = noInit,
+  List<ClassBlob> classes = const [],
 }) {
   final out = BytesBuilder();
   void u8(int v) => out.addByte(v & 0xFF);
@@ -126,6 +140,21 @@ Uint8List writeBlob({
   }
 
   u16(globalCount);
+
+  u16(classes.length);
+  for (final c in classes) {
+    u16(c.nameConst);
+    u8(c.fieldNameConsts.length);
+    for (final f in c.fieldNameConsts) {
+      u16(f);
+    }
+    u16(c.methods.length);
+    for (final (nameConst, fnIndex) in c.methods) {
+      u16(nameConst);
+      u16(fnIndex);
+    }
+    u16(c.ctor);
+  }
 
   u16(functions.length);
   for (final f in functions) {

@@ -36,10 +36,11 @@ enum {
   OP_NEW_LIST = 0x50, /* u16 count: pops that many values into a new list */
   OP_INDEX_GET = 0x51,
   OP_INDEX_SET = 0x52,
-  OP_LEN = 0x53,
-  OP_LIST_ADD = 0x54,
-  OP_LIST_REMOVE_LAST = 0x55,
-  OP_LIST_CLEAR = 0x56,
+
+  OP_NEW_INSTANCE = 0x57, /* u16 class index */
+  OP_GET_PROP = 0x58,     /* u16 name const: instance field, or .length */
+  OP_SET_PROP = 0x59,     /* u16 name const */
+  OP_INVOKE = 0x5A,       /* u16 name const, u8 argc */
 
   OP_EQ = 0x20,
   OP_NE = 0x21,
@@ -71,7 +72,7 @@ typedef struct {
 
 /* ---- heap objects ------------------------------------------------------ */
 
-typedef enum { OBJ_STRING, OBJ_LIST } obj_type;
+typedef enum { OBJ_STRING, OBJ_LIST, OBJ_INSTANCE } obj_type;
 
 struct moth_obj {
   obj_type type;
@@ -95,10 +96,18 @@ typedef struct {
   moth_value *items; /* plain malloc, not GC-tracked; contents are traced */
 } moth_list;
 
+typedef struct {
+  moth_obj obj;
+  uint16_t class_index;
+  moth_value *fields; /* exactly the class's field count */
+} moth_instance;
+
 #define AS_STRING(v) ((moth_string *)(v).as.obj)
 #define AS_LIST(v) ((moth_list *)(v).as.obj)
+#define AS_INSTANCE(v) ((moth_instance *)(v).as.obj)
 #define IS_OBJ_TYPE(v, t) ((v).type == MV_OBJ && (v).as.obj->type == (t))
 #define IS_LIST(v) IS_OBJ_TYPE(v, OBJ_LIST)
+#define IS_INSTANCE(v) IS_OBJ_TYPE(v, OBJ_INSTANCE)
 
 /* object.c */
 moth_value moth_string_take(moth_vm *vm, char *chars, uint32_t len);
@@ -106,6 +115,7 @@ moth_value moth_string_borrow(moth_vm *vm, const char *chars, uint32_t len);
 moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b);
 moth_value moth_list_new(moth_vm *vm);
 bool moth_list_push(moth_vm *vm, moth_value list, moth_value item);
+moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields);
 moth_value moth_to_string(moth_vm *vm, moth_value v);
 bool moth_string_equal(moth_value a, moth_value b);
 void moth_collect(moth_vm *vm);
@@ -131,6 +141,24 @@ typedef struct {
   uint8_t argc;
 } moth_native_slot;
 
+/* Field and method names are compared by constant index: the pool dedupes,
+ * so identical names always share one index. Lookup is a short scan. */
+typedef struct {
+  uint16_t name_const;
+  uint16_t func_index;
+} moth_method;
+
+typedef struct {
+  uint16_t name_const;
+  uint8_t nfields;
+  uint16_t *field_names;
+  uint16_t nmethods;
+  moth_method *methods;
+  uint16_t ctor; /* function index, or MOTH_NO_CTOR */
+} moth_class;
+
+#define MOTH_NO_CTOR 0xFFFF
+
 typedef struct {
   const moth_func *fn;
   const uint8_t *ip;
@@ -154,6 +182,11 @@ struct moth_vm {
   uint16_t nnatives;
   moth_value *globals;
   uint16_t nglobals;
+  moth_class *classes;
+  uint16_t nclasses;
+  /* constant indices of the built-in member names, resolved once at load
+   * so property access is an integer compare rather than a string compare */
+  uint16_t k_length, k_add, k_remove_last, k_clear;
   uint16_t entry;
   uint16_t init; /* MOTH_NO_INIT when the program has no top-level initializers */
   bool loaded;
