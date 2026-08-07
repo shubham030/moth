@@ -26,6 +26,7 @@ class Op {
   static const shl = 0x1A;
   static const shr = 0x1B;
   static const bnot = 0x1C;
+  static const toStringOp = 0x1D;
 
   static const eq = 0x20;
   static const ne = 0x21;

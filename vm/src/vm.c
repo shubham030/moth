@@ -31,6 +31,7 @@ static moth_status trap(moth_vm *vm, moth_frame *fr, moth_status st, const char 
   } while (0)
 #define POP() (*--vm->sp)
 #define PEEK() (vm->sp[-1])
+#define PEEK_AT(n) (vm->sp[-1 - (n)])
 
 /* Operand reads must stay inside the function's code. Cheap next to the
  * dispatch switch, and the difference between a clear error and a buffer
@@ -124,7 +125,22 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
       }
 
       case OP_ADD: case OP_SUB: case OP_MUL: case OP_IDIV: case OP_MOD: {
+        /* Concatenation allocates, so the operands stay on the stack until
+         * the result exists — otherwise a collection mid-allocation would
+         * free the very strings being joined. */
+        if (op == OP_ADD && moth_is_string(PEEK_AT(0)) && moth_is_string(PEEK_AT(1))) {
+          moth_value joined = moth_concat(vm, PEEK_AT(1), PEEK_AT(0));
+          if (joined.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+          (void)POP();
+          (void)POP();
+          PUSH(joined);
+          break;
+        }
         moth_value b = POP(), a = POP();
+        if (moth_is_string(a) || moth_is_string(b)) {
+          return trap(vm, fr, MOTH_ERR_TYPE,
+                      "cannot mix text and numbers here — convert with '${...}'");
+        }
         if (!moth_is_num(a) || !moth_is_num(b)) {
           return trap(vm, fr, MOTH_ERR_TYPE, "arithmetic needs numbers");
         }
@@ -203,6 +219,14 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         PUSH(moth_int(~a.as.i));
         break;
       }
+      case OP_TO_STRING: {
+        /* value stays rooted on the stack across the allocation */
+        moth_value s = moth_to_string(vm, PEEK());
+        if (s.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+        (void)POP();
+        PUSH(s);
+        break;
+      }
 
       case OP_EQ: case OP_NE: {
         moth_value b = POP(), a = POP();
@@ -210,8 +234,12 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         if (moth_is_num(a) && moth_is_num(b)) {
           eq = (a.type == MV_INT && b.type == MV_INT) ? a.as.i == b.as.i
                                                       : moth_as_double(a) == moth_as_double(b);
+        } else if (moth_is_string(a) && moth_is_string(b)) {
+          eq = moth_string_equal(a, b); /* Dart compares text, not identity */
         } else if (a.type != b.type) {
           eq = false;
+        } else if (a.type == MV_OBJ) {
+          eq = a.as.obj == b.as.obj;
         } else {
           eq = a.type == MV_NULL ? true : a.as.b == b.as.b;
         }
@@ -291,8 +319,10 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         if (nidx >= vm->nnatives) return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown native");
         moth_native_slot *ns = &vm->natives[nidx];
         if (argc != ns->argc) return trap(vm, fr, MOTH_ERR_BAD_OP, "wrong native argument count");
+        /* Arguments stay on the stack across the call so a native that
+         * allocates cannot have them collected underneath it. */
         moth_value *argv = vm->sp - argc;
-        moth_value res = ns->fn(argc, argv, ns->user);
+        moth_value res = ns->fn(vm, argc, argv, ns->user);
         vm->sp = argv;
         PUSH(res);
         break;

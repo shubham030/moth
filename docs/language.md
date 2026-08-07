@@ -22,6 +22,14 @@ final limit = 10;
 int step = 2;
 ```
 
+**Strings** — literals, `+`, interpolation, and `==` comparing text rather
+than identity. Garbage collected.
+
+```dart
+print('temp $tempC C, fan ${running ? "on" : "off"}');   // (ternary: not yet)
+print('device at address $addr');
+```
+
 **Top-level variables** — shared by every function in the file, initialized
 before `main` runs. Locals shadow them, as in Dart.
 
@@ -76,7 +84,6 @@ for (var i = 0; i < 10; i++) {
 
 | Feature | Milestone |
 | --- | --- |
-| Strings (`'hello'`, interpolation) | M1b |
 | Lists, maps, `for-in` | M1b |
 | Classes, methods, constructors | M1b |
 | Closures and function values | M1b |

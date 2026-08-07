@@ -332,6 +332,17 @@ class FunctionCompiler {
         _emit(expr.value ? Op.pushTrue : Op.pushFalse);
       case NullLiteral():
         _emit(Op.pushNull);
+      case SimpleStringLiteral():
+        _emit(Op.konst);
+        _emitU16(unit.constants.addString(expr.value));
+      case StringInterpolation():
+        _interpolation(expr);
+      case AdjacentStrings():
+        // 'a' 'b' is one string in Dart
+        for (var i = 0; i < expr.strings.length; i++) {
+          _expression(expr.strings[i]);
+          if (i > 0) _emit(Op.add);
+        }
       case ParenthesizedExpression():
         _expression(expr.expression);
       case SimpleIdentifier():
@@ -352,6 +363,29 @@ class FunctionCompiler {
           expr.offset,
           hint: 'M1a supports numbers, bools, variables, arithmetic and calls',
         );
+    }
+  }
+
+  /// `'temp $t C'` lowers to a left-to-right chain of concatenations, with
+  /// each embedded value converted first.
+  void _interpolation(StringInterpolation expr) {
+    var first = true;
+    for (final element in expr.elements) {
+      if (element is InterpolationString) {
+        if (element.value.isEmpty) continue; // the empty edges of '$x'
+        _emit(Op.konst);
+        _emitU16(unit.constants.addString(element.value));
+      } else if (element is InterpolationExpression) {
+        _expression(element.expression);
+        _emit(Op.toStringOp);
+      }
+      if (!first) _emit(Op.add);
+      first = false;
+    }
+    if (first) {
+      // the whole literal was empty
+      _emit(Op.konst);
+      _emitU16(unit.constants.addString(''));
     }
   }
 

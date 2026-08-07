@@ -9,6 +9,7 @@ idf_component_register(
   SRCS
     app_main.c
     "${VM_ROOT}/src/vm.c"
+    "${VM_ROOT}/src/object.c"
     "${VM_ROOT}/src/loader.c"
   INCLUDE_DIRS "${VM_ROOT}/include"
   PRIV_REQUIRES esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_driver_uart esp_adc esp_timer
