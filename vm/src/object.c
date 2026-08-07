@@ -203,8 +203,8 @@ static void sb_add(strbuf *sb, const char *text, size_t n) {
 #define MOTH_FORMAT_MAX_DEPTH 24
 
 /* Appends v the way Dart's print() would. Strings nested inside a list are
- * printed bare, as Dart does. */
-static void format_value(strbuf *sb, moth_value v, int depth) {
+ * printed bare, as Dart does. The vm is needed to name an instance's class. */
+static void format_value(moth_vm *vm, strbuf *sb, moth_value v, int depth) {
   char scratch[40];
   switch (v.type) {
     case MV_NULL: sb_add(sb, "null", 4); return;
@@ -235,10 +235,24 @@ static void format_value(strbuf *sb, moth_value v, int depth) {
     sb_add(sb, "[", 1);
     for (int i = 0; i < l->count; i++) {
       if (i > 0) sb_add(sb, ", ", 2);
-      format_value(sb, l->items[i], depth + 1);
+      format_value(vm, sb, l->items[i], depth + 1);
     }
     sb_add(sb, "]", 1);
     return;
+  }
+  if (IS_INSTANCE(v)) {
+    /* Dart writes Instance of 'Point'; the class name is already in the
+     * constant pool, reached through the instance's class index. */
+    uint16_t cls = AS_INSTANCE(v)->class_index;
+    if (vm && cls < vm->nclasses) {
+      uint16_t name_const = vm->classes[cls].name_const;
+      if (name_const < vm->nconsts && vm->const_strs[name_const].chars) {
+        sb_add(sb, "Instance of '", 13);
+        sb_add(sb, vm->const_strs[name_const].chars, vm->const_strs[name_const].len);
+        sb_add(sb, "'", 1);
+        return;
+      }
+    }
   }
   sb_add(sb, "Instance", 8);
 }
@@ -247,7 +261,7 @@ moth_value moth_to_string(moth_vm *vm, moth_value v) {
   if (moth_is_string(v)) return v; /* already a string */
 
   strbuf sb = {NULL, 0, 0, false};
-  format_value(&sb, v, 0);
+  format_value(vm, &sb, v, 0);
   if (sb.failed) {
     free(sb.data);
     return moth_null();
