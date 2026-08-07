@@ -1,4 +1,5 @@
 import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/token.dart';
 
 import 'compiler.dart';
 import 'errors.dart';
@@ -200,6 +201,10 @@ class FunctionCompiler {
 
   void _patchTo(int site, int target) {
     final offset = target - (site + 2);
+    if (offset < -32768 || offset > 32767) {
+      throw CompileError(
+          'this function is too large to compile', decl?.offset ?? 0);
+    }
     code[site] = offset & 0xFF;
     code[site + 1] = (offset >> 8) & 0xFF;
   }
@@ -523,6 +528,7 @@ class FunctionCompiler {
         _expression(expr.index);
         _emit(Op.indexGet);
       case PropertyAccess():
+        _rejectNullAware(expr.operator, expr.offset);
         _property(expr.propertyName, expr.target!, expr.offset);
       case PrefixedIdentifier():
         // `list.length` parses as a prefixed identifier when the target is a
@@ -560,6 +566,18 @@ class FunctionCompiler {
     }
     _emit(Op.newList);
     _emitU16(count);
+  }
+
+  /// `a?.b` must skip the access when `a` is null. moth would instead trap,
+  /// so it is rejected rather than compiled to the wrong thing.
+  void _rejectNullAware(Token? operator, int offset) {
+    if (operator != null && operator.lexeme == '?.') {
+      throw CompileError(
+        'the null-aware operator ?. is not supported yet',
+        offset,
+        hint: 'guard explicitly: if (x != null) x.method();',
+      );
+    }
   }
 
   /// Property reads are resolved by name at run time — the compiler has no
@@ -850,6 +868,7 @@ class FunctionCompiler {
         }
       case '++':
       case '--':
+        if (_incDecOnProperty(expr.operand, op == '++', prefix: true)) break;
         final slot = _assignableSlot(expr.operand);
         _emitLoadSlot(slot);
         _emit(Op.int8);
@@ -883,6 +902,7 @@ class FunctionCompiler {
     if (op != '++' && op != '--') {
       throw CompileError("'$op' is not supported yet", expr.operator.offset);
     }
+    if (_incDecOnProperty(expr.operand, op == '++', prefix: false)) return;
     final slot = _assignableSlot(expr.operand);
     _emitLoadSlot(slot);
     _emit(Op.dup); // the old value stays as this expression's result
@@ -892,7 +912,74 @@ class FunctionCompiler {
     _emitStoreSlot(slot);
   }
 
+  /// `count++` where count is a field, and `obj.count++`. Returns false when
+  /// the operand is an ordinary variable, which the caller then handles.
+  ///
+  /// The receiver goes into a hidden local so it is evaluated exactly once,
+  /// and the old/new value into a second so the result can be ordered without
+  /// a stack-shuffling opcode.
+  bool _incDecOnProperty(Expression operand, bool increment,
+      {required bool prefix}) {
+    void Function()? emitTarget;
+    String? name;
+
+    if (operand is PropertyAccess) {
+      _rejectNullAware(operand.operator, operand.offset);
+      emitTarget = () => _expression(operand.target!);
+      name = operand.propertyName.name;
+    } else if (operand is PrefixedIdentifier) {
+      emitTarget = () => _expression(operand.prefix);
+      name = operand.identifier.name;
+    } else if (operand is SimpleIdentifier &&
+        _resolve(operand.name) == null &&
+        _isField(operand.name)) {
+      emitTarget = _emitThis;
+      name = operand.name;
+    }
+    if (emitTarget == null || name == null) return false;
+
+    final nameConst = unit.constants.addString(name);
+    _pushScope();
+    final targetSlot = _declare(' target', operand.offset);
+    final valueSlot = _declare(' value', operand.offset);
+
+    emitTarget();
+    _emit(Op.store);
+    _emit(targetSlot);
+
+    _emit(Op.load);
+    _emit(targetSlot);
+    _emit(Op.getProp);
+    _emitU16(nameConst);
+    if (prefix) {
+      _emit(Op.int8);
+      _emit(1);
+      _emit(increment ? Op.add : Op.sub);
+    }
+    _emit(Op.store);
+    _emit(valueSlot); // prefix: the new value; postfix: the old one
+
+    _emit(Op.load);
+    _emit(targetSlot);
+    _emit(Op.load);
+    _emit(valueSlot);
+    if (!prefix) {
+      _emit(Op.int8);
+      _emit(1);
+      _emit(increment ? Op.add : Op.sub);
+    }
+    _emit(Op.setProp);
+    _emitU16(nameConst);
+    _emit(Op.pop);
+
+    _emit(Op.load);
+    _emit(valueSlot);
+    _popScope();
+    return true;
+  }
+
   void _call(MethodInvocation call) {
+    _rejectNullAware(call.operator, call.offset);
     final name = call.methodName.name;
     final args = call.argumentList.arguments;
 
@@ -938,8 +1025,10 @@ class FunctionCompiler {
       _emit(Op.newInstance);
       _emitU16(classIdx);
       final ctorIndex = unit.classCtorIndex[classIdx];
+      // Arity is checked here so a wrong count is a compile error with a
+      // location, not a runtime trap reported as "corrupt program".
+      _checkArgc(name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
       if (ctorIndex == null) {
-        _checkArgc(name, args.length, 0, call.offset);
         return; // default constructor: the fresh instance is the result
       }
       for (final a in args) {

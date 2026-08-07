@@ -64,6 +64,19 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
 - [ ] Animated widgets delegating to lv_anim
 - [ ] Golden tests: widget tree in → sequence of LVGL calls out
 
+## Known limitations to close
+
+- **The collector marks recursively.** Depth is one C frame per level of
+  nesting, which is fine on a host stack but risks overflowing an ESP-IDF
+  task stack (a few KB) if deeply nested structures are collected on device.
+  Needs an explicit mark stack or a depth cap.
+- **No bytecode verifier.** Load-time checks cover table bounds and indices,
+  and the interpreter bounds-checks operands, but nothing proves the operand
+  stack stays balanced across jumps. Required before M4 accepts blobs over
+  the network — see docs/BYTECODE.md.
+- **Native argument counts are taken from the blob.** `moth_register` does
+  not record an arity for the host to cross-check against.
+
 ## M4 — Hot push
 
 **Demo: edit Dart, `moth run`, new UI on the device in ~2s over WiFi. No cable.**

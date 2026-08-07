@@ -70,6 +70,12 @@ class DigitalPin {
 **Top-level variables** — shared by every function in the file, initialized
 before `main` runs. Locals shadow them, as in Dart.
 
+Unlike Dart, initialization is **eager and in declaration order**, not lazy.
+Dart runs a top-level initializer on first use, so `var a = b + 1; var b = 2;`
+prints 3; moth evaluates `a` first and traps on the null `b`. It fails loudly
+rather than silently, but order your declarations so each only depends on
+earlier ones.
+
 ```dart
 final ledPin = 38;      // pin map and tuning, visible everywhere
 var pressCount = 0;     // state that outlives any one function call

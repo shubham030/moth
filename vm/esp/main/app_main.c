@@ -41,20 +41,12 @@ static uint64_t s_rng = 1;
 /* ---- output / timing --------------------------------------------------- */
 
 static moth_value n_print(moth_vm *vm, int argc, const moth_value *argv, void *user) {
-  (void)vm; (void)argc; (void)user;
-  if (moth_is_string(argv[0])) {
-    int len = 0;
-    const char *chars = moth_string_chars(argv[0], &len);
-    ESP_LOGI(TAG, "%.*s", len, chars); /* not NUL-terminated */
-    return moth_null();
-  }
-  switch (argv[0].type) {
-    case MV_INT: ESP_LOGI(TAG, "%" PRId64, argv[0].as.i); break;
-    case MV_DOUBLE: ESP_LOGI(TAG, "%g", argv[0].as.d); break;
-    case MV_BOOL: ESP_LOGI(TAG, "%s", argv[0].as.b ? "true" : "false"); break;
-    case MV_NULL: ESP_LOGI(TAG, "null"); break;
-    case MV_OBJ: ESP_LOGI(TAG, "Instance"); break;
-  }
+  (void)argc; (void)user;
+  /* Same renderer the VM uses for '$x', so the two can never disagree. */
+  moth_value text = moth_to_string(vm, argv[0]);
+  int len = 0;
+  const char *chars = moth_string_chars(text, &len);
+  ESP_LOGI(TAG, "%.*s", len, chars ? chars : ""); /* not NUL-terminated */
   return moth_null();
 }
 

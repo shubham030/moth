@@ -82,31 +82,12 @@ static void advance_clock(int64_t ms) {
 
 /* ---- output ----------------------------------------------------------- */
 
-static void print_value(moth_value v) {
-  if (moth_is_string(v)) {
-    int len = 0;
-    const char *chars = moth_string_chars(v, &len);
-    fwrite(chars, 1, (size_t)len, stdout); /* not NUL-terminated */
-    return;
-  }
-  switch (v.type) {
-    case MV_NULL: printf("null"); break;
-    case MV_BOOL: printf(v.as.b ? "true" : "false"); break;
-    case MV_INT: printf("%" PRId64, v.as.i); break;
-    case MV_OBJ: printf("Instance"); break;
-    case MV_DOUBLE: {
-      char buf[32];
-      snprintf(buf, sizeof buf, "%g", v.as.d);
-      printf("%s", buf);
-      if (!strpbrk(buf, ".einf")) printf(".0"); /* Dart prints 1.0, not 1 */
-      break;
-    }
-  }
-}
-
 static moth_value n_print(moth_vm *vm, int argc, const moth_value *argv, void *user) {
-  (void)vm; (void)argc; (void)user;
-  print_value(argv[0]);
+  (void)argc; (void)user;
+  moth_value text = moth_to_string(vm, argv[0]);
+  int len = 0;
+  const char *chars = moth_string_chars(text, &len);
+  if (chars) fwrite(chars, 1, (size_t)len, stdout);
   putchar('\n');
   fflush(stdout);
   return moth_null();

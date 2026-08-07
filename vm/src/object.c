@@ -7,6 +7,7 @@
 #include "internal.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -135,28 +136,125 @@ moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields)
   return v;
 }
 
-/* Dart's own formatting: doubles keep a decimal point, ints never gain one. */
-moth_value moth_to_string(moth_vm *vm, moth_value v) {
-  char buf[40];
-  int n = 0;
-  switch (v.type) {
-    case MV_NULL: n = snprintf(buf, sizeof buf, "null"); break;
-    case MV_BOOL: n = snprintf(buf, sizeof buf, v.as.b ? "true" : "false"); break;
-    case MV_INT: n = snprintf(buf, sizeof buf, "%" PRId64, v.as.i); break;
-    case MV_DOUBLE:
-      n = snprintf(buf, sizeof buf, "%g", v.as.d);
-      if (!strpbrk(buf, ".einf")) n += snprintf(buf + n, sizeof buf - (size_t)n, ".0");
-      break;
-    case MV_OBJ:
-      if (moth_is_string(v)) return v; /* already a string */
-      if (IS_LIST(v)) {
-        n = snprintf(buf, sizeof buf, "[%d items]", AS_LIST(v)->count);
-      } else {
-        n = snprintf(buf, sizeof buf, "Instance");
-      }
-      break;
+/* ---- Dart-compatible formatting ---------------------------------------- */
+
+/* Dart prints the shortest decimal that reads back as the same double, so
+ * 0.1 + 0.2 shows all 17 digits while 0.5 shows one. Plain "%g" would round
+ * to 6 significant digits and disagree. */
+int moth_format_double(char *buf, size_t n, double d) {
+  if (isnan(d)) return snprintf(buf, n, "NaN");
+  if (isinf(d)) return snprintf(buf, n, d < 0 ? "-Infinity" : "Infinity");
+
+  /* Fewest significant digits that read back as the same double. */
+  char tmp[64];
+  int digits = 1;
+  for (; digits < 17; digits++) {
+    snprintf(tmp, sizeof tmp, "%.*e", digits - 1, d);
+    if (strtod(tmp, NULL) == d) break;
   }
-  return moth_new_string(vm, buf, n);
+  snprintf(tmp, sizeof tmp, "%.*e", digits - 1, d);
+
+  const char *marker = strchr(tmp, 'e');
+  int exp10 = marker ? atoi(marker + 1) : 0;
+
+  /* Dart (like JavaScript) writes plain decimals for exponents in [-6, 21)
+   * and scientific notation outside it. "%g" uses a different rule and would
+   * turn 10.0 into 1e+01. */
+  int len;
+  if (exp10 >= -6 && exp10 < 21) {
+    int decimals = digits - 1 - exp10;
+    if (decimals < 0) decimals = 0;
+    len = snprintf(buf, n, "%.*f", decimals, d);
+    if (!strchr(buf, '.') && (size_t)len + 3 < n) {
+      len += snprintf(buf + len, n - (size_t)len, ".0"); /* 1.0, never 1 */
+    }
+  } else {
+    char mantissa[32];
+    size_t take = marker ? (size_t)(marker - tmp) : strlen(tmp);
+    if (take >= sizeof mantissa) take = sizeof mantissa - 1;
+    memcpy(mantissa, tmp, take);
+    mantissa[take] = '\0';
+    /* Dart writes e+21 and e-7 — always signed, never zero-padded */
+    len = snprintf(buf, n, "%se%+d", mantissa, exp10);
+  }
+  return len;
+}
+
+typedef struct {
+  char *data;
+  size_t len, cap;
+  bool failed;
+} strbuf;
+
+static void sb_add(strbuf *sb, const char *text, size_t n) {
+  if (sb->failed) return;
+  if (sb->len + n > sb->cap) {
+    size_t cap = sb->cap ? sb->cap * 2 : 64;
+    while (cap < sb->len + n) cap *= 2;
+    char *grown = realloc(sb->data, cap);
+    if (!grown) { sb->failed = true; return; }
+    sb->data = grown;
+    sb->cap = cap;
+  }
+  memcpy(sb->data + sb->len, text, n);
+  sb->len += n;
+}
+
+#define MOTH_FORMAT_MAX_DEPTH 24
+
+/* Appends v the way Dart's print() would. Strings nested inside a list are
+ * printed bare, as Dart does. */
+static void format_value(strbuf *sb, moth_value v, int depth) {
+  char scratch[40];
+  switch (v.type) {
+    case MV_NULL: sb_add(sb, "null", 4); return;
+    case MV_BOOL:
+      if (v.as.b) sb_add(sb, "true", 4);
+      else sb_add(sb, "false", 5);
+      return;
+    case MV_INT:
+      sb_add(sb, scratch, (size_t)snprintf(scratch, sizeof scratch, "%" PRId64, v.as.i));
+      return;
+    case MV_DOUBLE:
+      sb_add(sb, scratch, (size_t)moth_format_double(scratch, sizeof scratch, v.as.d));
+      return;
+    case MV_OBJ: break;
+  }
+
+  if (moth_is_string(v)) {
+    sb_add(sb, AS_STRING(v)->chars, AS_STRING(v)->len);
+    return;
+  }
+  if (IS_LIST(v)) {
+    /* A list that contains itself would recurse forever; Dart prints [...] */
+    if (depth >= MOTH_FORMAT_MAX_DEPTH) {
+      sb_add(sb, "[...]", 5);
+      return;
+    }
+    moth_list *l = AS_LIST(v);
+    sb_add(sb, "[", 1);
+    for (int i = 0; i < l->count; i++) {
+      if (i > 0) sb_add(sb, ", ", 2);
+      format_value(sb, l->items[i], depth + 1);
+    }
+    sb_add(sb, "]", 1);
+    return;
+  }
+  sb_add(sb, "Instance", 8);
+}
+
+moth_value moth_to_string(moth_vm *vm, moth_value v) {
+  if (moth_is_string(v)) return v; /* already a string */
+
+  strbuf sb = {NULL, 0, 0, false};
+  format_value(&sb, v, 0);
+  if (sb.failed) {
+    free(sb.data);
+    return moth_null();
+  }
+  moth_value out = moth_new_string(vm, sb.data ? sb.data : "", (int)sb.len);
+  free(sb.data);
+  return out;
 }
 
 /* ---- collector --------------------------------------------------------- */

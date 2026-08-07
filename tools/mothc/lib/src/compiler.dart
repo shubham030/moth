@@ -310,6 +310,24 @@ class Compiler {
       }
     }
 
+    if (fields.length > 255) {
+      throw CompileError(
+        'a class may have at most 255 fields',
+        decl.offset,
+      );
+    }
+    final seen = <String>{};
+    for (final member in decl.members) {
+      if (member is MethodDeclaration) {
+        if (!seen.add(member.name.lexeme)) {
+          throw CompileError(
+            "'${member.name.lexeme}' is declared twice in this class",
+            member.offset,
+          );
+        }
+      }
+    }
+
     classIndex[name] = classDeclarations.length;
     classDeclarations.add(decl);
     classFields.add(fields);
@@ -334,6 +352,17 @@ class Compiler {
         globalInits.add((slot, v.initializer!));
       }
     }
+  }
+
+  /// Parameter count of a class's constructor, excluding the receiver.
+  /// Null when the class declares none.
+  int? classCtorArity(int classIdx) {
+    for (final member in classDeclarations[classIdx].members) {
+      if (member is ConstructorDeclaration) {
+        return member.parameters.parameters.length;
+      }
+    }
+    return null;
   }
 
   /// Parameter count of a declared function, for call-site checking.

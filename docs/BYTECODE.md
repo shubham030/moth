@@ -130,6 +130,21 @@ the offending name, rather than trapping later at the call site. This makes
 A native receives `(argc, argv)` and returns a value. Natives must not
 re-enter the VM in M1a.
 
+## Trusting a blob
+
+The VM validates what it can at load time: magic and version, every table's
+bounds, `nlocals >= arity`, the entry and initializer indices, and — because
+the class table is read before the function table — a second pass checking
+that every method and constructor index is in range and has a receiver slot.
+At run time, operand reads are bounds-checked against the function's code and
+operand-driven pops are checked against stack depth.
+
+That is enough to reject the malformed blobs seen so far, but it is **not a
+verifier**. A blob is still trusted to keep the operand stack balanced across
+jumps. Before M4 accepts blobs over the network, this needs a real
+verification pass — abstract interpretation of stack depth along every path —
+or the push channel needs to be authenticated. Tracked on the roadmap.
+
 ## Not in M1a
 
 Heap objects, strings as values, closures, classes, GC, exceptions, `async`.
