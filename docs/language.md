@@ -33,8 +33,18 @@ int fib(int n) {
 int add(int a, int b) => a + b;
 ```
 
-**Operators** — `+ - * / ~/ %`, `== != < <= > >=`, `&& || !`, `++ --`, and
-compound assignment (`+=`, `~/=`, …). `&&` and `||` short-circuit.
+**Operators** — `+ - * / ~/ %`, `== != < <= > >=`, `&& || !`, `& | ^ << >> ~`,
+`++ --`, and compound assignment (`+=`, `~/=`, `|=`, `<<=`, …). `&&` and `||`
+short-circuit.
+
+Bitwise operators matter more here than in app code — register masks and
+combining sensor bytes are routine:
+
+```dart
+var reading = (highByte << 8) | lowByte;   // two I2C registers into one value
+if ((status & 0x08) != 0) { }              // test a status flag
+flags |= 0x10;                             // set a bit
+```
 
 Two Dart details moth reproduces exactly, because they trip people up:
 

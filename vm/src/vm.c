@@ -167,6 +167,35 @@ moth_status moth_run(moth_vm *vm) {
         break;
       }
 
+      case OP_BAND: case OP_BOR: case OP_BXOR: case OP_SHL: case OP_SHR: {
+        moth_value b = POP(), a = POP();
+        if (a.type != MV_INT || b.type != MV_INT) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "bitwise operators need whole numbers");
+        }
+        int64_t x = a.as.i, y = b.as.i;
+        switch (op) {
+          case OP_BAND: PUSH(moth_int(x & y)); break;
+          case OP_BOR: PUSH(moth_int(x | y)); break;
+          case OP_BXOR: PUSH(moth_int(x ^ y)); break;
+          case OP_SHL:
+            if (y < 0) return trap(vm, fr, MOTH_ERR_TYPE, "cannot shift by a negative amount");
+            /* C leaves shifts >= width undefined; Dart just runs off the end */
+            PUSH(moth_int(y >= 64 ? 0 : (int64_t)((uint64_t)x << y)));
+            break;
+          case OP_SHR:
+            if (y < 0) return trap(vm, fr, MOTH_ERR_TYPE, "cannot shift by a negative amount");
+            PUSH(moth_int(y >= 64 ? (x < 0 ? -1 : 0) : (x >> y)));
+            break;
+        }
+        break;
+      }
+      case OP_BNOT: {
+        moth_value a = POP();
+        if (a.type != MV_INT) return trap(vm, fr, MOTH_ERR_TYPE, "~ needs a whole number");
+        PUSH(moth_int(~a.as.i));
+        break;
+      }
+
       case OP_EQ: case OP_NE: {
         moth_value b = POP(), a = POP();
         bool eq;

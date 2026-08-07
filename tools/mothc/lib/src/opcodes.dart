@@ -18,6 +18,12 @@ class Op {
   static const idiv = 0x14;
   static const mod = 0x15;
   static const neg = 0x16;
+  static const band = 0x17;
+  static const bor = 0x18;
+  static const bxor = 0x19;
+  static const shl = 0x1A;
+  static const shr = 0x1B;
+  static const bnot = 0x1C;
 
   static const eq = 0x20;
   static const ne = 0x21;
