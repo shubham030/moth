@@ -381,6 +381,11 @@ class FunctionCompiler {
         '/=': Op.div,
         '~/=': Op.idiv,
         '%=': Op.mod,
+        '&=': Op.band,
+        '|=': Op.bor,
+        '^=': Op.bxor,
+        '<<=': Op.shl,
+        '>>=': Op.shr,
       }[op];
       if (arith == null) {
         throw CompileError("'$op' is not supported yet", expr.operator.offset);
@@ -423,6 +428,11 @@ class FunctionCompiler {
       '<=': Op.le,
       '>': Op.gt,
       '>=': Op.ge,
+      '&': Op.band,
+      '|': Op.bor,
+      '^': Op.bxor,
+      '<<': Op.shl,
+      '>>': Op.shr,
     };
     final code = table[op];
     if (code == null) {
@@ -442,6 +452,9 @@ class FunctionCompiler {
       case '!':
         _expression(expr.operand);
         _emit(Op.not);
+      case '~':
+        _expression(expr.operand);
+        _emit(Op.bnot);
       case '-':
         final operand = expr.operand;
         if (operand is IntegerLiteral) {

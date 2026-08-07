@@ -23,6 +23,12 @@ enum {
   OP_IDIV = 0x14,
   OP_MOD = 0x15,
   OP_NEG = 0x16,
+  OP_BAND = 0x17,
+  OP_BOR = 0x18,
+  OP_BXOR = 0x19,
+  OP_SHL = 0x1A,
+  OP_SHR = 0x1B,
+  OP_BNOT = 0x1C,
 
   OP_EQ = 0x20,
   OP_NE = 0x21,
