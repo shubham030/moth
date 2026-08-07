@@ -1,0 +1,13 @@
+name: mothc
+description: Compiles a Dart subset to moth bytecode for microcontrollers.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  analyzer: ^7.0.0
+
+dev_dependencies:
+  test: ^1.25.0

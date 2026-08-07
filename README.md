@@ -21,8 +21,45 @@ class _VolumeState extends State<VolumeScreen> {
 }
 ```
 
-> **Status: design phase.** No runnable code yet — the architecture is documented
-> and milestone 1 (VM bring-up) is next. See [ROADMAP](docs/ROADMAP.md).
+> **Status: early, but real.** Dart already runs on hardware — the VM executes
+> compiled Dart on an ESP32, driving GPIO. The widget layer above is next.
+> See [ROADMAP](docs/ROADMAP.md).
+
+## Learn one language, use it everywhere
+
+If you are learning Dart to build Flutter apps, moth means the microcontroller
+on your desk speaks the same language. No second syntax, no toolchain detour —
+the `for` loop you already know, on a chip that costs a few dollars.
+
+```dart
+void main() {
+  var led = 38;
+  pinOutput(led);
+
+  var on = false;
+  while (true) {
+    on = !on;
+    digitalWrite(led, on);
+    delay(500);
+  }
+}
+```
+
+```
+$ dart run tools/mothc/bin/mothc.dart examples/blink.dart
+wrote examples/blink.mothb (130 bytes)
+
+$ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
+[     0ms] pin 38 -> output
+[     0ms] pin 38 = HIGH
+[   500ms] pin 38 = low
+[  1000ms] pin 38 = HIGH
+[  1500ms] pin 38 = low
+```
+
+The same blob runs unchanged on the board. And because a program is 130 bytes
+of bytecode rather than a firmware image, updating it later means pushing those
+bytes — not reflashing.
 
 ## Why
 
@@ -73,6 +110,7 @@ scope for now.
 ## Docs
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — VM, bytecode, GC, bindings, widget layer
+- [BYTECODE.md](docs/BYTECODE.md) — instruction set and blob format
 - [BACKEND.md](docs/BACKEND.md) — the rendering-backend contract (nodes, layout, events)
 - [ROADMAP.md](docs/ROADMAP.md) — milestones and help-wanted
 - [DECISIONS.md](docs/DECISIONS.md) — why it's built this way (ADRs)
