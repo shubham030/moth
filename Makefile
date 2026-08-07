@@ -2,7 +2,7 @@
 MOTHC := dart run tools/mothc/bin/mothc.dart
 MOTHRUN := ./build/vm/mothrun
 
-.PHONY: help vm deps test blink sim docs docs-build render clean
+.PHONY: help vm deps test blink sim ui docs docs-build render clean
 
 help:
 	@echo "make vm        build the VM and the mothrun simulator"
