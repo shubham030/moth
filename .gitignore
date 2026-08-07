@@ -11,6 +11,8 @@ dependencies.lock
 
 # moth artifacts
 *.mothb
+!vm/esp/main/program.mothb  # embedded in the firmware image; checked in so
+                            # the ESP build works without the Dart toolchain
 
 # OS
 .DS_Store
