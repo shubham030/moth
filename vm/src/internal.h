@@ -31,6 +31,7 @@ enum {
   OP_SHL = 0x1A,
   OP_SHR = 0x1B,
   OP_BNOT = 0x1C,
+  OP_TO_STRING = 0x1D,
 
   OP_EQ = 0x20,
   OP_NE = 0x21,
@@ -59,6 +60,37 @@ typedef struct {
   const char *chars; /* into the blob; not NUL-terminated */
   uint16_t len;
 } moth_str;
+
+/* ---- heap objects ------------------------------------------------------ */
+
+typedef enum { OBJ_STRING } obj_type;
+
+struct moth_obj {
+  obj_type type;
+  bool marked;
+  struct moth_obj *next; /* every object, for the sweep walk */
+};
+
+typedef struct {
+  moth_obj obj;
+  uint32_t len;
+  /* Constant strings point straight into the blob and are not freed; only
+   * strings built at runtime own their bytes. */
+  bool owns_chars;
+  const char *chars;
+} moth_string;
+
+#define AS_STRING(v) ((moth_string *)(v).as.obj)
+#define IS_OBJ_TYPE(v, t) ((v).type == MV_OBJ && (v).as.obj->type == (t))
+
+/* object.c */
+moth_value moth_string_take(moth_vm *vm, char *chars, uint32_t len);
+moth_value moth_string_borrow(moth_vm *vm, const char *chars, uint32_t len);
+moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b);
+moth_value moth_to_string(moth_vm *vm, moth_value v);
+bool moth_string_equal(moth_value a, moth_value b);
+void moth_collect(moth_vm *vm);
+void moth_free_objects(moth_vm *vm);
 
 typedef struct {
   uint16_t name_const;
@@ -111,6 +143,12 @@ struct moth_vm {
   moth_value *sp;
   moth_frame frames[MOTH_FRAMES_MAX];
   int nframes;
+
+  /* heap */
+  moth_obj *objects;
+  size_t bytes_allocated;
+  size_t next_gc;
+  bool gc_enabled; /* off while the constant table is being built */
 
   char err[192];
 };

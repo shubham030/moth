@@ -111,7 +111,9 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
         if (!r.ok || r.p + slen > r.end) return fail(vm, MOTH_ERR_FORMAT, "truncated string const");
         vm->const_strs[i].chars = (const char *)r.p;
         vm->const_strs[i].len = slen;
-        vm->consts[i] = moth_null();
+        /* Borrows the blob's bytes — a constant string costs only a header. */
+        vm->consts[i] = moth_string_borrow(vm, (const char *)r.p, slen);
+        if (vm->consts[i].type != MV_OBJ) return fail(vm, MOTH_ERR_OOM, "out of memory");
         r.p += slen;
         break;
       }
@@ -189,17 +191,22 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
   vm->blob_len = len;
   vm->loaded = true;
   vm->err[0] = '\0';
+  vm->gc_enabled = true; /* the constant table is complete and rootable now */
   return MOTH_OK;
 }
 
 moth_vm *moth_new(void) {
   moth_vm *vm = calloc(1, sizeof *vm);
-  if (vm) vm->sp = vm->stack;
+  if (vm) {
+    vm->sp = vm->stack;
+    vm->next_gc = 32 * 1024;
+  }
   return vm;
 }
 
 void moth_free(moth_vm *vm) {
   if (!vm) return;
+  moth_free_objects(vm);
   for (int i = 0; i < vm->nregs; i++) free((char *)vm->regs[i].name);
   free(vm->regs);
   free(vm->consts);

@@ -83,10 +83,17 @@ static void advance_clock(int64_t ms) {
 /* ---- output ----------------------------------------------------------- */
 
 static void print_value(moth_value v) {
+  if (moth_is_string(v)) {
+    int len = 0;
+    const char *chars = moth_string_chars(v, &len);
+    fwrite(chars, 1, (size_t)len, stdout); /* not NUL-terminated */
+    return;
+  }
   switch (v.type) {
     case MV_NULL: printf("null"); break;
     case MV_BOOL: printf(v.as.b ? "true" : "false"); break;
     case MV_INT: printf("%" PRId64, v.as.i); break;
+    case MV_OBJ: printf("Instance"); break;
     case MV_DOUBLE: {
       char buf[32];
       snprintf(buf, sizeof buf, "%g", v.as.d);
@@ -97,8 +104,8 @@ static void print_value(moth_value v) {
   }
 }
 
-static moth_value n_print(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_print(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   print_value(argv[0]);
   putchar('\n');
   fflush(stdout);
@@ -107,8 +114,8 @@ static moth_value n_print(int argc, const moth_value *argv, void *user) {
 
 /* ---- timing ----------------------------------------------------------- */
 
-static moth_value n_delay(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_delay(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int64_t ms = want_int(argv[0], "delay()");
   if (ms < 0) die("delay() needs a non-negative number of milliseconds");
   if (g_sim.real_time) usleep((useconds_t)(ms * 1000));
@@ -116,8 +123,8 @@ static moth_value n_delay(int argc, const moth_value *argv, void *user) {
   return moth_null();
 }
 
-static moth_value n_delay_us(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_delay_us(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int64_t us = want_int(argv[0], "delayMicroseconds()");
   if (us < 0) die("delayMicroseconds() needs a non-negative number");
   if (g_sim.real_time) usleep((useconds_t)us);
@@ -125,12 +132,12 @@ static moth_value n_delay_us(int argc, const moth_value *argv, void *user) {
   return moth_null();
 }
 
-static moth_value n_millis(int c, const moth_value *v, void *u) {
-  (void)c; (void)v; (void)u;
+static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)v; (void)u;
   return moth_int(g_sim.clock_ms);
 }
-static moth_value n_micros(int c, const moth_value *v, void *u) {
-  (void)c; (void)v; (void)u;
+static moth_value n_micros(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)v; (void)u;
   return moth_int(g_sim.clock_ms * 1000);
 }
 
@@ -145,18 +152,18 @@ static moth_value pin_mode(const moth_value *argv, bool output, bool pullup) {
   return moth_null();
 }
 
-static moth_value n_pin_output(int c, const moth_value *v, void *u) {
-  (void)c; (void)u; return pin_mode(v, true, false);
+static moth_value n_pin_output(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)u; return pin_mode(v, true, false);
 }
-static moth_value n_pin_input(int c, const moth_value *v, void *u) {
-  (void)c; (void)u; return pin_mode(v, false, false);
+static moth_value n_pin_input(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)u; return pin_mode(v, false, false);
 }
-static moth_value n_pin_input_pullup(int c, const moth_value *v, void *u) {
-  (void)c; (void)u; return pin_mode(v, false, true);
+static moth_value n_pin_input_pullup(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)u; return pin_mode(v, false, true);
 }
 
-static moth_value n_digital_write(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_digital_write(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int pin = check_pin(argv[0]);
   if (argv[1].type != MV_BOOL) die("digitalWrite(pin, value) needs true or false");
   if (!g_sim.configured[pin] || !g_sim.is_output[pin]) {
@@ -167,22 +174,22 @@ static moth_value n_digital_write(int argc, const moth_value *argv, void *user) 
   return moth_null();
 }
 
-static moth_value n_digital_read(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_digital_read(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   return moth_bool(g_sim.level[check_pin(argv[0])]);
 }
 
 /* ---- analog I/O ------------------------------------------------------- */
 
-static moth_value n_analog_read(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_analog_read(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int pin = check_pin(argv[0]);
   trace("analogRead(%d) -> %d", pin, g_sim.analog_in[pin]);
   return moth_int(g_sim.analog_in[pin]);
 }
 
-static moth_value n_analog_write(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_analog_write(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int pin = check_pin(argv[0]);
   int64_t duty = want_int(argv[1], "analogWrite() duty");
   if (duty < 0 || duty > 255) die("analogWrite() duty must be 0..255");
@@ -190,29 +197,29 @@ static moth_value n_analog_write(int argc, const moth_value *argv, void *user) {
   return moth_null();
 }
 
-static moth_value n_tone(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_tone(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int pin = check_pin(argv[0]);
   trace("pin %d tone %" PRId64 " Hz", pin, want_int(argv[1], "tone() frequency"));
   return moth_null();
 }
 
-static moth_value n_no_tone(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_no_tone(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   trace("pin %d tone off", check_pin(argv[0]));
   return moth_null();
 }
 
 /* ---- random ----------------------------------------------------------- */
 
-static moth_value n_random_seed(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_random_seed(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   g_sim.rng = (uint64_t)want_int(argv[0], "randomSeed()") | 1;
   return moth_null();
 }
 
-static moth_value n_random(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_random(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int64_t max = want_int(argv[0], "random()");
   if (max <= 0) die("random(max) needs max > 0");
   /* xorshift64: deterministic across runs so golden tests stay stable */
@@ -231,16 +238,16 @@ static int i2c_slot(uint8_t addr) {
   return -1;
 }
 
-static moth_value n_i2c_begin(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_i2c_begin(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int sda = check_pin(argv[0]), scl = check_pin(argv[1]);
   g_sim.i2c_started = true;
   trace("i2c started on sda %d, scl %d", sda, scl);
   return moth_null();
 }
 
-static moth_value n_i2c_ping(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_i2c_ping(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
   int64_t addr = want_int(argv[0], "an I2C address");
   bool found = i2c_slot((uint8_t)addr) >= 0;
@@ -248,8 +255,8 @@ static moth_value n_i2c_ping(int argc, const moth_value *argv, void *user) {
   return moth_bool(found);
 }
 
-static moth_value n_i2c_write_reg(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_i2c_write_reg(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
   int64_t addr = want_int(argv[0], "an I2C address");
   int64_t reg = want_int(argv[1], "a register number");
@@ -261,8 +268,8 @@ static moth_value n_i2c_write_reg(int argc, const moth_value *argv, void *user) 
   return moth_bool(true);
 }
 
-static moth_value n_i2c_read_reg(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_i2c_read_reg(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
   int64_t addr = want_int(argv[0], "an I2C address");
   int64_t reg = want_int(argv[1], "a register number");
@@ -281,8 +288,8 @@ static int check_uart(moth_value v) {
   return (int)port;
 }
 
-static moth_value n_uart_begin(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_uart_begin(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int port = check_uart(argv[0]);
   int tx = check_pin(argv[1]), rx = check_pin(argv[2]);
   int64_t baud = want_int(argv[3], "a baud rate");
@@ -291,22 +298,22 @@ static moth_value n_uart_begin(int argc, const moth_value *argv, void *user) {
   return moth_null();
 }
 
-static moth_value n_uart_write(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_uart_write(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   int port = check_uart(argv[0]);
   if (!g_sim.uart_open[port]) die("call uartBegin() before writing to UART %d", port);
   trace("uart %d <- %" PRId64, port, want_int(argv[1], "a byte"));
   return moth_null();
 }
 
-static moth_value n_uart_available(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_uart_available(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   check_uart(argv[0]);
   return moth_int(0); /* nothing is wired to the simulator's UART */
 }
 
-static moth_value n_uart_read(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)user;
+static moth_value n_uart_read(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
   check_uart(argv[0]);
   return moth_int(-1);
 }

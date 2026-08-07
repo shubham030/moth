@@ -35,7 +35,9 @@ typedef enum {
   MOTH_ERR_BAD_OP,            /* unknown opcode / pc out of range */
 } moth_status;
 
-typedef enum { MV_NULL, MV_BOOL, MV_INT, MV_DOUBLE } moth_type;
+typedef enum { MV_NULL, MV_BOOL, MV_INT, MV_DOUBLE, MV_OBJ } moth_type;
+
+typedef struct moth_obj moth_obj;
 
 typedef struct {
   moth_type type;
@@ -43,6 +45,7 @@ typedef struct {
     bool b;
     int64_t i;
     double d;
+    moth_obj *obj;
   } as;
 } moth_value;
 
@@ -58,9 +61,21 @@ static inline double moth_as_double(moth_value v) {
 
 typedef struct moth_vm moth_vm;
 
+/* ---- strings ----------------------------------------------------------
+ * Heap-allocated and garbage collected. Chars are NOT NUL-terminated; use
+ * the length. A string's memory is only valid until the next allocation
+ * that triggers a collection, so copy it if you need to keep it. */
+bool moth_is_string(moth_value v);
+const char *moth_string_chars(moth_value v, int *len_out);
+
+/* Allocates a string the collector owns. Safe to call from a native. */
+moth_value moth_new_string(moth_vm *vm, const char *chars, int len);
+
 /* A native receives its arguments left-to-right. Returning moth_null() is
- * the convention for void. Natives must not re-enter the VM. */
-typedef moth_value (*moth_native_fn)(int argc, const moth_value *argv, void *user);
+ * the convention for void. Natives must not re-enter the VM, but may
+ * allocate through the vm handle. */
+typedef moth_value (*moth_native_fn)(moth_vm *vm, int argc, const moth_value *argv,
+                                     void *user);
 
 moth_vm *moth_new(void);
 void moth_free(moth_vm *vm);
