@@ -369,6 +369,7 @@ static void usage(void) {
           "  --stop-after MS    halt once the simulated clock reaches MS\n"
           "  --analog PIN=VAL   value analogRead(PIN) should return\n"
           "  --i2c-device ADDR  pretend a device answers at ADDR (e.g. 0x5a)\n"
+          "  --i2c-reg A:R=V    preload a device register (e.g. 0x48:0=25)\n"
           "  --seed N           seed the random() generator (default 1)\n");
 }
 
@@ -395,6 +396,19 @@ int main(int argc, char **argv) {
     } else if (strcmp(a, "--i2c-device") == 0 && i + 1 < argc) {
       if (g_sim.n_i2c_devices >= MAX_I2C_DEVICES) die("too many --i2c-device entries");
       g_sim.i2c_devices[g_sim.n_i2c_devices++] = (uint8_t)strtol(argv[++i], NULL, 0);
+    } else if (strcmp(a, "--i2c-reg") == 0 && i + 1 < argc) {
+      /* ADDR:REG=VAL — pretend a sensor already holds this register value */
+      int addr = 0, reg = 0, val = 0;
+      if (sscanf(argv[++i], "%i:%i=%i", &addr, &reg, &val) != 3) {
+        die("--i2c-reg wants ADDR:REG=VALUE, e.g. 0x48:0=25");
+      }
+      int slot = i2c_slot((uint8_t)addr);
+      if (slot < 0) {
+        if (g_sim.n_i2c_devices >= MAX_I2C_DEVICES) die("too many I2C devices");
+        slot = g_sim.n_i2c_devices++;
+        g_sim.i2c_devices[slot] = (uint8_t)addr;
+      }
+      g_sim.i2c_regs[slot][reg & 0xFF] = (uint8_t)val;
     } else if (a[0] == '-') { usage(); return 64; }
     else if (!path) path = a;
     else { usage(); return 64; }
