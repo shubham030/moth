@@ -63,6 +63,10 @@ bool mr_init(const mr_config *cfg) {
   node_defaults(s.nodes[1], MR_NODE_BOX);
   s.nodes[1].f[MR_PROP_WIDTH] = (float)cfg->width;
   s.nodes[1].f[MR_PROP_HEIGHT] = (float)cfg->height;
+  /* Also fill the computed frame, so the display size can be queried before
+   * the first commit has run layout. */
+  s.nodes[1].w = (float)cfg->width;
+  s.nodes[1].h = (float)cfg->height;
   s.framebuffer.assign((size_t)cfg->width * cfg->height, 0xFF000000);
   return true;
 }

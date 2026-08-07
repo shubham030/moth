@@ -101,4 +101,23 @@ const kNatives = <String, int>{
   'uartWrite': 2,
   'uartAvailable': 1,
   'uartRead': 1,
+
+  // Display — the moth_render backend contract (docs/BACKEND.md). Flat and
+  // numeric because it is the VM boundary; package:moth wraps it in classes.
+  'uiWidth': 0,
+  'uiHeight': 0,
+  'uiRoot': 0,
+  'uiCreate': 1, // kind: 0 box, 1 label, 2 image, 3 slider, 4 switch
+  'uiDestroy': 1,
+  'uiAttach': 3, // parent, child, index (-1 appends)
+  'uiDetach': 1,
+  'uiSetNum': 3, // node, prop, double
+  'uiSetInt': 3, // node, prop, int (colours, enums)
+  'uiSetText': 3, // node, prop, text
+  'uiAnimate': 6, // node, prop, from, to, ms, easing
+  'uiTick': 1,
+  'uiCommit': 0, // true when the frame actually repainted
+  'uiPoll': 0, // node * 8 + kind, or -1 when the queue is empty
+  'uiEventValue': 0,
+  'uiFrameOf': 2, // node, 0..3 -> x, y, w, h
 };

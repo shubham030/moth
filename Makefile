@@ -1,8 +1,8 @@
 # moth — common tasks. Run `make help` for the list.
 MOTHC := dart run tools/mothc/bin/mothc.dart
-MOTHRUN := ./vm/build/mothrun
+MOTHRUN := ./build/vm/mothrun
 
-.PHONY: help vm deps test blink sim docs docs-build render clean
+.PHONY: help vm deps test blink sim ui docs docs-build render clean
 
 help:
 	@echo "make vm        build the VM and the mothrun simulator"
@@ -10,11 +10,18 @@ help:
 	@echo "make blink     compile and run examples/blink.dart with no hardware"
 	@echo "make sim F=x   compile and run any .dart file in the simulator"
 	@echo "make docs      serve the documentation site (Docusaurus dev server)"
+	@echo "make ui F=x    compile a UI program and run it in a window"
 	@echo "make render    build moth_render and its SDL harness"
 	@echo "make clean     remove build outputs"
 
 vm:
-	cmake -B vm/build vm && cmake --build vm/build
+	cmake -B build . && cmake --build build
+
+# mothsim runs a program with a display window; mothrun has no display.
+# make ui F=examples/ui/counter.dart
+ui: vm
+	$(MOTHC) $(F)
+	./build/mothsim $(basename $(F)).mothb
 
 deps:
 	dart pub get --directory tools/mothc

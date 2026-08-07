@@ -43,15 +43,23 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
       boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
       ADR-009. Examples and docs get rewritten around it.
 
-## M2 — LVGL from Dart (imperative)
+## M2 — Dart drives the display (done)
 
-**Demo: buttons, sliders, and labels on the P4 touchscreen, driven from Dart, callbacks working.**
+**Demo: a tappable UI written in Dart, running on the ESP32-S3 panel.**
 
-- [ ] Native-call mechanism + YAML binding spec + shim generator
-- [ ] Bindings: obj create/delete, label, button, slider, image, style basics,
-      flex layout, event registration
-- [ ] Event queue: LVGL ISR/task → VM event loop
-- [ ] Desktop simulator (`moth simulate`, SDL backend)
+The two tracks finally meet: the VM calls the backend contract, so the same
+Dart program draws in a desktop window and on the board.
+
+- [x] `ui/` — the contract bound as `ui*` natives (create/attach/set/animate,
+      commit, poll)
+- [x] Event queue: renderer → queue → `uiPoll`, drained by the program's own
+      loop (polling until closures exist)
+- [x] `mothsim` — desktop host with a window, plus `--tap X,Y` so the click
+      path is testable without a mouse
+- [x] `ui/esp-s3` — the same VM, renderer and bindings on the CO5300 panel
+      with CST9217 touch
+- [ ] Callbacks instead of polling — needs closures
+- [ ] ESP32-P4 host (blocked on the carplay board being free)
 
 ## M3 — Widgets and setState
 
