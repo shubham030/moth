@@ -1,7 +1,7 @@
 ---
-permalink: /language/
 title: Language
-nav_order: 3
+sidebar_position: 2
+slug: /language
 ---
 
 # The language

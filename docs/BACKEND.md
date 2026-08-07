@@ -1,7 +1,7 @@
 ---
 title: Backend contract
-nav_order: 12
-permalink: /backend/
+sidebar_position: 11
+slug: /backend
 ---
 
 # The backend contract

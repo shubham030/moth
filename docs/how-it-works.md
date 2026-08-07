@@ -1,7 +1,7 @@
 ---
-permalink: /how-it-works/
 title: How it works
-nav_order: 7
+sidebar_position: 6
+slug: /how-it-works
 ---
 
 # How it works
@@ -43,7 +43,7 @@ program needs, and the bytecode for each function. Blink is 130 bytes.
 Because a program is *data*, not a firmware image, updating it later means
 sending a few hundred bytes rather than reflashing — that is what makes the
 planned WiFi hot-push practical. The full format is in
-[BYTECODE]({{ site.baseurl }}/bytecode/).
+[BYTECODE](/docs/bytecode).
 
 ## 3. The VM (`vm/`)
 
@@ -80,10 +80,10 @@ your laptop, then run the identical bytes on hardware.
 
 moth's longer goal is Flutter's programming model — widgets and `setState` —
 on these chips. That work is a separate track: a
-[backend contract]({{ site.baseurl }}/backend/) that a renderer implements, with
+[backend contract](/docs/backend) that a renderer implements, with
 a working scene graph, flex layout and software rasterizer already running on
 desktop and on two ESP32 boards.
 
 The two halves have not met yet. Connecting them — Dart code driving pixels —
 is the milestone that makes moth what it is meant to be. See the
-[roadmap]({{ site.baseurl }}/roadmap/).
+[roadmap](/docs/roadmap).

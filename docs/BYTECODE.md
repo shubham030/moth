@@ -1,7 +1,7 @@
 ---
 title: Bytecode format
-nav_order: 11
-permalink: /bytecode/
+sidebar_position: 10
+slug: /bytecode
 ---
 
 # moth bytecode

@@ -1,0 +1,308 @@
+/* moth — a night palette with a lamp-amber accent. */
+
+:root {
+  --ifm-color-primary: #8a5a00;
+  --ifm-color-primary-dark: #7c5100;
+  --ifm-color-primary-darker: #754c00;
+  --ifm-color-primary-darkest: #603f00;
+  --ifm-color-primary-light: #98630a;
+  --ifm-color-primary-lighter: #a06914;
+  --ifm-color-primary-lightest: #b87a1e;
+
+  --ifm-font-family-base: system-ui, -apple-system, 'Segoe UI', Inter, Roboto,
+    'Helvetica Neue', sans-serif;
+  --ifm-font-family-monospace: ui-monospace, 'SF Mono', 'JetBrains Mono',
+    'Fira Code', Menlo, monospace;
+
+  --ifm-heading-font-weight: 650;
+  --ifm-code-font-size: 90%;
+  --ifm-navbar-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+
+  --moth-accent: #b87a1e;
+  --moth-violet: #7c4dcc;
+  --moth-surface: #ffffff;
+  --moth-border: rgba(0, 0, 0, 0.1);
+  --moth-muted: #5a6070;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #e0af68;
+  --ifm-color-primary-dark: #d9a04d;
+  --ifm-color-primary-darker: #d59840;
+  --ifm-color-primary-darkest: #b87d2b;
+  --ifm-color-primary-light: #e7be83;
+  --ifm-color-primary-lighter: #ebc690;
+  --ifm-color-primary-lightest: #f3dcb6;
+
+  --ifm-background-color: #16161e;
+  --ifm-background-surface-color: #1a1b26;
+  --ifm-navbar-background-color: rgba(22, 22, 30, 0.85);
+  --ifm-footer-background-color: #13131a;
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.08);
+
+  --moth-accent: #e0af68;
+  --moth-violet: #bb9af7;
+  --moth-surface: #1a1b26;
+  --moth-border: rgba(255, 255, 255, 0.09);
+  --moth-muted: #9aa2b8;
+}
+
+.navbar {
+  backdrop-filter: saturate(160%) blur(8px);
+  border-bottom: 1px solid var(--moth-border);
+}
+
+.navbar__title {
+  font-weight: 680;
+  letter-spacing: -0.01em;
+}
+
+/* Docs typography: slightly wider measure, calmer headings. */
+.markdown h1 {
+  letter-spacing: -0.02em;
+}
+.markdown h2 {
+  margin-top: 2.4rem;
+  letter-spacing: -0.012em;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--moth-border);
+}
+.markdown table {
+  display: table;
+  width: 100%;
+  font-size: 0.94rem;
+}
+.markdown table th {
+  font-weight: 620;
+}
+.markdown blockquote {
+  border-left: 3px solid var(--moth-accent);
+  background: color-mix(in srgb, var(--moth-accent) 8%, transparent);
+  border-radius: 0 6px 6px 0;
+}
+
+/* ---- landing page ----------------------------------------------------- */
+
+.heroBanner {
+  position: relative;
+  overflow: hidden;
+  padding: 5rem 0 4rem;
+  text-align: center;
+}
+
+/* the lamp the moth is drawn to */
+.heroBanner::before {
+  content: '';
+  position: absolute;
+  top: -280px;
+  left: 50%;
+  width: 900px;
+  height: 620px;
+  transform: translateX(-50%);
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--moth-accent) 22%, transparent) 0%,
+    transparent 68%
+  );
+  pointer-events: none;
+  z-index: 0;
+}
+
+.heroInner {
+  position: relative;
+  z-index: 1;
+}
+
+.heroLogo {
+  width: 84px;
+  height: 84px;
+  margin-bottom: 1.1rem;
+  filter: drop-shadow(0 6px 20px color-mix(in srgb, var(--moth-accent) 35%, transparent));
+}
+
+.heroTitle {
+  font-size: clamp(2.4rem, 6vw, 3.6rem);
+  line-height: 1.06;
+  letter-spacing: -0.035em;
+  margin-bottom: 0.9rem;
+}
+
+.heroAccent {
+  background: linear-gradient(100deg, var(--moth-accent), var(--moth-violet));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.heroSubtitle {
+  font-size: clamp(1.02rem, 2.2vw, 1.22rem);
+  color: var(--moth-muted);
+  max-width: 40rem;
+  margin: 0 auto 1.9rem;
+  line-height: 1.6;
+}
+
+.heroButtons {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.heroNote {
+  margin-top: 1.6rem;
+  font-size: 0.86rem;
+  color: var(--moth-muted);
+}
+
+/* code + terminal pair */
+.showcase {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.2rem;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 1rem;
+  text-align: left;
+}
+
+@media (max-width: 900px) {
+  .showcase {
+    grid-template-columns: 1fr;
+  }
+}
+
+.pane {
+  border: 1px solid var(--moth-border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--moth-surface);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.14);
+}
+
+.paneHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.85rem;
+  border-bottom: 1px solid var(--moth-border);
+  font-size: 0.78rem;
+  color: var(--moth-muted);
+  font-family: var(--ifm-font-family-monospace);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.pane pre {
+  margin: 0;
+  border-radius: 0;
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.section {
+  padding: 4rem 0;
+}
+
+.sectionAlt {
+  background: color-mix(in srgb, var(--moth-accent) 4%, transparent);
+  border-top: 1px solid var(--moth-border);
+  border-bottom: 1px solid var(--moth-border);
+}
+
+.sectionTitle {
+  text-align: center;
+  font-size: clamp(1.6rem, 3.4vw, 2.1rem);
+  letter-spacing: -0.02em;
+  margin-bottom: 0.6rem;
+}
+
+.sectionLede {
+  text-align: center;
+  color: var(--moth-muted);
+  max-width: 44rem;
+  margin: 0 auto 2.6rem;
+  line-height: 1.65;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1.1rem;
+}
+
+.card {
+  border: 1px solid var(--moth-border);
+  border-radius: 12px;
+  padding: 1.4rem;
+  background: var(--moth-surface);
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+
+.card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--moth-accent) 45%, transparent);
+}
+
+.cardIcon {
+  font-size: 1.5rem;
+  line-height: 1;
+  margin-bottom: 0.7rem;
+}
+
+.card h3 {
+  font-size: 1.06rem;
+  margin-bottom: 0.45rem;
+}
+
+.card p {
+  color: var(--moth-muted);
+  font-size: 0.93rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.statusGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.1rem;
+  max-width: 860px;
+  margin: 0 auto;
+}
+
+.statusCol h3 {
+  font-size: 1rem;
+  margin-bottom: 0.7rem;
+}
+
+.statusList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 0.93rem;
+  line-height: 1.85;
+  color: var(--moth-muted);
+}
+
+.tick::before {
+  content: '✓';
+  color: #6a9a3a;
+  font-weight: 700;
+  margin-right: 0.55rem;
+}
+
+[data-theme='dark'] .tick::before {
+  color: #9ece6a;
+}
+
+.pending::before {
+  content: '○';
+  margin-right: 0.55rem;
+  opacity: 0.75;
+}
