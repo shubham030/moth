@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define MAX_PINS 64
@@ -113,12 +114,25 @@ static moth_value n_delay_us(moth_vm *vm, int argc, const moth_value *argv, void
   return moth_null();
 }
 
+/* Under --real-time the clock is the wall clock, so timing a program (a
+ * benchmark, say) measures something. Otherwise it is the virtual clock,
+ * which only advances on delay() and keeps traces deterministic. */
+static int64_t real_micros(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+
+static int64_t g_start_us;
+
 static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
   (void)vm; (void)c; (void)v; (void)u;
+  if (g_sim.real_time) return moth_int((real_micros() - g_start_us) / 1000);
   return moth_int(g_sim.clock_ms);
 }
 static moth_value n_micros(moth_vm *vm, int c, const moth_value *v, void *u) {
   (void)vm; (void)c; (void)v; (void)u;
+  if (g_sim.real_time) return moth_int(real_micros() - g_start_us);
   return moth_int(g_sim.clock_ms * 1000);
 }
 
@@ -408,6 +422,7 @@ int main(int argc, char **argv) {
   }
   fclose(f);
 
+  g_start_us = real_micros();
   moth_vm *vm = moth_new();
   register_all(vm);
 

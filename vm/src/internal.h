@@ -212,6 +212,11 @@ struct moth_vm {
 
   /* heap */
   moth_obj *objects;
+  /* Marking uses an explicit worklist rather than recursion: one C frame per
+   * nesting level would overflow a few-KB FreeRTOS task stack. */
+  moth_obj **gray;
+  int gray_count, gray_cap;
+  bool gray_overflow;
   size_t bytes_allocated;
   size_t next_gc;
   bool gc_enabled; /* off while the constant table is being built */
