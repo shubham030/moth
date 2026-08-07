@@ -41,6 +41,8 @@ enum {
   OP_GET_PROP = 0x58,     /* u16 name const: instance field, or .length */
   OP_SET_PROP = 0x59,     /* u16 name const */
   OP_INVOKE = 0x5A,       /* u16 name const, u8 argc */
+  OP_CLOSURE = 0x5B,      /* u16 func index, u8 captures_this */
+  OP_CALL_VALUE = 0x5C,   /* u8 argc: callee is beneath the arguments */
 
   OP_EQ = 0x20,
   OP_NE = 0x21,
@@ -72,7 +74,7 @@ typedef struct {
 
 /* ---- heap objects ------------------------------------------------------ */
 
-typedef enum { OBJ_STRING, OBJ_LIST, OBJ_INSTANCE } obj_type;
+typedef enum { OBJ_STRING, OBJ_LIST, OBJ_INSTANCE, OBJ_CLOSURE } obj_type;
 
 struct moth_obj {
   obj_type type;
@@ -102,12 +104,23 @@ typedef struct {
   moth_value *fields; /* exactly the class's field count */
 } moth_instance;
 
+/* A closure is a function plus the receiver it was created with. moth does
+ * not capture locals yet (the compiler rejects that), so there is no upvalue
+ * array — `this` is the only thing a closure can close over. */
+typedef struct {
+  moth_obj obj;
+  uint16_t func_index;
+  moth_value receiver; /* null for a closure made outside a method */
+} moth_closure;
+
 #define AS_STRING(v) ((moth_string *)(v).as.obj)
 #define AS_LIST(v) ((moth_list *)(v).as.obj)
 #define AS_INSTANCE(v) ((moth_instance *)(v).as.obj)
+#define AS_CLOSURE(v) ((moth_closure *)(v).as.obj)
 #define IS_OBJ_TYPE(v, t) ((v).type == MV_OBJ && (v).as.obj->type == (t))
 #define IS_LIST(v) IS_OBJ_TYPE(v, OBJ_LIST)
 #define IS_INSTANCE(v) IS_OBJ_TYPE(v, OBJ_INSTANCE)
+#define IS_CLOSURE(v) IS_OBJ_TYPE(v, OBJ_CLOSURE)
 
 /* object.c */
 moth_value moth_string_take(moth_vm *vm, char *chars, uint32_t len);
@@ -116,6 +129,7 @@ moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b);
 moth_value moth_list_new(moth_vm *vm);
 bool moth_list_push(moth_vm *vm, moth_value list, moth_value item);
 moth_value moth_instance_new(moth_vm *vm, uint16_t class_index, uint8_t nfields);
+moth_value moth_closure_new(moth_vm *vm, uint16_t func_index, moth_value receiver);
 bool moth_string_equal(moth_value a, moth_value b);
 int moth_format_double(char *buf, size_t n, double d);
 void moth_collect(moth_vm *vm);

@@ -54,6 +54,8 @@ class Op {
   static const getProp = 0x58;
   static const setProp = 0x59;
   static const invoke = 0x5A;
+  static const closure = 0x5B;
+  static const callValue = 0x5C;
 }
 
 /// Host functions a program may call, with their argument counts. The VM
