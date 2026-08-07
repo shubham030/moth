@@ -1,3 +1,9 @@
+---
+title: Decisions (ADRs)
+nav_order: 13
+permalink: /decisions/
+---
+
 # Decision records
 
 Short ADRs. Each records a decision that shaped the architecture, so future

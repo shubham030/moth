@@ -1,3 +1,9 @@
+---
+title: Bytecode format
+nav_order: 11
+permalink: /bytecode/
+---
+
 # moth bytecode
 
 The compiler (`tools/mothc`, Dart) emits a `.mothb` blob; the VM (`vm/`, C)

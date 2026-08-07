@@ -1,3 +1,9 @@
+---
+title: Backend contract
+nav_order: 12
+permalink: /backend/
+---
+
 # The backend contract
 
 A **backend** turns moth's semantic node tree into pixels and input events.

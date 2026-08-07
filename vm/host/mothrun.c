@@ -1,8 +1,8 @@
 /* mothrun — runs a .mothb on the desktop with simulated peripherals.
  *
- * Pin writes and delays are printed as a trace against a virtual clock, so a
- * blink program is visible (and testable) with no hardware and no waiting.
- * --real-time actually sleeps instead.
+ * Pin writes, I2C and UART traffic, and delays are printed as a trace against
+ * a virtual clock, so a program is visible (and testable) with no hardware
+ * and no waiting. --real-time actually sleeps instead.
  */
 #include "moth_vm.h"
 
@@ -15,15 +15,28 @@
 #include <unistd.h>
 
 #define MAX_PINS 64
+#define MAX_I2C_DEVICES 16
+#define UART_PORTS 3
 
 typedef struct {
   int64_t clock_ms;
   int64_t stop_after_ms; /* <0 = run forever */
   bool real_time;
   bool trace;
+
   bool level[MAX_PINS];
   bool is_output[MAX_PINS];
   bool configured[MAX_PINS];
+  int analog_in[MAX_PINS];
+
+  uint8_t i2c_devices[MAX_I2C_DEVICES];
+  int n_i2c_devices;
+  bool i2c_started;
+  uint8_t i2c_regs[MAX_I2C_DEVICES][256];
+
+  bool uart_open[UART_PORTS];
+
+  uint64_t rng; /* deterministic by default so tests are stable */
 } sim;
 
 static sim g_sim;
@@ -38,13 +51,36 @@ static void trace(const char *fmt, ...) {
   putchar('\n');
 }
 
-static bool check_pin(int64_t pin) {
-  if (pin < 0 || pin >= MAX_PINS) {
-    fprintf(stderr, "moth: pin %" PRId64 " is out of range (0..%d)\n", pin, MAX_PINS - 1);
-    exit(1);
-  }
-  return true;
+static void die(const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  fprintf(stderr, "moth: ");
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  va_end(ap);
+  exit(1);
 }
+
+static int64_t want_int(moth_value v, const char *what) {
+  if (v.type != MV_INT) die("%s must be a whole number", what);
+  return v.as.i;
+}
+
+static int check_pin(moth_value v) {
+  int64_t pin = want_int(v, "a pin number");
+  if (pin < 0 || pin >= MAX_PINS) die("pin %" PRId64 " is out of range (0..%d)", pin, MAX_PINS - 1);
+  return (int)pin;
+}
+
+static void advance_clock(int64_t ms) {
+  g_sim.clock_ms += ms;
+  if (g_sim.stop_after_ms >= 0 && g_sim.clock_ms >= g_sim.stop_after_ms) {
+    printf("-- stopped after %" PRId64 "ms (simulated) --\n", g_sim.clock_ms);
+    exit(0);
+  }
+}
+
+/* ---- output ----------------------------------------------------------- */
 
 static void print_value(moth_value v) {
   switch (v.type) {
@@ -69,39 +105,43 @@ static moth_value n_print(int argc, const moth_value *argv, void *user) {
   return moth_null();
 }
 
+/* ---- timing ----------------------------------------------------------- */
+
 static moth_value n_delay(int argc, const moth_value *argv, void *user) {
   (void)argc; (void)user;
-  if (argv[0].type != MV_INT || argv[0].as.i < 0) {
-    fprintf(stderr, "moth: delay() needs a non-negative whole number of milliseconds\n");
-    exit(1);
-  }
-  int64_t ms = argv[0].as.i;
+  int64_t ms = want_int(argv[0], "delay()");
+  if (ms < 0) die("delay() needs a non-negative number of milliseconds");
   if (g_sim.real_time) usleep((useconds_t)(ms * 1000));
-  g_sim.clock_ms += ms;
-  if (g_sim.stop_after_ms >= 0 && g_sim.clock_ms >= g_sim.stop_after_ms) {
-    printf("-- stopped after %" PRId64 "ms (simulated) --\n", g_sim.clock_ms);
-    exit(0);
-  }
+  advance_clock(ms);
   return moth_null();
 }
 
-static moth_value n_millis(int argc, const moth_value *argv, void *user) {
-  (void)argc; (void)argv; (void)user;
-  return moth_int(g_sim.clock_ms);
+static moth_value n_delay_us(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int64_t us = want_int(argv[0], "delayMicroseconds()");
+  if (us < 0) die("delayMicroseconds() needs a non-negative number");
+  if (g_sim.real_time) usleep((useconds_t)us);
+  advance_clock(us / 1000);
+  return moth_null();
 }
 
+static moth_value n_millis(int c, const moth_value *v, void *u) {
+  (void)c; (void)v; (void)u;
+  return moth_int(g_sim.clock_ms);
+}
+static moth_value n_micros(int c, const moth_value *v, void *u) {
+  (void)c; (void)v; (void)u;
+  return moth_int(g_sim.clock_ms * 1000);
+}
+
+/* ---- digital I/O ------------------------------------------------------ */
+
 static moth_value pin_mode(const moth_value *argv, bool output, bool pullup) {
-  int64_t pin = argv[0].as.i;
-  if (argv[0].type != MV_INT) {
-    fprintf(stderr, "moth: pin number must be a whole number\n");
-    exit(1);
-  }
-  check_pin(pin);
+  int pin = check_pin(argv[0]);
   g_sim.is_output[pin] = output;
   g_sim.configured[pin] = true;
   g_sim.level[pin] = pullup; /* floating inputs read low, pulled-up read high */
-  trace("pin %" PRId64 " -> %s", pin,
-        output ? "output" : (pullup ? "input (pull-up)" : "input"));
+  trace("pin %d -> %s", pin, output ? "output" : (pullup ? "input (pull-up)" : "input"));
   return moth_null();
 }
 
@@ -117,33 +157,161 @@ static moth_value n_pin_input_pullup(int c, const moth_value *v, void *u) {
 
 static moth_value n_digital_write(int argc, const moth_value *argv, void *user) {
   (void)argc; (void)user;
-  if (argv[0].type != MV_INT || argv[1].type != MV_BOOL) {
-    fprintf(stderr, "moth: digitalWrite(pin, value) needs a pin number and true/false\n");
-    exit(1);
-  }
-  int64_t pin = argv[0].as.i;
-  check_pin(pin);
+  int pin = check_pin(argv[0]);
+  if (argv[1].type != MV_BOOL) die("digitalWrite(pin, value) needs true or false");
   if (!g_sim.configured[pin] || !g_sim.is_output[pin]) {
-    fprintf(stderr,
-            "moth: pin %" PRId64 " was written before pinOutput(%" PRId64 ") — "
-            "configure it first\n", pin, pin);
-    exit(1);
+    die("pin %d was written before pinOutput(%d) — configure it first", pin, pin);
   }
   g_sim.level[pin] = argv[1].as.b;
-  trace("pin %" PRId64 " = %s", pin, argv[1].as.b ? "HIGH" : "low");
+  trace("pin %d = %s", pin, argv[1].as.b ? "HIGH" : "low");
   return moth_null();
 }
 
 static moth_value n_digital_read(int argc, const moth_value *argv, void *user) {
   (void)argc; (void)user;
-  if (argv[0].type != MV_INT) {
-    fprintf(stderr, "moth: digitalRead(pin) needs a pin number\n");
-    exit(1);
-  }
-  int64_t pin = argv[0].as.i;
-  check_pin(pin);
-  return moth_bool(g_sim.level[pin]);
+  return moth_bool(g_sim.level[check_pin(argv[0])]);
 }
+
+/* ---- analog I/O ------------------------------------------------------- */
+
+static moth_value n_analog_read(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int pin = check_pin(argv[0]);
+  trace("analogRead(%d) -> %d", pin, g_sim.analog_in[pin]);
+  return moth_int(g_sim.analog_in[pin]);
+}
+
+static moth_value n_analog_write(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int pin = check_pin(argv[0]);
+  int64_t duty = want_int(argv[1], "analogWrite() duty");
+  if (duty < 0 || duty > 255) die("analogWrite() duty must be 0..255");
+  trace("pin %d PWM duty %" PRId64 "/255", pin, duty);
+  return moth_null();
+}
+
+static moth_value n_tone(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int pin = check_pin(argv[0]);
+  trace("pin %d tone %" PRId64 " Hz", pin, want_int(argv[1], "tone() frequency"));
+  return moth_null();
+}
+
+static moth_value n_no_tone(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  trace("pin %d tone off", check_pin(argv[0]));
+  return moth_null();
+}
+
+/* ---- random ----------------------------------------------------------- */
+
+static moth_value n_random_seed(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  g_sim.rng = (uint64_t)want_int(argv[0], "randomSeed()") | 1;
+  return moth_null();
+}
+
+static moth_value n_random(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int64_t max = want_int(argv[0], "random()");
+  if (max <= 0) die("random(max) needs max > 0");
+  /* xorshift64: deterministic across runs so golden tests stay stable */
+  uint64_t x = g_sim.rng;
+  x ^= x << 13; x ^= x >> 7; x ^= x << 17;
+  g_sim.rng = x;
+  return moth_int((int64_t)(x % (uint64_t)max));
+}
+
+/* ---- I2C -------------------------------------------------------------- */
+
+static int i2c_slot(uint8_t addr) {
+  for (int i = 0; i < g_sim.n_i2c_devices; i++) {
+    if (g_sim.i2c_devices[i] == addr) return i;
+  }
+  return -1;
+}
+
+static moth_value n_i2c_begin(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int sda = check_pin(argv[0]), scl = check_pin(argv[1]);
+  g_sim.i2c_started = true;
+  trace("i2c started on sda %d, scl %d", sda, scl);
+  return moth_null();
+}
+
+static moth_value n_i2c_ping(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
+  int64_t addr = want_int(argv[0], "an I2C address");
+  bool found = i2c_slot((uint8_t)addr) >= 0;
+  if (found) trace("i2c device found at 0x%02" PRIx64, addr);
+  return moth_bool(found);
+}
+
+static moth_value n_i2c_write_reg(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
+  int64_t addr = want_int(argv[0], "an I2C address");
+  int64_t reg = want_int(argv[1], "a register number");
+  int64_t val = want_int(argv[2], "a register value");
+  int slot = i2c_slot((uint8_t)addr);
+  if (slot < 0) return moth_bool(false);
+  g_sim.i2c_regs[slot][reg & 0xFF] = (uint8_t)val;
+  trace("i2c 0x%02" PRIx64 " reg 0x%02" PRIx64 " <- %" PRId64, addr, reg, val);
+  return moth_bool(true);
+}
+
+static moth_value n_i2c_read_reg(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
+  int64_t addr = want_int(argv[0], "an I2C address");
+  int64_t reg = want_int(argv[1], "a register number");
+  int slot = i2c_slot((uint8_t)addr);
+  if (slot < 0) return moth_int(-1); /* -1 means "no answer" */
+  int v = g_sim.i2c_regs[slot][reg & 0xFF];
+  trace("i2c 0x%02" PRIx64 " reg 0x%02" PRIx64 " -> %d", addr, reg, v);
+  return moth_int(v);
+}
+
+/* ---- UART ------------------------------------------------------------- */
+
+static int check_uart(moth_value v) {
+  int64_t port = want_int(v, "a UART port");
+  if (port < 0 || port >= UART_PORTS) die("UART port must be 0..%d", UART_PORTS - 1);
+  return (int)port;
+}
+
+static moth_value n_uart_begin(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int port = check_uart(argv[0]);
+  int tx = check_pin(argv[1]), rx = check_pin(argv[2]);
+  int64_t baud = want_int(argv[3], "a baud rate");
+  g_sim.uart_open[port] = true;
+  trace("uart %d open: tx %d, rx %d, %" PRId64 " baud", port, tx, rx, baud);
+  return moth_null();
+}
+
+static moth_value n_uart_write(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  int port = check_uart(argv[0]);
+  if (!g_sim.uart_open[port]) die("call uartBegin() before writing to UART %d", port);
+  trace("uart %d <- %" PRId64, port, want_int(argv[1], "a byte"));
+  return moth_null();
+}
+
+static moth_value n_uart_available(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  check_uart(argv[0]);
+  return moth_int(0); /* nothing is wired to the simulator's UART */
+}
+
+static moth_value n_uart_read(int argc, const moth_value *argv, void *user) {
+  (void)argc; (void)user;
+  check_uart(argv[0]);
+  return moth_int(-1);
+}
+
+/* ---- driver ----------------------------------------------------------- */
 
 static const char *status_text(moth_status st) {
   switch (st) {
@@ -159,26 +327,69 @@ static const char *status_text(moth_status st) {
   return "error";
 }
 
+static void register_all(moth_vm *vm) {
+  moth_register(vm, "print", n_print, NULL);
+  moth_register(vm, "delay", n_delay, NULL);
+  moth_register(vm, "delayMicroseconds", n_delay_us, NULL);
+  moth_register(vm, "millis", n_millis, NULL);
+  moth_register(vm, "micros", n_micros, NULL);
+  moth_register(vm, "pinOutput", n_pin_output, NULL);
+  moth_register(vm, "pinInput", n_pin_input, NULL);
+  moth_register(vm, "pinInputPullup", n_pin_input_pullup, NULL);
+  moth_register(vm, "digitalWrite", n_digital_write, NULL);
+  moth_register(vm, "digitalRead", n_digital_read, NULL);
+  moth_register(vm, "analogRead", n_analog_read, NULL);
+  moth_register(vm, "analogWrite", n_analog_write, NULL);
+  moth_register(vm, "tone", n_tone, NULL);
+  moth_register(vm, "noTone", n_no_tone, NULL);
+  moth_register(vm, "randomSeed", n_random_seed, NULL);
+  moth_register(vm, "random", n_random, NULL);
+  moth_register(vm, "i2cBegin", n_i2c_begin, NULL);
+  moth_register(vm, "i2cPing", n_i2c_ping, NULL);
+  moth_register(vm, "i2cWriteReg", n_i2c_write_reg, NULL);
+  moth_register(vm, "i2cReadReg", n_i2c_read_reg, NULL);
+  moth_register(vm, "uartBegin", n_uart_begin, NULL);
+  moth_register(vm, "uartWrite", n_uart_write, NULL);
+  moth_register(vm, "uartAvailable", n_uart_available, NULL);
+  moth_register(vm, "uartRead", n_uart_read, NULL);
+}
+
 static void usage(void) {
   fprintf(stderr,
-          "usage: mothrun <program.mothb> [--real-time] [--quiet] [--stop-after MS]\n"
-          "  --real-time     actually sleep on delay() instead of simulating\n"
-          "  --quiet         suppress the pin/timing trace\n"
-          "  --stop-after N  halt once the simulated clock reaches N ms\n");
+          "usage: mothrun <program.mothb> [options]\n"
+          "  --real-time        actually sleep on delay() instead of simulating\n"
+          "  --quiet            suppress the pin/bus trace\n"
+          "  --stop-after MS    halt once the simulated clock reaches MS\n"
+          "  --analog PIN=VAL   value analogRead(PIN) should return\n"
+          "  --i2c-device ADDR  pretend a device answers at ADDR (e.g. 0x5a)\n"
+          "  --seed N           seed the random() generator (default 1)\n");
 }
 
 int main(int argc, char **argv) {
   const char *path = NULL;
   g_sim.stop_after_ms = -1;
   g_sim.trace = true;
+  g_sim.rng = 1;
 
   for (int i = 1; i < argc; i++) {
-    if (strcmp(argv[i], "--real-time") == 0) g_sim.real_time = true;
-    else if (strcmp(argv[i], "--quiet") == 0) g_sim.trace = false;
-    else if (strcmp(argv[i], "--stop-after") == 0 && i + 1 < argc)
+    const char *a = argv[i];
+    if (strcmp(a, "--real-time") == 0) g_sim.real_time = true;
+    else if (strcmp(a, "--quiet") == 0) g_sim.trace = false;
+    else if (strcmp(a, "--stop-after") == 0 && i + 1 < argc)
       g_sim.stop_after_ms = strtoll(argv[++i], NULL, 10);
-    else if (argv[i][0] == '-') { usage(); return 64; }
-    else if (!path) path = argv[i];
+    else if (strcmp(a, "--seed") == 0 && i + 1 < argc)
+      g_sim.rng = (uint64_t)strtoll(argv[++i], NULL, 10) | 1;
+    else if (strcmp(a, "--analog") == 0 && i + 1 < argc) {
+      int pin, val;
+      if (sscanf(argv[++i], "%d=%d", &pin, &val) != 2 || pin < 0 || pin >= MAX_PINS) {
+        die("--analog wants PIN=VALUE");
+      }
+      g_sim.analog_in[pin] = val;
+    } else if (strcmp(a, "--i2c-device") == 0 && i + 1 < argc) {
+      if (g_sim.n_i2c_devices >= MAX_I2C_DEVICES) die("too many --i2c-device entries");
+      g_sim.i2c_devices[g_sim.n_i2c_devices++] = (uint8_t)strtol(argv[++i], NULL, 0);
+    } else if (a[0] == '-') { usage(); return 64; }
+    else if (!path) path = a;
     else { usage(); return 64; }
   }
   if (!path) { usage(); return 64; }
@@ -196,14 +407,7 @@ int main(int argc, char **argv) {
   fclose(f);
 
   moth_vm *vm = moth_new();
-  moth_register(vm, "print", n_print, NULL);
-  moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
-  moth_register(vm, "pinOutput", n_pin_output, NULL);
-  moth_register(vm, "pinInput", n_pin_input, NULL);
-  moth_register(vm, "pinInputPullup", n_pin_input_pullup, NULL);
-  moth_register(vm, "digitalWrite", n_digital_write, NULL);
-  moth_register(vm, "digitalRead", n_digital_read, NULL);
+  register_all(vm);
 
   moth_status st = moth_load(vm, blob, (size_t)len);
   if (st != MOTH_OK) {

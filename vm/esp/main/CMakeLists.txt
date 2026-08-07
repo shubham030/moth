@@ -11,6 +11,6 @@ idf_component_register(
     "${VM_ROOT}/src/vm.c"
     "${VM_ROOT}/src/loader.c"
   INCLUDE_DIRS "${VM_ROOT}/include"
-  PRIV_REQUIRES esp_driver_gpio esp_timer
+  PRIV_REQUIRES esp_driver_gpio esp_driver_ledc esp_driver_i2c esp_driver_uart esp_adc esp_timer
   EMBED_FILES program.mothb
 )
