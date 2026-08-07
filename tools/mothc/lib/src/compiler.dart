@@ -229,6 +229,17 @@ class Compiler {
           throw CompileError(
               'static methods are not supported yet', member.offset);
         }
+        // Accepting this silently would be worse than rejecting it: print()
+        // and '$obj' would keep saying "Instance" while real Dart calls the
+        // override, and the program would differ from Dart without saying so.
+        if (member.name.lexeme == 'toString') {
+          throw CompileError(
+            'toString() overrides are not supported yet',
+            member.offset,
+            hint: 'give it another name and call it explicitly, '
+                'e.g. "print(thing.describe())"',
+          );
+        }
         if (member.isGetter || member.isSetter) {
           throw CompileError(
             'getters and setters are not supported yet',

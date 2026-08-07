@@ -1,0 +1,12 @@
+LED status draws 20mA
+motor fan draws 900mA
+LED backlight draws 20mA
+total 940mA
+tree sum 210 depth 3
+abc
+(3,4) -> (13,14)
+true
+false
+false
+17
+yes

@@ -43,7 +43,13 @@ print('avg ${total ~/ window.length}');
 ```
 
 **Classes** — fields with initializers, one constructor (with `this.x`
-parameters), methods, and implicit `this`. No inheritance yet.
+parameters), methods, and implicit `this`. Also supported: the ternary
+`a ? b : c` and the null assertion `x!` (which passes through, since moth
+does not check nullability).
+
+There is no inheritance. Because method calls resolve by name at run time,
+**duck typing works instead**: any two classes with the same method name are
+interchangeable, without a shared base type.
 
 ```dart
 class DigitalPin {

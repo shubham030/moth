@@ -530,6 +530,8 @@ class FunctionCompiler {
         _property(expr.identifier, expr.prefix, expr.offset);
       case ThisExpression():
         _emitThis();
+      case ConditionalExpression():
+        _conditional(expr);
       case MethodInvocation():
         _call(expr);
       default:
@@ -860,8 +862,24 @@ class FunctionCompiler {
     }
   }
 
+  void _conditional(ConditionalExpression expr) {
+    _expression(expr.condition);
+    final toElse = _emitJump(Op.jumpIfFalse);
+    _expression(expr.thenExpression);
+    final toEnd = _emitJump(Op.jump);
+    _patch(toElse);
+    _expression(expr.elseExpression);
+    _patch(toEnd);
+  }
+
   void _postfix(PostfixExpression expr) {
     final op = expr.operator.lexeme;
+    // `x!` asserts non-null. moth has no null-safety checking, so the value
+    // simply passes through — it exists so null-safe Dart source compiles.
+    if (op == '!') {
+      _expression(expr.operand);
+      return;
+    }
     if (op != '++' && op != '--') {
       throw CompileError("'$op' is not supported yet", expr.operator.offset);
     }
