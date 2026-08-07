@@ -1,0 +1,29 @@
+title: moth
+description: Write Dart. Run it on a microcontroller.
+remote_theme: just-the-docs/just-the-docs@v0.7.0
+
+url: https://shubham030.github.io
+baseurl: /moth
+
+plugins:
+  - jekyll-remote-theme
+
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  GitHub: https://github.com/shubham030/moth
+aux_links_new_tab: true
+
+nav_external_links:
+  - title: moth on GitHub
+    url: https://github.com/shubham030/moth
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - vendor
+
+footer_content: >-
+  moth is MIT licensed. API unstable until v0.1.

@@ -1,3 +1,9 @@
+---
+title: Architecture
+nav_order: 10
+permalink: /architecture/
+---
+
 # moth architecture
 
 Four layers, each independently shippable:

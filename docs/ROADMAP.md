@@ -1,3 +1,9 @@
+---
+title: Roadmap
+nav_order: 8
+permalink: /roadmap/
+---
+
 # Roadmap
 
 Each milestone is independently useful and demoable. Order matters: nothing in

@@ -35,12 +35,21 @@ void main() {
     final name = source.uri.pathSegments.last.replaceAll('.dart', '');
     final expectedFile = File('${source.path.replaceAll('.dart', '')}.out');
 
+    // A case may ship a .args file with extra simulator flags (fake analog
+    // readings, fake I2C devices) so peripheral behavior is testable too.
+    final argsFile = File('${source.path.replaceAll('.dart', '')}.args');
+    final extraArgs = argsFile.existsSync()
+        ? argsFile.readAsStringSync().trim().split(RegExp(r'\s+'))
+        : const <String>[];
+
     test(name, () {
-      final blob = Compiler(source.path, source.readAsStringSync()).compile().blob;
+      final blob =
+          Compiler(source.path, source.readAsStringSync()).compile().blob;
       final tmp = File('${Directory.systemTemp.path}/moth_test_$name.mothb')
         ..writeAsBytesSync(blob);
 
-      final result = Process.runSync(mothrun.path, [tmp.path, '--quiet']);
+      final result =
+          Process.runSync(mothrun.path, [tmp.path, '--quiet', ...extraArgs]);
       expect(result.exitCode, 0, reason: 'stderr: ${result.stderr}');
       expect(result.stdout, expectedFile.readAsStringSync());
       tmp.deleteSync();
@@ -49,11 +58,13 @@ void main() {
 
   test('blink produces the expected pin trace', () {
     final source = File('$repoRoot/examples/blink.dart');
-    final blob = Compiler(source.path, source.readAsStringSync()).compile().blob;
+    final blob =
+        Compiler(source.path, source.readAsStringSync()).compile().blob;
     final tmp = File('${Directory.systemTemp.path}/moth_test_blink.mothb')
       ..writeAsBytesSync(blob);
 
-    final result = Process.runSync(mothrun.path, [tmp.path, '--stop-after', '2000']);
+    final result =
+        Process.runSync(mothrun.path, [tmp.path, '--stop-after', '2000']);
     expect(result.exitCode, 0, reason: 'stderr: ${result.stderr}');
     expect(result.stdout, '''
 [     0ms] pin 38 -> output

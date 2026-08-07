@@ -1,3 +1,9 @@
+---
+title: Prior art
+nav_order: 9
+permalink: /prior-art/
+---
+
 # Prior art
 
 Surveyed August 2026. Two questions matter: does a Dart runtime for

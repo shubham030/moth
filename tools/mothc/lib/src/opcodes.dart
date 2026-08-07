@@ -41,13 +41,46 @@ class Op {
 /// Host functions a program may call, with their argument counts. The VM
 /// resolves these by name at load time; a board that doesn't register one
 /// rejects the blob up front rather than failing mid-run.
+/// Names mirror Arduino's core API where one exists, so an Arduino tutorial
+/// translates line for line. See docs/arduino-parity.md.
 const kNatives = <String, int>{
+  // output
   'print': 1,
+
+  // timing
   'delay': 1,
+  'delayMicroseconds': 1,
   'millis': 0,
+  'micros': 0,
+
+  // digital I/O
   'pinOutput': 1,
   'pinInput': 1,
   'pinInputPullup': 1,
   'digitalWrite': 2,
   'digitalRead': 1,
+
+  // analog I/O
+  'analogRead': 1,
+  'analogWrite': 2,
+
+  // sound
+  'tone': 2,
+  'noTone': 1,
+
+  // random
+  'randomSeed': 1,
+  'random': 1,
+
+  // I2C — single-register access covers most sensors and needs no heap
+  'i2cBegin': 2,
+  'i2cPing': 1,
+  'i2cWriteReg': 3,
+  'i2cReadReg': 2,
+
+  // UART
+  'uartBegin': 4,
+  'uartWrite': 2,
+  'uartAvailable': 1,
+  'uartRead': 1,
 };
