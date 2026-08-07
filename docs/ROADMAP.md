@@ -72,16 +72,20 @@ Dart program draws in a desktop window and on the board.
 - [ ] Capturing a local of the enclosing function — rejected at compile time
       for now; needs boxed cells or upvalues
 
-## M3 — Widgets and setState
+## M3 — Widgets and setState (first version working)
 
-**Demo: the README's VolumeScreen — declarative UI, reactive updates.**
+**Demo: `examples/ui/widgets.dart` — a counter that rebuilds on tap.**
 
-- [ ] `package:moth`: Widget / State / Element, dirty list, build scheduler
-- [ ] Reconciler: runtimeType+key matching, property diffing into lv_ calls
-- [ ] Core widgets: Screen, Container, Row, Column, Label, Button, Slider,
-      Image, Switch, ListView (non-virtualized)
-- [ ] Animated widgets delegating to lv_anim
-- [ ] Golden tests: widget tree in → sequence of LVGL calls out
+- [x] Widget / Element split, dirty list, rebuild on the next frame
+- [x] `setState(() { ... })` marking its element dirty
+- [x] Reconciler: matches by widget type, updates nodes in place, mounts and
+      unmounts children as the list grows or shrinks
+- [x] Event bubbling — hit-testing reports the innermost node, so a tap walks
+      up to the first ancestor with a handler
+- [ ] Keys, so reordered children keep their state
+- [ ] Move it out of the example into `package:moth` (needs imports)
+- [ ] More widgets: Row/Column helpers, Slider, Switch, Image
+- [ ] Golden tests: widget tree in → sequence of ui* calls out
 
 ## Known limitations to close
 
