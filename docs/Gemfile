@@ -1,0 +1,22 @@
+# Local preview of the docs site.
+#
+#   cd docs
+#   bundle install
+#   bundle exec jekyll serve
+#
+# GitHub Pages builds this itself once the repo is public — remote_theme in
+# _config.yml is what both this and Pages use, so the preview matches.
+source "https://rubygems.org"
+
+gem "jekyll", "~> 4.4"
+gem "jekyll-remote-theme"
+# just-the-docs needs these; GitHub Pages ships them already.
+gem "jekyll-seo-tag"
+gem "jekyll-include-cache"
+
+# Ruby 3.4+ moved these out of the default gem set; Jekyll still wants them.
+gem "base64"
+gem "bigdecimal"
+gem "csv"
+gem "logger"
+gem "webrick"

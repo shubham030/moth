@@ -16,3 +16,8 @@ dependencies.lock
 
 # OS
 .DS_Store
+
+# Jekyll docs site
+docs/_site/
+docs/.jekyll-cache/
+docs/vendor/
