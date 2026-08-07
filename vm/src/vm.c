@@ -340,6 +340,82 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         break;
       }
 
+      case OP_NEW_LIST: {
+        NEED(2);
+        uint16_t count = read_u16(&fr->ip);
+        /* Elements stay on the stack while the list is allocated. */
+        moth_value list = moth_list_new(vm);
+        if (list.type != MV_OBJ) return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+        moth_value *first = vm->sp - count;
+        for (uint16_t i = 0; i < count; i++) {
+          if (!moth_list_push(vm, list, first[i])) {
+            return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+          }
+        }
+        vm->sp = first;
+        PUSH(list);
+        break;
+      }
+      case OP_INDEX_GET: {
+        moth_value idx = POP(), target = POP();
+        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "only lists can be indexed");
+        if (idx.type != MV_INT) return trap(vm, fr, MOTH_ERR_TYPE, "list index must be a whole number");
+        moth_list *l = AS_LIST(target);
+        if (idx.as.i < 0 || idx.as.i >= l->count) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "index %lld is outside a list of %d",
+                      (long long)idx.as.i, l->count);
+        }
+        PUSH(l->items[idx.as.i]);
+        break;
+      }
+      case OP_INDEX_SET: {
+        moth_value value = POP(), idx = POP(), target = POP();
+        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "only lists can be indexed");
+        if (idx.type != MV_INT) return trap(vm, fr, MOTH_ERR_TYPE, "list index must be a whole number");
+        moth_list *l = AS_LIST(target);
+        if (idx.as.i < 0 || idx.as.i >= l->count) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "index %lld is outside a list of %d",
+                      (long long)idx.as.i, l->count);
+        }
+        l->items[idx.as.i] = value;
+        PUSH(value); /* assignment is an expression */
+        break;
+      }
+      case OP_LEN: {
+        moth_value target = POP();
+        if (IS_LIST(target)) PUSH(moth_int(AS_LIST(target)->count));
+        else if (moth_is_string(target)) PUSH(moth_int(AS_STRING(target)->len));
+        else return trap(vm, fr, MOTH_ERR_TYPE, "only lists and text have a length");
+        break;
+      }
+      case OP_LIST_ADD: {
+        /* item stays on the stack until it is inside the list */
+        moth_value target = PEEK_AT(1);
+        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "add() needs a list");
+        if (!moth_list_push(vm, target, PEEK_AT(0))) {
+          return trap(vm, fr, MOTH_ERR_OOM, "out of memory");
+        }
+        (void)POP();
+        (void)POP();
+        PUSH(moth_null());
+        break;
+      }
+      case OP_LIST_REMOVE_LAST: {
+        moth_value target = POP();
+        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "removeLast() needs a list");
+        moth_list *l = AS_LIST(target);
+        if (l->count == 0) return trap(vm, fr, MOTH_ERR_TYPE, "removeLast() on an empty list");
+        PUSH(l->items[--l->count]);
+        break;
+      }
+      case OP_LIST_CLEAR: {
+        moth_value target = POP();
+        if (!IS_LIST(target)) return trap(vm, fr, MOTH_ERR_TYPE, "clear() needs a list");
+        AS_LIST(target)->count = 0;
+        PUSH(moth_null());
+        break;
+      }
+
       default:
         return trap(vm, fr, MOTH_ERR_BAD_OP, "unknown opcode 0x%02x", op);
     }
