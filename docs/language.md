@@ -65,9 +65,13 @@ parameters), methods, and implicit `this`. Also supported: the ternary
 `a ? b : c` and the null assertion `x!` (which passes through, since moth
 does not check nullability).
 
-There is no inheritance. Because method calls resolve by name at run time,
-**duck typing works instead**: any two classes with the same method name are
-interchangeable, without a shared base type.
+**Single inheritance** with `extends`, including method overriding. An
+inherited method that calls an overridden one lands on the override, as in
+Dart. Duck typing also works — any two classes with the same method name are
+interchangeable, with or without a shared base type.
+
+Not supported: `implements`, mixins, and extending a class that declares a
+constructor (there is no way to chain to it yet). Each is a compile error.
 
 ```dart
 class DigitalPin {
