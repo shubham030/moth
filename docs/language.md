@@ -22,6 +22,14 @@ final limit = 10;
 int step = 2;
 ```
 
+**Top-level variables** — shared by every function in the file, initialized
+before `main` runs. Locals shadow them, as in Dart.
+
+```dart
+final ledPin = 38;      // pin map and tuning, visible everywhere
+var pressCount = 0;     // state that outlives any one function call
+```
+
 **Functions** — top-level, positional parameters, recursion, expression bodies.
 
 ```dart

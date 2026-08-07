@@ -18,10 +18,11 @@ All multi-byte integers are little-endian.
 
 ```
 magic        4 bytes   "MOTH"
-version      u16       MOTH_BYTECODE_VERSION (currently 1)
+version      u16       MOTH_BYTECODE_VERSION (currently 2)
 flags        u16       reserved, 0
 constants    u16 count, then each: tag u8 + payload
 natives      u16 count, then each: name_const u16 + argc u8
+globals      u16       number of top-level variable slots
 functions    u16 count, then each:
                name_const  u16
                arity       u8
@@ -29,7 +30,12 @@ functions    u16 count, then each:
                code_len    u32
                code        code_len bytes
 entry        u16       index of the function to call at start (must be arity 0)
+init         u16       initializer function index, or 0xFFFF for none
 ```
+
+Global slots start as `null` and are filled by the `init` function, which the
+VM runs to completion before `entry`. The compiler synthesizes it from the
+top-level variable initializers, in declaration order.
 
 Constant tags: `0 = int` (i64), `1 = double` (f64), `2 = string`
 (u16 byte length + UTF-8, no terminator), `3 = bool` (u8), `4 = null`.
@@ -59,6 +65,8 @@ Operands are shown after the mnemonic. Stack effect is written
 | `DUP` | 0x07 | — | `[v → v v]` |
 | `LOAD` | 0x08 | u8 slot | `[→ v]` push local |
 | `STORE` | 0x09 | u8 slot | `[v →]` pop into local |
+| `LOAD_GLOBAL` | 0x0A | u16 slot | `[→ v]` push top-level variable |
+| `STORE_GLOBAL` | 0x0B | u16 slot | `[v →]` pop into top-level variable |
 | `ADD` | 0x10 | — | `[a b → a+b]` |
 | `SUB` | 0x11 | — | `[a b → a-b]` |
 | `MUL` | 0x12 | — | `[a b → a*b]` |
@@ -66,6 +74,12 @@ Operands are shown after the mnemonic. Stack effect is written
 | `IDIV` | 0x14 | — | `[a b → a~/b]` truncating int divide |
 | `MOD` | 0x15 | — | `[a b → a%b]` Euclidean: result always in `[0, b.abs())` |
 | `NEG` | 0x16 | — | `[a → -a]` |
+| `BAND` | 0x17 | — | `[a b → a&b]` ints only |
+| `BOR` | 0x18 | — | `[a b → a\|b]` ints only |
+| `BXOR` | 0x19 | — | `[a b → a^b]` ints only |
+| `SHL` | 0x1A | — | `[a b → a<<b]` shifts ≥ 64 give 0 |
+| `SHR` | 0x1B | — | `[a b → a>>b]` arithmetic; ≥ 64 gives 0 or −1 |
+| `BNOT` | 0x1C | — | `[a → ~a]` ints only |
 | `EQ` | 0x20 | — | `[a b → bool]` |
 | `NE` | 0x21 | — | `[a b → bool]` |
 | `LT` | 0x22 | — | `[a b → bool]` |

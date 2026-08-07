@@ -144,6 +144,15 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
     vm->natives[i].argc = argc;
   }
 
+  /* top-level variables — one slot each, all starting null */
+  vm->nglobals = rd_u16(&r);
+  if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated globals count");
+  if (vm->nglobals > 0) {
+    vm->globals = calloc(vm->nglobals, sizeof *vm->globals);
+    if (!vm->globals) return fail(vm, MOTH_ERR_OOM, "out of memory");
+    for (uint16_t i = 0; i < vm->nglobals; i++) vm->globals[i] = moth_null();
+  }
+
   /* functions */
   vm->nfuncs = rd_u16(&r);
   if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated function table");
@@ -166,10 +175,14 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
   }
 
   vm->entry = rd_u16(&r);
+  vm->init = rd_u16(&r);
   if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated entry index");
   if (vm->entry >= vm->nfuncs) return fail(vm, MOTH_ERR_FORMAT, "entry index out of range");
   if (vm->funcs[vm->entry].arity != 0) {
     return fail(vm, MOTH_ERR_FORMAT, "entry function must take no arguments");
+  }
+  if (vm->init != MOTH_NO_INIT && vm->init >= vm->nfuncs) {
+    return fail(vm, MOTH_ERR_FORMAT, "initializer index out of range");
   }
 
   vm->blob = blob;
@@ -193,6 +206,7 @@ void moth_free(moth_vm *vm) {
   free(vm->const_strs);
   free(vm->natives);
   free(vm->funcs);
+  free(vm->globals);
   free(vm);
 }
 

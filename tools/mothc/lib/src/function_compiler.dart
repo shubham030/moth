@@ -11,9 +11,16 @@ class _Loop {
 }
 
 /// Lowers one function body to bytecode.
+/// Where a name lives: a frame slot, or a top-level variable slot.
+typedef Slot = ({bool isGlobal, int index});
+
 class FunctionCompiler {
   final Compiler unit;
-  final FunctionDeclaration decl;
+  final FunctionDeclaration? decl;
+
+  /// When set, this compiles the synthetic `<globals>` initializer instead of
+  /// a declared function body.
+  final List<(int, Expression)>? globalInits;
 
   final List<int> code = [];
   final List<Map<String, int>> _scopes = [{}];
@@ -21,9 +28,13 @@ class FunctionCompiler {
   int _nextSlot = 0;
   int _maxSlots = 0;
 
-  FunctionCompiler(this.unit, this.decl);
+  FunctionCompiler(this.unit, this.decl) : globalInits = null;
+
+  FunctionCompiler.globalsInit(this.unit, this.globalInits) : decl = null;
 
   FunctionBlob compile() {
+    if (globalInits != null) return _compileGlobalsInit();
+    final decl = this.decl!;
     final params = decl.functionExpression.parameters?.parameters ?? const [];
     for (final p in params) {
       if (p is! SimpleFormalParameter) {
@@ -56,6 +67,17 @@ class FunctionCompiler {
     );
   }
 
+  FunctionBlob _compileGlobalsInit() {
+    for (final (slot, expr) in globalInits!) {
+      _expression(expr);
+      _emit(Op.storeGlobal);
+      _emitU16(slot);
+    }
+    _emit(Op.retNull);
+    return FunctionBlob(
+        unit.constants.addString('<globals>'), 0, _maxSlots, code);
+  }
+
   // ---- emit helpers -----------------------------------------------------
 
   void _emit(int byte) => code.add(byte & 0xFF);
@@ -75,7 +97,8 @@ class FunctionCompiler {
   void _patch(int site) {
     final offset = code.length - (site + 2);
     if (offset < -32768 || offset > 32767) {
-      throw CompileError('this function is too large to compile', decl.offset);
+      throw CompileError(
+          'this function is too large to compile', decl?.offset ?? 0);
     }
     code[site] = offset & 0xFF;
     code[site + 1] = (offset >> 8) & 0xFF;
@@ -342,25 +365,53 @@ class FunctionCompiler {
     }
   }
 
+  /// Locals shadow top-level variables, as in Dart.
+  Slot? _resolve(String name) {
+    final local = _lookup(name);
+    if (local != null) return (isGlobal: false, index: local);
+    final global = unit.globalIndex[name];
+    if (global != null) return (isGlobal: true, index: global);
+    return null;
+  }
+
+  void _emitLoadSlot(Slot slot) {
+    if (slot.isGlobal) {
+      _emit(Op.loadGlobal);
+      _emitU16(slot.index);
+    } else {
+      _emit(Op.load);
+      _emit(slot.index);
+    }
+  }
+
+  void _emitStoreSlot(Slot slot) {
+    if (slot.isGlobal) {
+      _emit(Op.storeGlobal);
+      _emitU16(slot.index);
+    } else {
+      _emit(Op.store);
+      _emit(slot.index);
+    }
+  }
+
   void _identifier(SimpleIdentifier id) {
-    final slot = _lookup(id.name);
+    final slot = _resolve(id.name);
     if (slot == null) {
       throw CompileError(
         "'${id.name}' is not defined",
         id.offset,
-        hint:
-            'only local variables exist in M1a — declare it with "var ${id.name} = ...;"',
+        hint: 'declare it with "var ${id.name} = ...;" — '
+            'at the top of the file, or inside the function that uses it',
       );
     }
-    _emit(Op.load);
-    _emit(slot);
+    _emitLoadSlot(slot);
   }
 
-  int _assignableSlot(Expression target) {
+  Slot _assignableSlot(Expression target) {
     if (target is! SimpleIdentifier) {
       throw CompileError('only variables can be assigned to', target.offset);
     }
-    final slot = _lookup(target.name);
+    final slot = _resolve(target.name);
     if (slot == null) {
       throw CompileError("'${target.name}' is not defined", target.offset);
     }
@@ -390,15 +441,13 @@ class FunctionCompiler {
       if (arith == null) {
         throw CompileError("'$op' is not supported yet", expr.operator.offset);
       }
-      _emit(Op.load);
-      _emit(slot);
+      _emitLoadSlot(slot);
       _expression(expr.rightHandSide);
       _emit(arith);
     }
     // assignment is an expression: leave the value, then store a copy
     _emit(Op.dup);
-    _emit(Op.store);
-    _emit(slot);
+    _emitStoreSlot(slot);
   }
 
   void _binary(BinaryExpression expr) {
@@ -466,14 +515,12 @@ class FunctionCompiler {
       case '++':
       case '--':
         final slot = _assignableSlot(expr.operand);
-        _emit(Op.load);
-        _emit(slot);
+        _emitLoadSlot(slot);
         _emit(Op.int8);
         _emit(1);
         _emit(op == '++' ? Op.add : Op.sub);
         _emit(Op.dup);
-        _emit(Op.store);
-        _emit(slot);
+        _emitStoreSlot(slot);
       default:
         throw CompileError("'$op' is not supported yet", expr.operator.offset);
     }
@@ -485,14 +532,12 @@ class FunctionCompiler {
       throw CompileError("'$op' is not supported yet", expr.operator.offset);
     }
     final slot = _assignableSlot(expr.operand);
-    _emit(Op.load);
-    _emit(slot);
+    _emitLoadSlot(slot);
     _emit(Op.dup); // the old value stays as this expression's result
     _emit(Op.int8);
     _emit(1);
     _emit(op == '++' ? Op.add : Op.sub);
-    _emit(Op.store);
-    _emit(slot);
+    _emitStoreSlot(slot);
   }
 
   void _call(MethodInvocation call) {
