@@ -112,6 +112,7 @@ scope for now.
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — VM, bytecode, GC, bindings, widget layer
 - [BYTECODE.md](docs/BYTECODE.md) — instruction set and blob format
 - [BACKEND.md](docs/BACKEND.md) — the rendering-backend contract (nodes, layout, events)
+- [PRIOR-ART.md](docs/PRIOR-ART.md) — what exists already, and why this is still worth building
 - [ROADMAP.md](docs/ROADMAP.md) — milestones and help-wanted
 - [DECISIONS.md](docs/DECISIONS.md) — why it's built this way (ADRs)
 
