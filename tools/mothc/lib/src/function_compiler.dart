@@ -254,12 +254,16 @@ class FunctionCompiler {
 
   void _forStatement(ForStatement stmt) {
     final parts = stmt.forLoopParts;
+    if (parts is ForEachPartsWithDeclaration) {
+      _forInStatement(stmt, parts);
+      return;
+    }
     if (parts is! ForPartsWithDeclarations &&
         parts is! ForPartsWithExpression) {
       throw CompileError(
-        'only counting for-loops are supported yet',
+        'this kind of for-loop is not supported yet',
         stmt.offset,
-        hint: 'try "for (var i = 0; i < n; i++)" — for-in arrives with lists',
+        hint: 'try "for (var i = 0; i < n; i++)" or "for (final x in list)"',
       );
     }
 
@@ -319,6 +323,68 @@ class FunctionCompiler {
     _popScope();
   }
 
+  /// `for (final x in list)` lowers to an index walk over hidden locals, so
+  /// it needs no iterator protocol.
+  void _forInStatement(ForStatement stmt, ForEachPartsWithDeclaration parts) {
+    _pushScope();
+
+    // hidden: the iterable, evaluated once, and the cursor
+    _expression(parts.iterable);
+    final listSlot = _declare(' iterable', stmt.offset);
+    _emit(Op.store);
+    _emit(listSlot);
+
+    _emit(Op.int8);
+    _emit(0);
+    final indexSlot = _declare(' index', stmt.offset);
+    _emit(Op.store);
+    _emit(indexSlot);
+
+    final start = code.length;
+    _emit(Op.load);
+    _emit(indexSlot);
+    _emit(Op.load);
+    _emit(listSlot);
+    _emit(Op.len);
+    _emit(Op.lt);
+    final exit = _emitJump(Op.jumpIfFalse);
+
+    _pushScope();
+    _emit(Op.load);
+    _emit(listSlot);
+    _emit(Op.load);
+    _emit(indexSlot);
+    _emit(Op.indexGet);
+    final itemSlot = _declare(parts.loopVariable.name.lexeme, parts.offset);
+    _emit(Op.store);
+    _emit(itemSlot);
+
+    final loop = _Loop();
+    _loops.add(loop);
+    _statement(stmt.body);
+    _loops.removeLast();
+    _popScope();
+
+    final continueLabel = code.length;
+    _emit(Op.load);
+    _emit(indexSlot);
+    _emit(Op.int8);
+    _emit(1);
+    _emit(Op.add);
+    _emit(Op.store);
+    _emit(indexSlot);
+    _emitLoop(start);
+
+    _patch(exit);
+    for (final site in loop.breaks) {
+      _patch(site);
+    }
+    for (final site in loop.continues) {
+      _patchTo(site, continueLabel);
+    }
+    _popScope();
+  }
+
   // ---- expressions ------------------------------------------------------
 
   void _expression(Expression expr) {
@@ -355,6 +421,18 @@ class FunctionCompiler {
         _prefix(expr);
       case PostfixExpression():
         _postfix(expr);
+      case ListLiteral():
+        _listLiteral(expr);
+      case IndexExpression():
+        _expression(expr.target!);
+        _expression(expr.index);
+        _emit(Op.indexGet);
+      case PropertyAccess():
+        _property(expr.propertyName, expr.target!, expr.offset);
+      case PrefixedIdentifier():
+        // `list.length` parses as a prefixed identifier when the target is a
+        // plain name rather than an expression.
+        _property(expr.identifier, expr.prefix, expr.offset);
       case MethodInvocation():
         _call(expr);
       default:
@@ -364,6 +442,37 @@ class FunctionCompiler {
           hint: 'M1a supports numbers, bools, variables, arithmetic and calls',
         );
     }
+  }
+
+  void _listLiteral(ListLiteral expr) {
+    var count = 0;
+    for (final element in expr.elements) {
+      if (element is! Expression) {
+        throw CompileError(
+          'spreads and if/for inside list literals are not supported yet',
+          element.offset,
+        );
+      }
+      _expression(element);
+      count++;
+    }
+    if (count > 0xFFFF) {
+      throw CompileError('list literal is too large', expr.offset);
+    }
+    _emit(Op.newList);
+    _emitU16(count);
+  }
+
+  void _property(SimpleIdentifier name, Expression target, int offset) {
+    if (name.name != 'length') {
+      throw CompileError(
+        "'.${name.name}' is not supported yet",
+        offset,
+        hint: 'lists and text have .length; other properties need classes',
+      );
+    }
+    _expression(target);
+    _emit(Op.len);
   }
 
   /// `'temp $t C'` lowers to a left-to-right chain of concatenations, with
@@ -453,7 +562,12 @@ class FunctionCompiler {
   }
 
   void _assignment(AssignmentExpression expr) {
-    final slot = _assignableSlot(expr.leftHandSide);
+    final target = expr.leftHandSide;
+    if (target is IndexExpression) {
+      _indexAssignment(expr, target);
+      return;
+    }
+    final slot = _assignableSlot(target);
     final op = expr.operator.lexeme;
 
     if (op == '=') {
@@ -483,6 +597,43 @@ class FunctionCompiler {
     _emit(Op.dup);
     _emitStoreSlot(slot);
   }
+
+  /// `list[i] = v` and `list[i] += v`. The compound form evaluates the target
+  /// and index twice; both are simple expressions in practice.
+  void _indexAssignment(AssignmentExpression expr, IndexExpression target) {
+    final op = expr.operator.lexeme;
+    _expression(target.target!);
+    _expression(target.index);
+
+    if (op == '=') {
+      _expression(expr.rightHandSide);
+    } else {
+      final arith = _compoundOps[op];
+      if (arith == null) {
+        throw CompileError("'$op' is not supported yet", expr.operator.offset);
+      }
+      _expression(target.target!);
+      _expression(target.index);
+      _emit(Op.indexGet);
+      _expression(expr.rightHandSide);
+      _emit(arith);
+    }
+    _emit(Op.indexSet);
+  }
+
+  static const _compoundOps = {
+    '+=': Op.add,
+    '-=': Op.sub,
+    '*=': Op.mul,
+    '/=': Op.div,
+    '~/=': Op.idiv,
+    '%=': Op.mod,
+    '&=': Op.band,
+    '|=': Op.bor,
+    '^=': Op.bxor,
+    '<<=': Op.shl,
+    '>>=': Op.shr,
+  };
 
   void _binary(BinaryExpression expr) {
     final op = expr.operator.lexeme;
@@ -575,15 +726,28 @@ class FunctionCompiler {
   }
 
   void _call(MethodInvocation call) {
-    if (call.target != null) {
-      throw CompileError(
-        'method calls on objects are not supported yet',
-        call.offset,
-        hint: 'M1a has top-level functions only',
-      );
-    }
     final name = call.methodName.name;
     final args = call.argumentList.arguments;
+
+    if (call.target != null) {
+      final builtin = kBuiltinMethods[name];
+      if (builtin == null) {
+        throw CompileError(
+          "'.$name(...)' is not supported yet",
+          call.offset,
+          hint: 'lists have ${kBuiltinMethods.keys.join(', ')}; '
+              'other methods need classes',
+        );
+      }
+      _checkArgc(name, args.length, builtin.argc, call.offset);
+      _expression(call.target!);
+      for (final a in args) {
+        _expression(a);
+      }
+      _emit(builtin.op);
+      return;
+    }
+
     for (final a in args) {
       if (a is NamedExpression) {
         throw CompileError('named arguments are not supported yet', a.offset);

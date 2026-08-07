@@ -33,6 +33,14 @@ enum {
   OP_BNOT = 0x1C,
   OP_TO_STRING = 0x1D,
 
+  OP_NEW_LIST = 0x50, /* u16 count: pops that many values into a new list */
+  OP_INDEX_GET = 0x51,
+  OP_INDEX_SET = 0x52,
+  OP_LEN = 0x53,
+  OP_LIST_ADD = 0x54,
+  OP_LIST_REMOVE_LAST = 0x55,
+  OP_LIST_CLEAR = 0x56,
+
   OP_EQ = 0x20,
   OP_NE = 0x21,
   OP_LT = 0x22,
@@ -63,7 +71,7 @@ typedef struct {
 
 /* ---- heap objects ------------------------------------------------------ */
 
-typedef enum { OBJ_STRING } obj_type;
+typedef enum { OBJ_STRING, OBJ_LIST } obj_type;
 
 struct moth_obj {
   obj_type type;
@@ -80,13 +88,24 @@ typedef struct {
   const char *chars;
 } moth_string;
 
+typedef struct {
+  moth_obj obj;
+  int count;
+  int capacity;
+  moth_value *items; /* plain malloc, not GC-tracked; contents are traced */
+} moth_list;
+
 #define AS_STRING(v) ((moth_string *)(v).as.obj)
+#define AS_LIST(v) ((moth_list *)(v).as.obj)
 #define IS_OBJ_TYPE(v, t) ((v).type == MV_OBJ && (v).as.obj->type == (t))
+#define IS_LIST(v) IS_OBJ_TYPE(v, OBJ_LIST)
 
 /* object.c */
 moth_value moth_string_take(moth_vm *vm, char *chars, uint32_t len);
 moth_value moth_string_borrow(moth_vm *vm, const char *chars, uint32_t len);
 moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b);
+moth_value moth_list_new(moth_vm *vm);
+bool moth_list_push(moth_vm *vm, moth_value list, moth_value item);
 moth_value moth_to_string(moth_vm *vm, moth_value v);
 bool moth_string_equal(moth_value a, moth_value b);
 void moth_collect(moth_vm *vm);

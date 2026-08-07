@@ -91,6 +91,32 @@ moth_value moth_concat(moth_vm *vm, moth_value a, moth_value b) {
   return moth_string_take(vm, chars, len);
 }
 
+moth_value moth_list_new(moth_vm *vm) {
+  moth_list *l = (moth_list *)allocate_object(vm, sizeof(moth_list), OBJ_LIST);
+  if (!l) return moth_null();
+  l->count = 0;
+  l->capacity = 0;
+  l->items = NULL;
+  moth_value v;
+  v.type = MV_OBJ;
+  v.as.obj = (moth_obj *)l;
+  return v;
+}
+
+bool moth_list_push(moth_vm *vm, moth_value list, moth_value item) {
+  moth_list *l = AS_LIST(list);
+  if (l->count == l->capacity) {
+    int cap = l->capacity < 8 ? 8 : l->capacity * 2;
+    moth_value *items = realloc(l->items, (size_t)cap * sizeof(moth_value));
+    if (!items) return false;
+    vm->bytes_allocated += (size_t)(cap - l->capacity) * sizeof(moth_value);
+    l->items = items;
+    l->capacity = cap;
+  }
+  l->items[l->count++] = item;
+  return true;
+}
+
 /* Dart's own formatting: doubles keep a decimal point, ints never gain one. */
 moth_value moth_to_string(moth_vm *vm, moth_value v) {
   char buf[40];
@@ -113,10 +139,20 @@ moth_value moth_to_string(moth_vm *vm, moth_value v) {
 
 /* ---- collector --------------------------------------------------------- */
 
+static void mark_value(moth_value v);
+
 static void mark_object(moth_obj *o) {
   if (!o || o->marked) return;
-  o->marked = true;
-  /* Strings reference nothing. Lists and instances will recurse here. */
+  o->marked = true; /* set before recursing, so cycles terminate */
+  switch (o->type) {
+    case OBJ_STRING:
+      break; /* references nothing */
+    case OBJ_LIST: {
+      moth_list *l = (moth_list *)o;
+      for (int i = 0; i < l->count; i++) mark_value(l->items[i]);
+      break;
+    }
+  }
 }
 
 static void mark_value(moth_value v) {
@@ -139,6 +175,13 @@ static void free_object(moth_vm *vm, moth_obj *o) {
         free((char *)s->chars);
       }
       vm->bytes_allocated -= sizeof(moth_string);
+      break;
+    }
+    case OBJ_LIST: {
+      moth_list *l = (moth_list *)o;
+      vm->bytes_allocated -= (size_t)l->capacity * sizeof(moth_value);
+      vm->bytes_allocated -= sizeof(moth_list);
+      free(l->items);
       break;
     }
   }

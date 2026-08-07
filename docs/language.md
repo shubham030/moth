@@ -30,6 +30,18 @@ print('temp $tempC C, fan ${running ? "on" : "off"}');   // (ternary: not yet)
 print('device at address $addr');
 ```
 
+**Lists** — literals, indexing, `.length`, `add`, `removeLast`, `clear`, and
+`for-in`. Garbage collected, and they may nest.
+
+```dart
+var window = [12, 7, 30];
+window.add(19);
+for (final v in window) {
+  total += v;
+}
+print('avg ${total ~/ window.length}');
+```
+
 **Top-level variables** — shared by every function in the file, initialized
 before `main` runs. Locals shadow them, as in Dart.
 
@@ -84,7 +96,7 @@ for (var i = 0; i < 10; i++) {
 
 | Feature | Milestone |
 | --- | --- |
-| Lists, maps, `for-in` | M1b |
+| Maps | M1b |
 | Classes, methods, constructors | M1b |
 | Closures and function values | M1b |
 | `async` / `await`, `Future` | after M2 |

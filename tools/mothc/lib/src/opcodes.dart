@@ -45,7 +45,23 @@ class Op {
   static const native = 0x41;
   static const ret = 0x42;
   static const retNull = 0x43;
+
+  static const newList = 0x50;
+  static const indexGet = 0x51;
+  static const indexSet = 0x52;
+  static const len = 0x53;
+  static const listAdd = 0x54;
+  static const listRemoveLast = 0x55;
+  static const listClear = 0x56;
 }
+
+/// Methods moth understands without real class dispatch. Real method lookup
+/// arrives with classes; until then these lower to dedicated opcodes.
+const kBuiltinMethods = <String, ({int op, int argc})>{
+  'add': (op: Op.listAdd, argc: 1),
+  'removeLast': (op: Op.listRemoveLast, argc: 0),
+  'clear': (op: Op.listClear, argc: 0),
+};
 
 /// Host functions a program may call, with their argument counts. The VM
 /// resolves these by name at load time; a board that doesn't register one
