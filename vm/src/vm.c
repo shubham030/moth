@@ -479,13 +479,28 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
           return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no method '%s'",
                       type_name(target), const_name(vm, name));
         }
-        moth_class *cls = &vm->classes[AS_INSTANCE(target)->class_index];
+        moth_instance *inst = AS_INSTANCE(target);
+        moth_class *cls = &vm->classes[inst->class_index];
         uint16_t fn_index = 0xFFFF;
         for (uint16_t i = 0; i < cls->nmethods; i++) {
           if (cls->methods[i].name_const == name) { fn_index = cls->methods[i].func_index; break; }
         }
+
+        /* The receiver is normally the object, but a field holding a function
+         * carries its own — `box.onTap()` runs the closure's receiver, not
+         * the box. Dart resolves methods first, then fields, and so do we. */
+        moth_value receiver = target;
         if (fn_index == 0xFFFF) {
-          return trap(vm, fr, MOTH_ERR_TYPE, "no method named '%s'", const_name(vm, name));
+          int slot = field_slot(vm, inst->class_index, name);
+          if (slot >= 0 && IS_CLOSURE(inst->fields[slot])) {
+            moth_closure *cl = AS_CLOSURE(inst->fields[slot]);
+            fn_index = cl->func_index;
+            receiver = cl->receiver;
+          }
+        }
+        if (fn_index == 0xFFFF) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no method or function field named '%s'",
+                      const_name(vm, name));
         }
         const moth_func *callee = &vm->funcs[fn_index];
         /* slot 0 is the receiver, so the method takes argc + 1 slots */
@@ -497,6 +512,7 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
           return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
         }
         moth_value *slots = vm->sp - argc - 1;
+        slots[0] = receiver;
         for (int i = callee->arity; i < callee->nlocals; i++) PUSH(moth_null());
         moth_frame *nf = &vm->frames[vm->nframes++];
         nf->fn = callee;

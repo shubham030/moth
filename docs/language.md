@@ -53,6 +53,9 @@ button.onTap(() {
 });
 ```
 
+A function stored in a field is callable like a method — `button.handler()`
+works, resolving methods first and then fields, as Dart does.
+
 Capturing a **local** of the enclosing function is not supported yet, and is
 a compile error rather than a silent copy. Use a top-level variable or a
 field — both are reachable from any closure.
