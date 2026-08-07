@@ -1,4 +1,4 @@
-/* moth_render on the MOMO board (Waveshare AMOLED 1.75C): the demo scene
+/* moth_render on the Waveshare ESP32-S3-Touch-AMOLED-1.75C: the demo scene
  * with real touch — taps rotate the cards' grow factors and re-fire the
  * pulse animation. Round display, so the scene keeps generous padding.
  */
@@ -37,7 +37,7 @@ static void build_scene(void)
     mr_set_u32(root, MR_PROP_MAIN_ALIGN, MR_ALIGN_CENTER);
 
     mr_node_id title = mr_node_create(MR_NODE_LABEL);
-    mr_set_str(title, MR_PROP_TEXT, "moth on MOMO");
+    mr_set_str(title, MR_PROP_TEXT, "moth on ESP32-S3");
     mr_set_f32(title, MR_PROP_FONT_SIZE, 20);
     mr_set_u32(title, MR_PROP_TEXT_COLOR, 0xFFC0CAF5);
     mr_attach(root, title, -1);

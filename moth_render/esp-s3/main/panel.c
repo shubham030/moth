@@ -9,8 +9,8 @@
 #include "esp_lcd_touch_cst9217.h"
 #include "esp_log.h"
 
-/* Waveshare 1.75C pin map (from the MOMO bring-up — the C variant differs
- * from the non-C board: LCD_RST 1, TOUCH_RST 2). */
+/* Waveshare 1.75C pin map — the C variant differs from the non-C board:
+ * LCD_RST 1, TOUCH_RST 2. */
 #define PIN_I2C_SDA   15
 #define PIN_I2C_SCL   14
 #define PIN_LCD_CS    12
@@ -34,7 +34,7 @@ static esp_lcd_panel_handle_t s_panel;
 static esp_lcd_touch_handle_t s_touch;
 static uint16_t *s_chunk; /* internal DMA-capable bounce buffer */
 
-/* Vendor init sequence (Waveshare BSP via MOMO). */
+/* Vendor init sequence (Waveshare BSP). */
 static const co5300_lcd_init_cmd_t s_lcd_init_cmds[] = {
     {0xFE, (uint8_t[]){0x20}, 1, 0},
     {0x19, (uint8_t[]){0x10}, 1, 0},

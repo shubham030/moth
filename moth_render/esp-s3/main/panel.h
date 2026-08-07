@@ -1,5 +1,5 @@
 /* Waveshare ESP32-S3-Touch-AMOLED-1.75C: CO5300 466x466 round AMOLED (QSPI)
- * + CST9217 touch (I2C). Bring-up lifted from the MOMO momo_board component.
+ * + CST9217 touch (I2C).
  */
 #pragma once
 
