@@ -6,7 +6,7 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Learn',
       collapsed: false,
-      items: ['getting-started', 'language', 'builtins', 'arduino-parity', 'testing'],
+      items: ['getting-started', 'language', 'hardware', 'builtins', 'arduino-parity', 'testing'],
     },
     {
       type: 'category',

@@ -169,6 +169,28 @@ class FunctionCompiler {
   }
 
   void _compileBodyStatements(FunctionBody body, int offset) {
+    // `await` is rejected where it appears, but a body marked async without
+    // one used to compile as though the keyword were not there — so a function
+    // returning Future<int> in Dart returned a plain int here, and a program
+    // that printed it silently disagreed with Dart. Refusing the declaration
+    // is the only honest answer until there is an event loop to run it on.
+    if (body.isAsynchronous) {
+      throw CompileError(
+        'async functions are not supported yet',
+        body.offset,
+        hint: 'moth has no event loop, so there is nothing for a Future to '
+            'complete on — write it synchronously, and use millis() to spread '
+            'slow work across frames',
+      );
+    }
+    if (body.isGenerator) {
+      throw CompileError(
+        'generator functions (sync* and async*) are not supported yet',
+        body.offset,
+        hint: 'return a List instead',
+      );
+    }
+
     if (body is BlockFunctionBody) {
       _block(body.block);
     } else if (body is ExpressionFunctionBody) {
