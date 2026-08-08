@@ -8,6 +8,8 @@
  */
 #include "scene_internal.hpp"
 
+#include "font8x8_basic.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -37,6 +39,31 @@ static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
   }
 }
 
+/* Blits the 8x8 glyphs, each pixel expanded to a scale x scale block.
+ * Clipped to the node's box, so a label never paints outside its layout. */
+static void draw_text(Scene &s, const Node &n, float opacity) {
+  int scale = text_scale(n.f[MR_PROP_FONT_SIZE]);
+  uint32_t color = n.u[MR_PROP_TEXT_COLOR];
+  float pen_x = n.x;
+
+  for (size_t i = 0; i < n.text.size(); i++) {
+    unsigned char ch = (unsigned char)n.text[i];
+    if (ch > 127) ch = '?'; /* the font covers ASCII only */
+    const unsigned char *glyph = font8x8_basic[ch];
+
+    for (int row = 0; row < MOTH_GLYPH_PX; row++) {
+      for (int col = 0; col < MOTH_GLYPH_PX; col++) {
+        if (!((glyph[row] >> col) & 1)) continue;
+        float px = pen_x + (float)(col * scale);
+        float py = n.y + (float)(row * scale);
+        if (px + scale <= n.x || px >= n.x + n.w) continue; /* clip to the box */
+        fill_rect(s, px, py, (float)scale, (float)scale, color, opacity);
+      }
+    }
+    pen_x += (float)(MOTH_GLYPH_PX * scale);
+  }
+}
+
 static void paint_node(Scene &s, mr_node_id id, float opacity) {
   Node *n = s.get(id);
   if (!n) return;
@@ -46,10 +73,7 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
   fill_rect(s, n->x, n->y, n->w, n->h, n->u[MR_PROP_BG_COLOR], opacity);
 
   if (n->kind == MR_NODE_LABEL && !n->text.empty()) {
-    /* placeholder: text renders as an underline bar until ThorVG lands */
-    float fs = n->f[MR_PROP_FONT_SIZE];
-    fill_rect(s, n->x, n->y + n->h - 2, std::min(n->w, 0.55f * fs * (float)n->text.size()),
-              2, n->u[MR_PROP_TEXT_COLOR], opacity);
+    draw_text(s, *n, opacity);
   }
 
   for (mr_node_id c : n->children) paint_node(s, c, opacity);

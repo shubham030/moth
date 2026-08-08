@@ -11,15 +11,13 @@ namespace mr {
 
 static bool is_auto(float v) { return v < 0.0f; }
 
-/* TODO(R2): real text measurement via ThorVG font metrics. Placeholder uses
- * a fixed advance ratio so layout goldens can be written against something
- * deterministic, then re-baselined once real metrics land. */
 static void leaf_auto_size(const Node &n, float &w, float &h) {
   switch (n.kind) {
     case MR_NODE_LABEL: {
+      /* Exact, because the font is a fixed-size bitmap at integer scale. */
       float fs = n.f[MR_PROP_FONT_SIZE];
-      w = 0.55f * fs * (float)n.text.size();
-      h = 1.25f * fs;
+      w = text_width(n.text.size(), fs);
+      h = text_height(fs);
       break;
     }
     case MR_NODE_IMAGE:  w = 32; h = 32; break; /* TODO(R2): intrinsic size */

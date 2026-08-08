@@ -123,7 +123,9 @@ Desktop-first; no Dart dependency until the framework exists.
 - [x] R0 — Backend contract (docs/BACKEND.md) + component scaffold with SDL harness
 - [ ] R1 — Flex layout per §4 of the contract, passing the layout goldens;
       flat-color software paint (boxes visible in the harness)
-- [ ] R2 — ThorVG integration: rounded rects, borders, text, images
+- [x] R2a — text: 8x8 bitmap font at integer scale, measured exactly by
+      layout (no external dependency; readable, not scalable)
+- [ ] R2b — ThorVG: rounded rects, borders, anti-aliased scalable text, images
 - [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one)
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL

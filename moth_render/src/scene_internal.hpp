@@ -58,6 +58,23 @@ struct Scene {
 
 Scene &scene();
 
+/* Text is drawn from an 8x8 bitmap font at integer scale, so a glyph is
+ * always a whole number of pixels and layout can measure it exactly. */
+#define MOTH_GLYPH_PX 8
+
+inline int text_scale(float font_size) {
+  int scale = (int)(font_size / MOTH_GLYPH_PX + 0.5f);
+  return scale < 1 ? 1 : scale;
+}
+
+inline float text_width(size_t chars, float font_size) {
+  return (float)(chars * MOTH_GLYPH_PX * (size_t)text_scale(font_size));
+}
+
+inline float text_height(float font_size) {
+  return (float)(MOTH_GLYPH_PX * text_scale(font_size));
+}
+
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);
 
