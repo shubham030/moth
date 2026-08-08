@@ -78,6 +78,12 @@ typedef struct {
 } mr_config;
 
 bool mr_init(const mr_config *cfg);
+
+/* Clears the tree back to a bare root, keeping the display configuration and
+ * the event sink. A host swapping in a new program calls this so the old
+ * program's nodes do not linger underneath the new UI. */
+void mr_reset(void);
+
 void mr_shutdown(void);
 uint32_t mr_contract_version(void);
 mr_node_id mr_root(void); /* box spanning the display; owned by the backend */

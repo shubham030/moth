@@ -101,13 +101,21 @@ Dart program draws in a desktop window and on the board.
 - **Native argument counts are taken from the blob.** `moth_register` does
   not record an arity for the host to cross-check against.
 
-## M4 — Hot push
+## M4 — Hot push (working on the desktop)
 
-**Demo: edit Dart, `moth run`, new UI on the device in ~2s over WiFi. No cable.**
+**Demo: `mothc app.dart --push host:port` replaces the running program.**
 
-- [ ] Device listener (mDNS + TCP), blob to spare partition, VM restart in place
-- [ ] `moth run` = build + discover + push + attach log console
-- [ ] Crash-loop protection (fall back to previous blob)
+- [x] Push protocol: "MPSH", a length, the blob. The receiver verifies before
+      running it, so a bad push is refused rather than trusted
+- [x] `moth_request_halt` — a host can stop a running program at the next
+      instruction, which is what makes swapping into an endless loop possible
+- [x] `mr_reset` — the outgoing program's nodes go with it, so the new UI
+      does not draw over a tree it does not own
+- [x] `mothsim --listen PORT`, and `mothc --push HOST:PORT`
+- [ ] ESP32 side: the receiver is POSIX sockets and should build on lwIP
+      as-is; what is missing is WiFi bring-up and credentials handling
+- [ ] Persist across reboot (blob to a spare partition)
+- [ ] Crash-loop protection (fall back to the previous blob)
 
 ## M5 — v0.1 public release
 

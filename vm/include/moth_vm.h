@@ -33,6 +33,7 @@ typedef enum {
   MOTH_ERR_STACK_OVERFLOW,
   MOTH_ERR_OOM,
   MOTH_ERR_BAD_OP,            /* unknown opcode / pc out of range */
+  MOTH_HALTED,                /* stopped by moth_request_halt, not an error */
 } moth_status;
 
 typedef enum { MV_NULL, MV_BOOL, MV_INT, MV_DOUBLE, MV_OBJ } moth_type;
@@ -94,6 +95,12 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len);
 
 /* Runs the entry function to completion. */
 moth_status moth_run(moth_vm *vm);
+
+/* Asks the running program to stop at the next instruction, returning
+ * MOTH_HALTED from moth_run. Safe to call from a native — that is the point:
+ * it is how a host swaps in a newly pushed program without waiting for a
+ * loop that never ends. */
+void moth_request_halt(moth_vm *vm);
 
 /* Human-readable description of the last failure ("" when none). Includes
  * the function name and pc for runtime traps. */
