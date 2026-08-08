@@ -96,11 +96,20 @@ class Compiler {
   /// Parses [unitPath], then its imports, depth first. A file already loaded
   /// is skipped, so import cycles terminate.
   void _loadUnit(String unitPath, String contents, int fromOffset) {
-    final absolute = p.normalize(p.absolute(unitPath));
-    if (!_loaded.add(absolute)) return;
+    // Key on the file's identity, not on how it was spelled. A case-insensitive
+    // filesystem makes 'a.dart' and 'A.dart' the same file, and a symlink gives
+    // two paths to one source; keying on the string loads it twice and then
+    // rejects the program for redeclaring everything in it.
+    var identity = p.normalize(p.absolute(unitPath));
+    try {
+      identity = File(unitPath).resolveSymbolicLinksSync();
+    } on FileSystemException {
+      // Missing files are reported by the caller, with a better message.
+    }
+    if (!_loaded.add(identity)) return;
 
-    final parsed =
-        parseString(content: contents, path: unitPath, throwIfDiagnostics: false);
+    final parsed = parseString(
+        content: contents, path: unitPath, throwIfDiagnostics: false);
     final unit = SourceUnit(unitPath, contents, parsed.lineInfo);
     _units.add(unit);
     currentUnit = unit;
@@ -250,7 +259,8 @@ class Compiler {
         throw CompileError(
           "'$superName' is not a class in this file",
           classDeclarations[i].offset,
-          hint: 'moth has no imports yet, so a superclass must be declared here',
+          hint:
+              'moth has no imports yet, so a superclass must be declared here',
         );
       }
       if (superIdx == i) {
@@ -315,17 +325,17 @@ class Compiler {
 
   List<(String, Expression)> effectiveFieldInits(int index) {
     final superIdx = classSuper[index];
-    final inherited =
-        superIdx == null ? <(String, Expression)>[] : effectiveFieldInits(superIdx);
+    final inherited = superIdx == null
+        ? <(String, Expression)>[]
+        : effectiveFieldInits(superIdx);
     return [...inherited, ...classFieldInits[index]];
   }
 
   /// Inherited methods, with the subclass's own replacing them by name.
   Map<String, int> effectiveMethodSlots(int index) {
     final superIdx = classSuper[index];
-    final merged = superIdx == null
-        ? <String, int>{}
-        : effectiveMethodSlots(superIdx);
+    final merged =
+        superIdx == null ? <String, int>{} : effectiveMethodSlots(superIdx);
     for (final (name, slot) in classMethodSlots[index]) {
       merged[name] = slot;
     }
