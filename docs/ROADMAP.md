@@ -82,7 +82,7 @@ Dart program draws in a desktop window and on the board.
       unmounts children as the list grows or shrinks
 - [x] Event bubbling — hit-testing reports the innermost node, so a tap walks
       up to the first ancestor with a handler
-- [ ] Keys, so reordered children keep their state
+- [x] Keys, so a reordered child keeps its element and node
 - [x] Multi-file imports, so the framework is a library programs import
 - [ ] Publish it as `package:moth` rather than a file in examples/
 - [ ] More widgets: Row/Column helpers, Slider, Switch, Image
