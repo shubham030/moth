@@ -223,6 +223,7 @@ struct moth_vm {
   size_t bytes_allocated;
   size_t next_gc;
   bool gc_enabled; /* off while the constant table is being built */
+  volatile bool halt_requested;
 
   char err[192];
 };

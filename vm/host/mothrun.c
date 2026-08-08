@@ -325,6 +325,7 @@ static const char *status_text(moth_status st) {
     case MOTH_ERR_STACK_OVERFLOW: return "stack overflow";
     case MOTH_ERR_OOM: return "out of memory";
     case MOTH_ERR_BAD_OP: return "corrupt program";
+    case MOTH_HALTED: return "stopped";
   }
   return "error";
 }

@@ -88,6 +88,10 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
     if (fr->ip < fr->fn->code || fr->ip >= fr->fn->code + fr->fn->code_len) {
       return trap(vm, fr, MOTH_ERR_BAD_OP, "ran off the end of the function");
     }
+    if (vm->halt_requested) {
+      vm->halt_requested = false;
+      return MOTH_HALTED;
+    }
     uint8_t op = *fr->ip++;
 
     switch (op) {
@@ -615,6 +619,10 @@ static int field_slot(moth_vm *vm, uint16_t class_index, uint16_t name_const) {
     if (cls->field_names[i] == name_const) return i;
   }
   return -1;
+}
+
+void moth_request_halt(moth_vm *vm) {
+  if (vm) vm->halt_requested = true;
 }
 
 moth_status moth_run(moth_vm *vm) {

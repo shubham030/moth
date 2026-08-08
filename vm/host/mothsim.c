@@ -7,6 +7,7 @@
 #include "moth_render.h"
 #include "moth_ui.h"
 #include "moth_vm.h"
+#include "push.h"
 
 #include <SDL.h>
 #include <inttypes.h>
@@ -29,6 +30,12 @@ static struct {
   int ntaps;
   long frame;
   long quit_after; /* 0 = run until the window closes */
+
+  /* Hot push: a newly arrived program waiting to replace the running one. */
+  moth_push *push;
+  uint8_t *pending;
+  size_t pending_len;
+  moth_vm *vm;
 } g_sim;
 
 static void pump_input(void) {
@@ -58,6 +65,20 @@ static void pump_input(void) {
 static void on_frame(bool repainted, void *user) {
   (void)user;
   pump_input();
+
+  /* A push asks the running program to stop; the display stays up, so the
+   * replacement draws over a live screen rather than a blank one. */
+  if (g_sim.push && !g_sim.pending) {
+    size_t len = 0;
+    uint8_t *blob = moth_push_poll(g_sim.push, &len);
+    if (blob) {
+      g_sim.pending = blob;
+      g_sim.pending_len = len;
+      printf("push: %zu bytes received, restarting\n", len);
+      fflush(stdout);
+      moth_request_halt(g_sim.vm);
+    }
+  }
 
   g_sim.frame++;
   for (int i = 0; i < g_sim.ntaps; i++) {
@@ -108,6 +129,12 @@ static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
   return moth_int(SDL_GetTicks());
 }
 
+static void register_host_natives(moth_vm *vm) {
+  moth_register(vm, "print", n_print, NULL);
+  moth_register(vm, "delay", n_delay, NULL);
+  moth_register(vm, "millis", n_millis, NULL);
+}
+
 static const char *status_text(moth_status st) {
   switch (st) {
     case MOTH_OK: return "ok";
@@ -118,6 +145,7 @@ static const char *status_text(moth_status st) {
     case MOTH_ERR_STACK_OVERFLOW: return "stack overflow";
     case MOTH_ERR_OOM: return "out of memory";
     case MOTH_ERR_BAD_OP: return "corrupt program";
+    case MOTH_HALTED: return "stopped";
   }
   return "error";
 }
@@ -132,6 +160,12 @@ int main(int argc, char **argv) {
       if (sscanf(argv[++i], "%dx%d", &g_sim.width, &g_sim.height) != 2) {
         fprintf(stderr, "mothsim: --size wants WIDTHxHEIGHT, e.g. 466x466\n");
         return 64;
+      }
+    } else if (strcmp(argv[i], "--listen") == 0 && i + 1 < argc) {
+      g_sim.push = moth_push_listen(atoi(argv[++i]));
+      if (!g_sim.push) {
+        fprintf(stderr, "mothsim: cannot listen on that port\n");
+        return 1;
       }
     } else if (strcmp(argv[i], "--round") == 0) {
       g_sim.round = true;
@@ -149,7 +183,8 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
       g_sim.quit_after = atol(argv[++i]);
     } else if (argv[i][0] == '-') {
-      fprintf(stderr, "usage: mothsim <program.mothb> [--size WxH] [--round] [--tap X,Y] [--frames N]\n");
+      fprintf(stderr, "usage: mothsim <program.mothb> [--size WxH] [--round] [--listen PORT]\n"
+              "                [--tap X,Y] [--frames N]\n");
       return 64;
     } else if (!path) {
       path = argv[i];
@@ -193,21 +228,42 @@ int main(int argc, char **argv) {
   }
 
   moth_vm *vm = moth_new();
-  moth_register(vm, "print", n_print, NULL);
-  moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
+  register_host_natives(vm);
   moth_ui_register(vm);
   moth_ui_set_frame_hook(on_frame, NULL);
 
-  moth_status st = moth_load(vm, blob, (size_t)len);
-  if (st != MOTH_OK) {
-    fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));
-    return 65;
-  }
-  st = moth_run(vm);
-  if (st != MOTH_OK) {
-    fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));
-    return 70;
+  uint8_t *current = blob;
+  size_t current_len = (size_t)len;
+
+  for (;;) {
+    g_sim.vm = vm;
+    moth_status st = moth_load(vm, current, current_len);
+    if (st != MOTH_OK) {
+      fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));
+      if (!g_sim.pending) return 65;
+    } else {
+      st = moth_run(vm);
+      if (st != MOTH_OK && st != MOTH_HALTED) {
+        fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));
+        if (!g_sim.pending) return 70;
+      }
+    }
+
+    if (!g_sim.pending) break;
+
+    /* Swap in the pushed program. The old program's nodes go with it —
+     * otherwise the new UI draws on top of a tree it does not own. */
+    mr_reset();
+    moth_free(vm);
+    free(current);
+    current = g_sim.pending;
+    current_len = g_sim.pending_len;
+    g_sim.pending = NULL;
+
+    vm = moth_new();
+    register_host_natives(vm);
+    moth_ui_register(vm);
+    moth_ui_set_frame_hook(on_frame, NULL);
   }
 
   /* The program finished; hold the window so the result stays visible. */
@@ -216,7 +272,8 @@ int main(int argc, char **argv) {
     SDL_Delay(16);
   }
   moth_free(vm);
-  free(blob);
+  free(current);
+  moth_push_close(g_sim.push);
   SDL_Quit();
   return 0;
 }

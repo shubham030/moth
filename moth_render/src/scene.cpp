@@ -90,6 +90,17 @@ void mr_safe_area(int *x, int *y, int *w, int *h) {
   if (h) *h = h_px;
 }
 
+void mr_reset(void) {
+  Scene &s = scene();
+  mr_config cfg = s.cfg;
+  /* The sink belongs to the host, not the program, so it survives a swap. */
+  mr_event_cb sink = s.sink;
+  void *sink_user = s.sink_user;
+  mr_init(&cfg);
+  s.sink = sink;
+  s.sink_user = sink_user;
+}
+
 void mr_shutdown(void) { scene() = Scene{}; }
 
 uint32_t mr_contract_version(void) { return MR_CONTRACT_VERSION; }
