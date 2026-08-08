@@ -51,6 +51,21 @@ static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
   int y0 = std::max(0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
   int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+  if (x1 <= x0 || y1 <= y0) return;
+
+  /* An opaque fill has nothing to blend with, and backgrounds are the biggest
+   * rectangles on screen — a full-screen panel is a fifth of a million pixels,
+   * and taking the general path for each cost more than everything else in a
+   * frame put together. */
+  if (((argb >> 24) & 0xFF) == 0xFF && opacity >= 1.0f) {
+    const uint32_t solid = 0xFF000000u | (argb & 0x00FFFFFFu);
+    for (int y = y0; y < y1; y++) {
+      uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+      std::fill(row + x0, row + x1, solid);
+    }
+    return;
+  }
+
   for (int y = y0; y < y1; y++) {
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
     for (int x = x0; x < x1; x++) row[x] = blend(row[x], argb, opacity);
@@ -139,6 +154,17 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   const float cap0x = cx + mid * std::sin(a0), cap0y = cy - mid * std::cos(a0);
   const float cap1x = cx + mid * std::sin(a1), cap1y = cy - mid * std::cos(a1);
 
+  /* Everything the stroke can touch lies in an annulus a pixel wider than the
+   * stroke on each side. Rejecting against its squared radii costs a multiply
+   * where taking the distance costs a square root, and nearly all of the
+   * bounding box is rejected — on a 466px panel that is the difference
+   * between ~217k square roots per arc and ~20k. */
+  const float r_in = mid - half - 1.0f;
+  const float r_out = mid + half + 1.0f;
+  const float r_in2 = r_in > 0.0f ? r_in * r_in : 0.0f;
+  const float r_out2 = r_out * r_out;
+  const float cap_r2 = (half + 1.0f) * (half + 1.0f);
+
   int x0 = std::max(0, (int)std::floor(cx - outer - 1.0f));
   int y0 = std::max(0, (int)std::floor(cy - outer - 1.0f));
   int x1 = std::min(s.cfg.width, (int)std::ceil(cx + outer + 1.0f));
@@ -147,30 +173,45 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   const uint32_t argb = n.u[MR_PROP_BG_COLOR];
 
   for (int y = y0; y < y1; y++) {
+    const float dy = (float)y + 0.5f - cy;
+    const float dy2 = dy * dy;
+    if (dy2 > r_out2) continue; /* this row misses the ring entirely */
+
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
     for (int x = x0; x < x1; x++) {
       const float dx = (float)x + 0.5f - cx;
-      const float dy = (float)y + 0.5f - cy;
-      const float dist = std::sqrt(dx * dx + dy * dy);
+      const float d2 = dx * dx + dy2;
+      if (d2 > r_out2 || d2 < r_in2) continue; /* outside the stroke: no sqrt */
 
-      /* How far inside the stroke this pixel is, radially. */
+      const float dist = std::sqrt(d2);
       float cov = clamp01(half + 0.5f - std::fabs(dist - mid));
-      if (cov > 0.0f && !closed) {
-        float ang = std::atan2(dx, -dy) / kDeg; /* 0 at twelve, clockwise */
-        float rel = ang - start;
-        while (rel < 0.0f) rel += 360.0f;
-        while (rel >= 360.0f) rel -= 360.0f;
-        if (rel > sweep) cov = 0.0f; /* past the end; the caps fill it in */
-      }
 
       if (!closed) {
-        /* Round caps, as discs centred on the ends of the centre line. */
-        const float d0x = (float)x + 0.5f - cap0x, d0y = (float)y + 0.5f - cap0y;
-        const float d1x = (float)x + 0.5f - cap1x, d1y = (float)y + 0.5f - cap1y;
-        float c0 = clamp01(half + 0.5f - std::sqrt(d0x * d0x + d0y * d0y));
-        float c1 = clamp01(half + 0.5f - std::sqrt(d1x * d1x + d1y * d1y));
-        if (c0 > cov) cov = c0;
-        if (c1 > cov) cov = c1;
+        if (cov > 0.0f) {
+          float ang = std::atan2(dx, -dy) / kDeg; /* 0 at twelve, clockwise */
+          float rel = ang - start;
+          while (rel < 0.0f) rel += 360.0f;
+          while (rel >= 360.0f) rel -= 360.0f;
+          if (rel > sweep) cov = 0.0f; /* past the end; a cap may still cover it */
+        }
+
+        /* Round caps, as discs on the ends of the centre line. They lie inside
+         * the annulus by construction, so this only sees pixels that already
+         * got past the radial check, and only while coverage is still to gain. */
+        if (cov < 1.0f) {
+          const float d0x = (float)x + 0.5f - cap0x, d0y = (float)y + 0.5f - cap0y;
+          const float q0 = d0x * d0x + d0y * d0y;
+          if (q0 <= cap_r2) {
+            const float c0 = clamp01(half + 0.5f - std::sqrt(q0));
+            if (c0 > cov) cov = c0;
+          }
+          const float d1x = (float)x + 0.5f - cap1x, d1y = (float)y + 0.5f - cap1y;
+          const float q1 = d1x * d1x + d1y * d1y;
+          if (q1 <= cap_r2) {
+            const float c1 = clamp01(half + 0.5f - std::sqrt(q1));
+            if (c1 > cov) cov = c1;
+          }
+        }
       }
 
       if (cov <= 0.0f) continue;
