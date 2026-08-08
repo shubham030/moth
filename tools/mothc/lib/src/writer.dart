@@ -1,7 +1,10 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-const int bytecodeVersion = 3;
+/// Must match MOTH_BYTECODE_VERSION in vm/include/moth_vm.h. The loader
+/// compares exactly, so a mismatch is refused at load rather than trapping
+/// partway through the program.
+const int bytecodeVersion = 4;
 
 /// Sentinel for "this program has no top-level initializers to run".
 const int noInit = 0xFFFF;

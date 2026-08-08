@@ -15,7 +15,12 @@
 extern "C" {
 #endif
 
-#define MOTH_BYTECODE_VERSION 3
+/* Bump this whenever a blob stops being safe for an older VM to run: a new
+ * opcode, a changed operand layout, a new section. Version 4 added OP_CLOSURE
+ * and OP_CALL_VALUE, which a version-3 VM would reach at run time and trap on,
+ * halfway through whatever the program had already done. The check is exact,
+ * so an old board refuses a new blob at load instead. */
+#define MOTH_BYTECODE_VERSION 4
 
 #ifndef MOTH_STACK_MAX
 #define MOTH_STACK_MAX 256
