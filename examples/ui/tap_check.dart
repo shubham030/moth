@@ -5,7 +5,7 @@
 //
 //   ./build/mothsim examples/ui/tap_check.mothb --frames 80 --tap 100,30
 
-import 'lib/widgets.dart';
+import 'package:moth/widgets.dart';
 
 var taps = 0;
 

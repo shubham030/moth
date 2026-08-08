@@ -40,7 +40,7 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
       parameters), methods, implicit `this`
 - [x] Single inheritance with method overriding
 - [ ] Named parameters and enums
-- [ ] **`package:moth` device API** — the idiomatic Dart layer over the native
+- [x] **`package:moth` device API** — the idiomatic Dart layer over the native
       boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
       ADR-009. Examples and docs get rewritten around it.
 
@@ -84,7 +84,7 @@ Dart program draws in a desktop window and on the board.
       up to the first ancestor with a handler
 - [x] Keys, so a reordered child keeps its element and node
 - [x] Multi-file imports, so the framework is a library programs import
-- [ ] Publish it as `package:moth` rather than a file in examples/
+- [x] Publish it as `package:moth` rather than a file in examples/
 - [ ] More widgets: Row/Column helpers, Slider, Switch, Image
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
@@ -121,7 +121,8 @@ Dart program draws in a desktop window and on the board.
 
 - [ ] README demo GIF (simulator + real hardware)
 - [ ] `moth create` project template
-- [ ] Contributor docs; golden tests wired to CI (simulator, no hardware)
+- [x] Golden tests wired to CI (simulator, no hardware)
+- [ ] Contributor docs
 - [ ] Publish: GitHub + pub.dev for the CLI and `package:moth`
 
 ## Track R — moth_render (parallel, best-effort)

@@ -91,7 +91,7 @@ static moth_value n_ui_safe_area(moth_vm *vm, int argc, const moth_value *argv, 
 static moth_value n_ui_create(moth_vm *vm, int argc, const moth_value *argv, void *user) {
   (void)vm; (void)argc; (void)user;
   int64_t kind = want_int(argv[0], MR_NODE_BOX);
-  if (kind < MR_NODE_BOX || kind > MR_NODE_SWITCH) kind = MR_NODE_BOX;
+  if (kind < MR_NODE_BOX || kind > MR_NODE_ARC) kind = MR_NODE_BOX;
   return moth_int(mr_node_create((mr_node_kind)kind));
 }
 

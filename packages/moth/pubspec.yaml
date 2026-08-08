@@ -1,0 +1,7 @@
+name: moth
+description: Dart for microcontrollers — pins, buses and a widget layer that runs on-device.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0

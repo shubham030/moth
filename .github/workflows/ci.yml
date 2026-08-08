@@ -1,0 +1,77 @@
+# Everything here runs without a board attached. The simulator models the
+# clock, the pins and the I2C bus, and mothsim renders into a dummy SDL driver,
+# so the reconciler's regression checks run on a CI machine exactly as they do
+# on a laptop. Hardware-only work — flashing, the panel, touch — is not covered
+# and has to be run by hand.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      # SDL2 is only needed for mothsim; the VM and mothrun build without it.
+      - name: Install SDL2
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev
+
+      - name: Build
+        run: cmake -B build . && cmake --build build
+
+      - name: Golden tests
+        run: |
+          dart pub get --directory tools/mothc
+          cd tools/mothc && dart test
+
+      # The goldens cover the language; these cover that every example still
+      # compiles, which is what breaks when the framework or the package moves.
+      - name: Compile every example
+        run: |
+          set -e
+          for f in examples/*.dart examples/ui/*.dart; do
+            echo "--- $f"
+            dart run tools/mothc/bin/mothc.dart "$f"
+          done
+
+      - name: Blink runs against the simulated clock
+        run: ./build/vm/mothrun examples/blink.mothb --stop-after 3000
+
+      # These print PASS/FAIL and then idle, and mothsim exits 0 when its frame
+      # budget runs out either way — so the output is what decides, not the
+      # exit code.
+      - name: Reconciler checks
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -e
+          out=$(./build/mothsim examples/ui/reconcile_check.mothb --frames 60)
+          echo "$out"
+          echo "$out" | grep -q 'all checks passed'
+
+      - name: A tap fires exactly one handler
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -e
+          out=$(./build/mothsim examples/ui/tap_check.mothb --frames 80 --tap 100,30)
+          echo "$out"
+          echo "$out" | grep -q 'PASS  one tap fires one handler'
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Build the documentation site
+        run: cd website && npm install && npm run build

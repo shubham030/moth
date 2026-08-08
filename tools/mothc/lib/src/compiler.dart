@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -125,15 +126,32 @@ class Compiler {
     for (final directive in parsed.unit.directives) {
       if (directive is ImportDirective) {
         final target = directive.uri.stringValue;
-        if (target == null || target.contains(':')) {
+        if (target == null) {
+          throw CompileError('this import is not a plain string',
+              directive.offset);
+        }
+        if (target.startsWith('dart:')) {
           throw CompileError(
-            'only relative file imports are supported',
+            "'$target' is not available on a microcontroller",
             directive.offset,
-            hint: "package: and dart: imports need a package system; "
-                "try import 'widgets.dart';",
+            hint: "moth's own libraries live under package:moth — "
+                "try import 'package:moth/moth.dart';",
           );
         }
-        final resolved = p.join(p.dirname(unitPath), target);
+
+        final String resolved;
+        if (target.startsWith('package:')) {
+          resolved = _resolvePackageUri(target, directive.uri.offset);
+        } else if (target.contains(':')) {
+          throw CompileError(
+            "'$target' is not a kind of import moth understands",
+            directive.offset,
+            hint: "use a relative path, or package:<name>/<file>.dart",
+          );
+        } else {
+          resolved = p.join(p.dirname(unitPath), target);
+        }
+
         final file = File(resolved);
         if (!file.existsSync()) {
           throw CompileError("cannot find '$target'", directive.uri.offset);
@@ -331,6 +349,103 @@ class Compiler {
     return [...inherited, ...classFieldInits[index]];
   }
 
+  /// Turns `package:moth/widgets.dart` into a path on disk.
+  ///
+  /// Two ways, in order. A `.dart_tool/package_config.json` beside the program
+  /// — what `dart pub get` writes — is authoritative, so a program in a real
+  /// pub package resolves the way the Dart SDK would. Failing that, moth's own
+  /// packages ship next to the compiler, so `package:moth/...` works in a
+  /// bare directory with no pub setup at all. That second path is what keeps
+  /// the first program someone writes a single file.
+  String _resolvePackageUri(String uri, int offset) {
+    final rest = uri.substring('package:'.length);
+    final slash = rest.indexOf('/');
+    if (slash <= 0 || slash == rest.length - 1) {
+      throw CompileError("'$uri' is missing a file after the package name",
+          offset,
+          hint: 'it should look like package:moth/moth.dart');
+    }
+    final packageName = rest.substring(0, slash);
+    final filePath = rest.substring(slash + 1);
+
+    for (final root in _packageRoots(packageName)) {
+      final candidate = p.join(root, filePath);
+      if (File(candidate).existsSync()) return candidate;
+    }
+    throw CompileError("cannot find '$uri'", offset,
+        hint: packageName == 'moth'
+            ? "moth's libraries should sit in packages/moth/lib beside the "
+                'compiler — is the checkout complete?'
+            : "add it to pubspec.yaml and run 'dart pub get'");
+  }
+
+  /// Candidate lib/ directories for a package, best source first.
+  List<String> _packageRoots(String name) {
+    final roots = <String>[];
+
+    // What `dart pub get` wrote, if the program lives in a pub package.
+    var dir = Directory(p.dirname(p.absolute(path)));
+    while (true) {
+      final cfg = File(p.join(dir.path, '.dart_tool', 'package_config.json'));
+      if (cfg.existsSync()) {
+        try {
+          final json = jsonDecode(cfg.readAsStringSync());
+          for (final pkg in (json['packages'] as List)) {
+            if (pkg['name'] != name) continue;
+            final rootUri = pkg['rootUri'] as String;
+            final packageUri = (pkg['packageUri'] as String?) ?? 'lib/';
+            final base = rootUri.startsWith('file://')
+                ? Uri.parse(rootUri).toFilePath()
+                : p.normalize(p.join(cfg.parent.path, rootUri));
+            roots.add(p.normalize(p.join(base, packageUri)));
+          }
+        } catch (_) {
+          // Any shape of broken package_config — bad JSON, a null packages
+          // list, a missing rootUri — falls through to the bundled copy,
+          // which is very likely what was wanted anyway. Catching only
+          // FormatException let valid JSON of the wrong shape kill the build
+          // with a stack trace.
+        }
+        break;
+      }
+      final parent = dir.parent;
+      if (parent.path == dir.path) break;
+      dir = parent;
+    }
+
+    // moth's own packages, which ship with the compiler.
+    final here = p.dirname(p.dirname(p.absolute(Platform.script.toFilePath())));
+    for (final guess in [
+      p.join(here, '..', '..', 'packages', name, 'lib'),
+      p.join(here, '..', 'packages', name, 'lib'),
+    ]) {
+      roots.add(p.normalize(guess));
+    }
+    return roots;
+  }
+
+  /// Distinguishes a setter from a getter or method of the same name. Dart
+  /// lets a class declare both `int get x` and `set x(int v)`, so the name
+  /// alone is not a unique key; the VM tells them apart by arity instead, and
+  /// the trailing '=' is stripped before the name reaches the class table.
+  static String _memberKey(MethodDeclaration m) =>
+      m.isSetter ? '${m.name.lexeme}=' : m.name.lexeme;
+
+  static String _plainName(String key) =>
+      key.endsWith('=') ? key.substring(0, key.length - 1) : key;
+
+  /// 0 method, 1 getter, 2 setter — matching MEMBER_* in vm/src/internal.h.
+  /// Kept out of the key itself so inheritance still overrides by name.
+  int _memberKindOf(String key) {
+    if (key.endsWith('=')) return 2;
+    return _getterKeys.contains(key) ? 1 : 0;
+  }
+
+  /// Keys that were declared with `get`. A getter and a zero-argument method
+  /// are the same shape once compiled, so this is the only thing that
+  /// distinguishes them.
+  final Set<String> _getterKeys = {};
+
   /// Inherited methods, with the subclass's own replacing them by name.
   Map<String, int> effectiveMethodSlots(int index) {
     final superIdx = classSuper[index];
@@ -360,7 +475,9 @@ class Compiler {
       final slots = <(String, int)>[];
       for (final member in decl.members) {
         if (member is MethodDeclaration) {
-          slots.add((member.name.lexeme, next++));
+          final key = _memberKey(member);
+          if (member.isGetter) _getterKeys.add(key);
+          slots.add((key, next++));
         }
       }
       classMethodSlots.add(slots);
@@ -374,7 +491,16 @@ class Compiler {
     // a superclass field or call a superclass method without qualification.
     final fields = effectiveFields(index);
     final inheritedMethods = effectiveMethodSlots(index);
-    final methodNames = inheritedMethods.keys.toList();
+    // Callable and readable members; setters are kept apart because they are
+    // assignable but not callable.
+    final methodNames = [
+      for (final k in inheritedMethods.keys)
+        if (!k.endsWith('=')) k,
+    ];
+    final setterNames = [
+      for (final k in inheritedMethods.keys)
+        if (k.endsWith('=')) _plainName(k),
+    ];
 
     var ctor = noCtor;
     final fieldInits = effectiveFieldInits(index);
@@ -385,7 +511,7 @@ class Compiler {
     // it appears among the members (and exists even when synthesized).
     if (classCtorIndex.containsKey(index)) {
       ctor = classCtorIndex[index]!;
-      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames,
+      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames, setterNames,
               isConstructor: true)
           .compileMember(
         name: '${decl.name.lexeme}()',
@@ -436,23 +562,17 @@ class Compiler {
                 'e.g. "print(thing.describe())"',
           );
         }
-        if (member.isGetter || member.isSetter) {
-          throw CompileError(
-            'getters and setters are not supported yet',
-            member.offset,
-            hint: 'use a plain method for now',
-          );
-        }
         final reserved = classMethodSlots[index]
-            .firstWhere((s) => s.$1 == member.name.lexeme)
+            .firstWhere((s) => s.$1 == _memberKey(member))
             .$2;
-        functions[reserved] = FunctionCompiler.member(this, fields, methodNames,
+        functions[reserved] = FunctionCompiler.member(this, fields, methodNames, setterNames,
                 isConstructor: false)
             .compileMember(
           name: '${decl.name.lexeme}.${member.name.lexeme}',
           params: member.parameters?.parameters ?? const [],
           body: member.body,
           offset: member.offset,
+          isSetter: member.isSetter,
         );
         continue;
       }
@@ -467,7 +587,11 @@ class Compiler {
       // Inherited entries included, own ones already replacing them by name.
       [
         for (final entry in inheritedMethods.entries)
-          (constants.addString(entry.key), entry.value),
+          (
+            constants.addString(_plainName(entry.key)),
+            entry.value,
+            _memberKindOf(entry.key),
+          ),
       ],
       ctor,
     );
@@ -511,10 +635,25 @@ class Compiler {
         decl.offset,
       );
     }
+    // Fields share the namespace with methods and accessors, and the VM
+    // resolves fields first — so a setter with a field's name is silently
+    // dead code, which in a hardware API is the line that drives the pin.
+    final fieldNames = fields.toSet();
+    for (final member in decl.members) {
+      if (member is MethodDeclaration && fieldNames.contains(member.name.lexeme)) {
+        throw CompileError(
+          "'${member.name.lexeme}' is already a field of this class",
+          member.offset,
+          hint: 'a field and an accessor cannot share a name — the field wins '
+              'and the accessor would never run; rename one',
+        );
+      }
+    }
+
     final seen = <String>{};
     for (final member in decl.members) {
       if (member is MethodDeclaration) {
-        if (!seen.add(member.name.lexeme)) {
+        if (!seen.add(_memberKey(member))) {
           throw CompileError(
             "'${member.name.lexeme}' is declared twice in this class",
             member.offset,

@@ -3,27 +3,48 @@
 **Flutter's programming model on a $6 microcontroller.**
 
 moth lets you write UI and application logic for ESP32-class microcontrollers in
-real Dart — `StatefulWidget`, `setState`, `build()` — and run it on-device via a
-small bytecode VM, rendering through [LVGL](https://lvgl.io).
+real Dart — widgets, `setState`, `build()` — and run it on-device via a small
+bytecode VM, drawing through moth's own renderer. The VM, the renderer and the
+bindings together add about 32 KB of flash on top of ESP-IDF.
 
 ```dart
-class VolumeScreen extends StatefulWidget {
-  State createState() => _VolumeState();
+import 'package:moth/moth.dart';
+
+class Counter extends Component {
+  int count = 0;
+
+  Widget build() {
+    var label = Text();
+    label.value = 'tapped $count times';
+
+    var panel = Box();
+    panel.color = 0xFF1A1B26;
+    panel.growFactor = 1;
+    panel.kids = [label];
+    panel.onTap = () {
+      setState(() {
+        count += 1;
+      });
+    };
+    return panel;
+  }
 }
 
-class _VolumeState extends State<VolumeScreen> {
-  int volume = 40;
-
-  Widget build() => Column(children: [
-        Label('Volume: $volume'),
-        Slider(value: volume, onChanged: (v) => setState(() => volume = v)),
-      ]);
+void main() {
+  runApp(Counter());
+  while (true) {
+    pumpFrame(16);
+    delay(16);
+  }
 }
 ```
 
-> **Status: early, but real.** Dart already runs on hardware — the VM executes
-> compiled Dart on an ESP32, driving GPIO. The widget layer above is next.
-> See [ROADMAP](docs/ROADMAP.md).
+It is wordier than Flutter because moth has no named parameters yet — that is
+a real gap, not a style choice. See [ROADMAP](docs/ROADMAP.md).
+
+> **Status: early, but real.** Dart runs on hardware: the VM drives GPIO, and
+> the widget layer above draws and takes touch on a 466x466 panel. A tap
+> rebuilds the tree and the reconciler patches the nodes in place.
 
 ## Learn one language, use it everywhere
 
@@ -47,7 +68,7 @@ void main() {
 
 ```
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
-wrote examples/blink.mothb (130 bytes)
+wrote examples/blink.mothb (136 bytes)
 
 $ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
 [     0ms] pin 38 -> output
@@ -57,7 +78,7 @@ $ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
 [  1500ms] pin 38 = low
 ```
 
-The same blob runs unchanged on the board. And because a program is 130 bytes
+The same blob runs unchanged on the board. And because a program is 136 bytes
 of bytecode rather than a firmware image, updating it later means pushing those
 bytes — not reflashing.
 
@@ -72,9 +93,15 @@ moth reimplements that model at MCU scale:
   bytecode, reusing the official Dart analyzer as its front end.
 - **Device VM (C, ESP-IDF component):** a small bytecode interpreter with GC,
   in the spirit of MicroPython / mruby. No Dart VM port, no Linux.
-- **Widget framework (pure Dart, runs on the VM):** widgets diff against LVGL's
-  retained object tree the way React diffs against the DOM. LVGL does layout,
-  drawing, and input; moth does state and reconciliation.
+- **Renderer (C++, `moth_render`):** a retained scene graph with flex layout,
+  a software rasterizer and native animations. moth owns layout and style
+  semantics rather than delegating them (ADR-007), so the same tree renders
+  identically on a laptop and on a panel.
+- **Widget framework (pure Dart, runs on the VM):** widgets diff against the
+  scene graph the way React diffs against the DOM. The renderer does layout,
+  drawing and input; moth does state and reconciliation.
+- **Device API (`package:moth`):** pins and buses as objects — `OutputPin`,
+  `AnalogPin`, `I2c` — over the flat Arduino-style built-ins.
 - **Hot push:** your app is a bytecode blob. Push a new one over WiFi and the
   UI restarts in place — no reflash, no cable.
 
@@ -86,18 +113,21 @@ moth reimplements that model at MCU scale:
 │  app.mothb  (bytecode blob)     │ /USB │  widget framework (Dart)    │
 └─────────────────────────────────┘      │    │ diff & patch           │
                                          │    ▼                        │
-                                         │  LVGL 9 (layout + render)   │
+                                         │  moth_render (layout+draw)  │
                                          └─────────────────────────────┘
 ```
 
 ## What moth is not
 
-- Not Flutter. No Impeller/Skia, no RenderObjects, no `dart:ui`. Rendering is
-  LVGL; widgets are moth's own (deliberately Flutter-flavored) API.
+- Not Flutter. No Impeller/Skia, no RenderObjects, no `dart:ui`. Widgets are
+  moth's own, deliberately Flutter-flavored, API.
+- Not networked, and not asynchronous. There is no event loop, so no `async`,
+  no `await`, no `Future` — and no WiFi, sockets or HTTP from Dart yet.
 - Not full Dart. The VM runs a practical subset — see
   [ARCHITECTURE](docs/ARCHITECTURE.md#dart-subset) for exactly what.
-- Not an LVGL XML tool. moth calls LVGL's MIT-licensed C API at runtime and
-  does not read or write the separately-licensed LVGL XML format
+- Not an LVGL project. An early plan to render through LVGL was dropped for
+  moth's own renderer ([ADR-007](docs/DECISIONS.md#adr-007)); moth never reads
+  or writes the separately-licensed LVGL XML format
   ([ADR-002](docs/DECISIONS.md#adr-002)).
 
 ## Hardware targets
@@ -109,6 +139,9 @@ scope for now.
 
 ## Docs
 
+- [getting-started.md](docs/getting-started.md) — install, compile, run without hardware
+- [hardware.md](docs/hardware.md) — pins and buses as objects (`package:moth`)
+- [language.md](docs/language.md) — the Dart subset, and what is rejected
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) — VM, bytecode, GC, bindings, widget layer
 - [BYTECODE.md](docs/BYTECODE.md) — instruction set and blob format
 - [BACKEND.md](docs/BACKEND.md) — the rendering-backend contract (nodes, layout, events)

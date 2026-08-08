@@ -191,6 +191,7 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
       for (uint16_t m = 0; m < c->nmethods; m++) {
         c->methods[m].name_const = rd_u16(&r);
         c->methods[m].func_index = rd_u16(&r);
+        c->methods[m].member_kind = rd_u8(&r);
       }
     }
     c->ctor = rd_u16(&r);

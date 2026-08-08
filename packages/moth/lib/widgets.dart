@@ -11,18 +11,31 @@
 
 final kBox = 0;
 final kLabel = 1;
+final kArc = 5;
 
+final propWidth = 0;
 final propHeight = 1;
 final propDirection = 2;
 final propMainAlign = 3;
+final propCrossAlign = 4;
 final propGrow = 5;
 final propGap = 6;
 final propPadding = 7;
+final propPosition = 8;
+final propLeft = 9;
+final propTop = 10;
 final propBgColor = 11;
 final propRadius = 12;
+final propBorderWidth = 13;
+final propBorderColor = 14;
 final propText = 16;
 final propFontSize = 17;
 final propTextColor = 18;
+final propArcStart = 23;
+final propArcSweep = 24;
+final propThickness = 25;
+
+final positionAbsolute = 1;
 
 final directionRow = 1;
 final alignCenter = 1;
@@ -61,7 +74,13 @@ class Box extends Widget {
   int growFactor = 0;
   int corner = 0;
   int fixedHeight = -1;
+  int fixedWidth = -1;
   int align = 0;
+
+  /// Alignment across the box's other axis — for a column, that is horizontal.
+  int crossAlign = 0;
+  int borderWidth = 0;
+  int borderColor = 0;
   var kids = [];
   Function? onTap;
 
@@ -78,7 +97,51 @@ class Box extends Widget {
     uiSetNum(node, propGrow, growFactor);
     uiSetNum(node, propRadius, corner);
     uiSetInt(node, propMainAlign, align);
+    uiSetInt(node, propCrossAlign, crossAlign);
+    uiSetNum(node, propBorderWidth, borderWidth);
+    uiSetInt(node, propBorderColor, borderColor);
     if (fixedHeight >= 0) uiSetNum(node, propHeight, fixedHeight);
+    if (fixedWidth >= 0) uiSetNum(node, propWidth, fixedWidth);
+  }
+}
+
+/// A stroked ring segment — a progress ring, a gauge, a dial.
+///
+/// Angles are degrees clockwise from twelve o'clock, which is how you would
+/// describe a progress ring out loud. A [sweep] of 360 or more closes it.
+/// The arc is inscribed in its own box, so it is normally placed absolutely
+/// over the whole display rather than laid out in the flow.
+class Arc extends Widget {
+  int color = 0xFFE0AF68;
+  int thickness = 6;
+
+  /// Where the stroke begins, and how far round it goes.
+  int start = 0;
+  int sweep = 360;
+
+  /// Size of the box the ring is inscribed in.
+  int size = 0;
+
+  /// Offset from the parent's content box, since an arc is positioned rather
+  /// than laid out.
+  int left = 0;
+  int top = 0;
+
+  String typeName() => 'Arc';
+  int kind() => kArc;
+
+  void apply(int node) {
+    uiSetInt(node, propPosition, positionAbsolute);
+    uiSetNum(node, propLeft, left);
+    uiSetNum(node, propTop, top);
+    if (size > 0) {
+      uiSetNum(node, propWidth, size);
+      uiSetNum(node, propHeight, size);
+    }
+    uiSetInt(node, propBgColor, color);
+    uiSetNum(node, propThickness, thickness);
+    uiSetNum(node, propArcStart, start);
+    uiSetNum(node, propArcSweep, sweep);
   }
 }
 

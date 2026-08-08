@@ -1,38 +1,19 @@
-// The same blink, written the way moth is meant to be written: an object
-// with a method, not a pile of loose functions taking pin numbers.
+// The same blink as examples/blink.dart, written with objects.
 //
-// This is a sketch of what package:moth will provide — for now the classes
-// live in your program, wrapping the low-level built-ins directly.
+//   dart run tools/mothc/bin/mothc.dart examples/blink_oo.dart
+//   ./build/vm/mothrun examples/blink_oo.mothb --stop-after 3000
+//
+// OutputPin comes from package:moth; Blinker is written here, to show that a
+// class of your own composes with the package's the same way it would in any
+// Dart program. There is nothing privileged about the ones that ship.
 
-class DigitalPin {
-  int number;
-  bool state = false;
+import 'package:moth/hardware.dart';
 
-  DigitalPin(this.number) {
-    pinOutput(number);
-  }
-
-  void write(bool value) {
-    state = value;
-    digitalWrite(number, value);
-  }
-
-  void toggle() {
-    write(!state);
-  }
-
-  void on() {
-    write(true);
-  }
-
-  void off() {
-    write(false);
-  }
-}
-
+/// Blinks a pin and remembers how often it has done so.
 class Blinker {
-  DigitalPin pin;
-  int periodMs;
+  final OutputPin pin;
+  final int periodMs;
+
   int count = 0;
 
   Blinker(this.pin, this.periodMs);
@@ -43,14 +24,11 @@ class Blinker {
     delay(periodMs);
   }
 
-  String report() {
-    return 'blinked ${count} times on pin ${pin.number}';
-  }
+  String report() => 'blinked $count times on pin ${pin.number}';
 }
 
 void main() {
-  var led = DigitalPin(38);
-  var blinker = Blinker(led, 500);
+  var blinker = Blinker(OutputPin(38), 500);
 
   for (var i = 0; i < 6; i++) {
     blinker.step();
