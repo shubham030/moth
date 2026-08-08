@@ -63,6 +63,59 @@ enum {
   OP_RET_NULL = 0x43,
 };
 
+/* The stack shape of every opcode, in one place.
+ *
+ *   X(opcode, operand_bytes, min_stack, net_effect)
+ *
+ * min_stack is how many operands the instruction reads; net_effect is what it
+ * leaves behind minus what it took. The verifier drives its checks from this
+ * table rather than restating them per case, because the bug it exists to
+ * catch is exactly an opcode whose stack model was written down twice and
+ * drifted. Opcodes whose consumption depends on an operand byte — the call
+ * family and NEW_LIST — carry 0/0 here and are checked where that operand is
+ * in hand; so do the jumps, whose two successors need different depths.
+ */
+#define MOTH_OPCODE_TABLE(X)      \
+  X(OP_NOP, 0, 0, 0)              \
+  X(OP_CONST, 2, 0, +1)           \
+  X(OP_INT8, 1, 0, +1)            \
+  X(OP_TRUE, 0, 0, +1)            \
+  X(OP_FALSE, 0, 0, +1)           \
+  X(OP_NULL, 0, 0, +1)            \
+  X(OP_POP, 0, 1, -1)             \
+  X(OP_DUP, 0, 1, +1)             \
+  X(OP_LOAD, 1, 0, +1)            \
+  X(OP_STORE, 1, 1, -1)           \
+  X(OP_LOAD_GLOBAL, 2, 0, +1)     \
+  X(OP_STORE_GLOBAL, 2, 1, -1)    \
+  X(OP_ADD, 0, 2, -1)             \
+  X(OP_SUB, 0, 2, -1)             \
+  X(OP_MUL, 0, 2, -1)             \
+  X(OP_DIV, 0, 2, -1)             \
+  X(OP_IDIV, 0, 2, -1)            \
+  X(OP_MOD, 0, 2, -1)             \
+  X(OP_BAND, 0, 2, -1)            \
+  X(OP_BOR, 0, 2, -1)             \
+  X(OP_BXOR, 0, 2, -1)            \
+  X(OP_SHL, 0, 2, -1)             \
+  X(OP_SHR, 0, 2, -1)             \
+  X(OP_EQ, 0, 2, -1)              \
+  X(OP_NE, 0, 2, -1)              \
+  X(OP_LT, 0, 2, -1)              \
+  X(OP_LE, 0, 2, -1)              \
+  X(OP_GT, 0, 2, -1)              \
+  X(OP_GE, 0, 2, -1)              \
+  X(OP_NEG, 0, 1, 0)              \
+  X(OP_NOT, 0, 1, 0)              \
+  X(OP_BNOT, 0, 1, 0)             \
+  X(OP_TO_STRING, 0, 1, 0)        \
+  X(OP_INDEX_GET, 0, 2, -1)       \
+  X(OP_INDEX_SET, 0, 3, -2)       \
+  X(OP_NEW_INSTANCE, 2, 0, +1)    \
+  X(OP_GET_PROP, 2, 1, 0)         \
+  X(OP_SET_PROP, 2, 2, -1)        \
+  X(OP_CLOSURE, 3, 0, +1)
+
 enum { CONST_INT = 0, CONST_DOUBLE = 1, CONST_STRING = 2, CONST_BOOL = 3, CONST_NULL = 4 };
 
 #define MOTH_NO_INIT 0xFFFF
