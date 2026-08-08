@@ -8,11 +8,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 #define PUSH_MAGIC "MPSH"
 #define HEADER_LEN 8
 #define MAX_BLOB (1u << 20) /* a megabyte is far beyond any real program */
+
+/* A peer that disappears without a FIN or an RST — a board losing power, a
+ * laptop closing its lid mid-push — leaves a socket that never reports an
+ * error and never delivers a byte. Without a deadline it would hold the
+ * channel forever and no later push could be accepted. Progress resets it,
+ * so this only fires on a connection that has gone completely silent. */
+#define PUSH_STALL_MS 5000
+
+static uint32_t now_ms(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
 
 struct moth_push {
   int listener;
@@ -21,6 +35,7 @@ struct moth_push {
   size_t header_got;
   uint8_t *blob;
   size_t blob_len, blob_got;
+  uint32_t last_progress_ms;
 };
 
 static void set_nonblocking(int fd) {
@@ -78,6 +93,12 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
     if (c < 0) return NULL; /* nothing waiting, or a transient failure */
     set_nonblocking(c);
     p->client = c;
+    p->last_progress_ms = now_ms();
+  } else if (now_ms() - p->last_progress_ms > PUSH_STALL_MS) {
+    fprintf(stderr, "push: client stalled, dropping it\n");
+    fflush(stderr);
+    drop_client(p);
+    return NULL;
   }
 
   if (p->header_got < HEADER_LEN) {
@@ -88,6 +109,7 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
       return NULL;
     }
     p->header_got += (size_t)n;
+    p->last_progress_ms = now_ms();
     if (p->header_got < HEADER_LEN) return NULL;
 
     if (memcmp(p->header, PUSH_MAGIC, 4) != 0) { drop_client(p); return NULL; }
@@ -109,6 +131,7 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
       return NULL;
     }
     p->blob_got += (size_t)n;
+    p->last_progress_ms = now_ms();
   }
 
   uint8_t *complete = p->blob;
