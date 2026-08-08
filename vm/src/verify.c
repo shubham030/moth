@@ -15,6 +15,7 @@
  */
 #include "internal.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +32,7 @@ typedef struct {
 } verifier;
 
 static bool fail_at(verifier *v, uint32_t pc, const char *what) {
-  snprintf(v->err, sizeof v->err, "%s at offset %u", what, pc);
+  snprintf(v->err, sizeof v->err, "%s at offset %" PRIu32, what, pc);
   return false;
 }
 
