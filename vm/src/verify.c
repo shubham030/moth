@@ -59,6 +59,26 @@ static uint16_t read16(const uint8_t *code, uint32_t pc) {
   return (uint16_t)(code[pc] | (code[pc + 1] << 8));
 }
 
+/* One opcode's stack shape, as declared in MOTH_OPCODE_TABLE. */
+typedef struct {
+  uint8_t operands;
+  uint8_t min_stack;
+  int8_t net;
+  bool known; /* false for the branch and call family, handled by hand */
+} op_shape;
+
+static op_shape shape_of(uint8_t op) {
+  switch (op) {
+#define MOTH_SHAPE_CASE(NAME, OPERANDS, MIN, NET) \
+  case NAME:                                      \
+    return (op_shape){(OPERANDS), (MIN), (NET), true};
+    MOTH_OPCODE_TABLE(MOTH_SHAPE_CASE)
+#undef MOTH_SHAPE_CASE
+    default:
+      return (op_shape){0, 0, 0, false};
+  }
+}
+
 /* Walks one instruction, returning the pcs that follow it. */
 static bool step(verifier *v, uint32_t pc, int depth) {
   const moth_func *fn = v->fn;
@@ -74,57 +94,48 @@ static bool step(verifier *v, uint32_t pc, int depth) {
     next += (n);                                                        \
   } while (0)
 
+  /* Opcodes with a fixed shape come straight off the table, so the operand
+   * count and the depth requirement cannot disagree with the interpreter's. */
+  op_shape sh = shape_of(op);
+  if (sh.known) {
+    OPERANDS(sh.operands);
+    if (depth < sh.min_stack) return fail_at(v, pc, "stack underflow");
+
+    /* Operand indices are the one thing the table cannot express. */
+    switch (op) {
+      case OP_CONST:
+        if (read16(code, pc + 1) >= vm->nconsts) return fail_at(v, pc, "constant out of range");
+        break;
+      case OP_GET_PROP: case OP_SET_PROP:
+        if (read16(code, pc + 1) >= vm->nconsts)
+          return fail_at(v, pc, "property name out of range");
+        break;
+      case OP_LOAD: case OP_STORE:
+        if (code[pc + 1] >= fn->nlocals) return fail_at(v, pc, "local out of range");
+        break;
+      case OP_LOAD_GLOBAL: case OP_STORE_GLOBAL:
+        if (read16(code, pc + 1) >= vm->nglobals) return fail_at(v, pc, "global out of range");
+        break;
+      case OP_NEW_INSTANCE:
+        if (read16(code, pc + 1) >= vm->nclasses) return fail_at(v, pc, "unknown class");
+        break;
+      case OP_CLOSURE:
+        if (read16(code, pc + 1) >= vm->nfuncs)
+          return fail_at(v, pc, "closure over an unknown function");
+        break;
+      default:
+        break;
+    }
+
+    depth += sh.net;
+    if (next >= fn->code_len) {
+      return fail_at(v, pc, "execution runs past the end of the function");
+    }
+    return reach(v, next, depth);
+  }
+
+  /* The rest either branch, or consume a count carried in their operands. */
   switch (op) {
-    case OP_NOP:
-      break;
-
-    case OP_CONST: {
-      OPERANDS(2);
-      if (read16(code, pc + 1) >= vm->nconsts) return fail_at(v, pc, "constant out of range");
-      depth += 1;
-      break;
-    }
-    case OP_INT8:
-      OPERANDS(1);
-      depth += 1;
-      break;
-    case OP_TRUE: case OP_FALSE: case OP_NULL:
-      depth += 1;
-      break;
-    case OP_POP:
-      depth -= 1;
-      break;
-    case OP_DUP:
-      if (depth < 1) return fail_at(v, pc, "stack underflow");
-      depth += 1;
-      break;
-
-    case OP_LOAD: case OP_STORE: {
-      OPERANDS(1);
-      if (code[pc + 1] >= fn->nlocals) return fail_at(v, pc, "local out of range");
-      depth += (op == OP_LOAD) ? 1 : -1;
-      break;
-    }
-    case OP_LOAD_GLOBAL: case OP_STORE_GLOBAL: {
-      OPERANDS(2);
-      if (read16(code, pc + 1) >= vm->nglobals) return fail_at(v, pc, "global out of range");
-      depth += (op == OP_LOAD_GLOBAL) ? 1 : -1;
-      break;
-    }
-
-    /* binary: two operands become one */
-    case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV: case OP_IDIV:
-    case OP_MOD: case OP_BAND: case OP_BOR: case OP_BXOR: case OP_SHL:
-    case OP_SHR: case OP_EQ: case OP_NE: case OP_LT: case OP_LE:
-    case OP_GT: case OP_GE:
-      depth -= 1;
-      break;
-
-    /* unary: one operand in, one out */
-    case OP_NEG: case OP_NOT: case OP_BNOT: case OP_TO_STRING:
-      if (depth < 1) return fail_at(v, pc, "stack underflow");
-      break;
-
     case OP_JUMP: {
       OPERANDS(2);
       int32_t target = (int32_t)next + (int16_t)read16(code, pc + 1);
@@ -135,9 +146,10 @@ static bool step(verifier *v, uint32_t pc, int depth) {
       OPERANDS(2);
       int32_t target = (int32_t)next + (int16_t)read16(code, pc + 1);
       if (target < 0) return fail_at(v, pc, "jump outside the function");
+      /* All three read the value on top; only the non-K form pops it. */
+      if (depth < 1) return fail_at(v, pc, "stack underflow");
       int taken = (op == OP_JUMP_IF_FALSE) ? depth - 1 : depth;
       if (op == OP_JUMP_IF_FALSE) depth -= 1;
-      if (depth < 0) return fail_at(v, pc, "stack underflow");
       if (!reach(v, (uint32_t)target, taken)) return false;
       break;
     }
@@ -148,6 +160,7 @@ static bool step(verifier *v, uint32_t pc, int depth) {
       uint8_t argc = code[pc + 3];
       if (idx >= vm->nfuncs) return fail_at(v, pc, "call to an unknown function");
       if (vm->funcs[idx].arity != argc) return fail_at(v, pc, "wrong argument count");
+      if (depth < argc) return fail_at(v, pc, "stack underflow");
       depth = depth - argc + 1;
       break;
     }
@@ -157,18 +170,23 @@ static bool step(verifier *v, uint32_t pc, int depth) {
       uint8_t argc = code[pc + 3];
       if (idx >= vm->nnatives) return fail_at(v, pc, "unknown built-in");
       if (vm->natives[idx].argc != argc) return fail_at(v, pc, "wrong built-in argument count");
+      if (depth < argc) return fail_at(v, pc, "stack underflow");
       depth = depth - argc + 1;
       break;
     }
     case OP_INVOKE: {
       OPERANDS(3);
       if (read16(code, pc + 1) >= vm->nconsts) return fail_at(v, pc, "method name out of range");
-      depth = depth - code[pc + 3] - 1 + 1; /* receiver and arguments, one result */
+      int argc = code[pc + 3];
+      if (depth < argc + 1) return fail_at(v, pc, "stack underflow"); /* receiver too */
+      depth = depth - argc; /* receiver and arguments out, one result in */
       break;
     }
     case OP_CALL_VALUE: {
       OPERANDS(1);
-      depth = depth - code[pc + 1] - 1 + 1; /* callee and arguments, one result */
+      int argc = code[pc + 1];
+      if (depth < argc + 1) return fail_at(v, pc, "stack underflow"); /* callee too */
+      depth = depth - argc; /* callee and arguments out, one result in */
       break;
     }
 
@@ -181,38 +199,8 @@ static bool step(verifier *v, uint32_t pc, int depth) {
     case OP_NEW_LIST: {
       OPERANDS(2);
       uint16_t count = read16(code, pc + 1);
+      if (depth < (int)count) return fail_at(v, pc, "stack underflow");
       depth = depth - (int)count + 1;
-      break;
-    }
-    case OP_INDEX_GET:
-      depth -= 1;
-      break;
-    case OP_INDEX_SET:
-      depth -= 2;
-      break;
-
-    case OP_NEW_INSTANCE: {
-      OPERANDS(2);
-      if (read16(code, pc + 1) >= vm->nclasses) return fail_at(v, pc, "unknown class");
-      depth += 1;
-      break;
-    }
-    case OP_GET_PROP: {
-      OPERANDS(2);
-      if (read16(code, pc + 1) >= vm->nconsts) return fail_at(v, pc, "property name out of range");
-      if (depth < 1) return fail_at(v, pc, "stack underflow");
-      break;
-    }
-    case OP_SET_PROP: {
-      OPERANDS(2);
-      if (read16(code, pc + 1) >= vm->nconsts) return fail_at(v, pc, "property name out of range");
-      depth -= 1;
-      break;
-    }
-    case OP_CLOSURE: {
-      OPERANDS(3);
-      if (read16(code, pc + 1) >= vm->nfuncs) return fail_at(v, pc, "closure over an unknown function");
-      depth += 1;
       break;
     }
 
