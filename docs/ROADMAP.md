@@ -83,7 +83,8 @@ Dart program draws in a desktop window and on the board.
 - [x] Event bubbling — hit-testing reports the innermost node, so a tap walks
       up to the first ancestor with a handler
 - [ ] Keys, so reordered children keep their state
-- [ ] Move it out of the example into `package:moth` (needs imports)
+- [x] Multi-file imports, so the framework is a library programs import
+- [ ] Publish it as `package:moth` rather than a file in examples/
 - [ ] More widgets: Row/Column helpers, Slider, Switch, Image
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 

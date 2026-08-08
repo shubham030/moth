@@ -52,7 +52,14 @@ void main(List<String> args) {
     File(outPath).writeAsBytesSync(result.blob);
     stdout.writeln('wrote $outPath (${result.blob.length} bytes)');
   } on CompileError catch (e) {
-    stderr.write(e.format(input, source, LineInfo.fromContent(source)));
+    // The error may have come from an imported file, so report it against
+    // whichever unit the compiler was processing.
+    final unit = compiler.currentUnit;
+    if (unit != null) {
+      stderr.write(e.format(unit.path, unit.source, unit.lineInfo));
+    } else {
+      stderr.write(e.format(input, source, LineInfo.fromContent(source)));
+    }
     exit(65);
   }
 }
