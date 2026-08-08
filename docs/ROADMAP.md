@@ -121,7 +121,8 @@ Dart program draws in a desktop window and on the board.
 
 - [ ] README demo GIF (simulator + real hardware)
 - [ ] `moth create` project template
-- [ ] Contributor docs; golden tests wired to CI (simulator, no hardware)
+- [x] Golden tests wired to CI (simulator, no hardware)
+- [ ] Contributor docs
 - [ ] Publish: GitHub + pub.dev for the CLI and `package:moth`
 
 ## Track R — moth_render (parallel, best-effort)
