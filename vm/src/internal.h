@@ -213,9 +213,15 @@ typedef struct {
 
 /* Field and method names are compared by constant index: the pool dedupes,
  * so identical names always share one index. Lookup is a short scan. */
+/* What a class member is. Arity cannot tell these apart — a getter and a
+ * zero-argument method both take only the receiver — and guessing meant
+ * reading `obj.method` ran it instead of tearing it off. */
+enum { MEMBER_METHOD = 0, MEMBER_GETTER = 1, MEMBER_SETTER = 2 };
+
 typedef struct {
   uint16_t name_const;
   uint16_t func_index;
+  uint8_t member_kind;
 } moth_method;
 
 typedef struct {

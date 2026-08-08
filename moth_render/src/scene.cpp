@@ -44,6 +44,11 @@ static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
     mr_node_id hit = hit_test(s, *it, px, py);
     if (hit != MR_NODE_NONE) return hit;
   }
+  /* An arc is a stroke, not a surface: its box covers the whole ring, so
+   * testing that box would make a decorative overlay swallow every tap
+   * beneath it. Ask the geometry instead. */
+  if (n->kind == MR_NODE_ARC) return arc_hit(*n, px, py) ? id : MR_NODE_NONE;
+
   bool inside = px >= n->x && px < n->x + n->w && py >= n->y && py < n->y + n->h;
   return inside ? id : MR_NODE_NONE;
 }

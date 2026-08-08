@@ -37,6 +37,11 @@ class FunctionCompiler {
   /// mean `this.name(...)`.
   final List<String> _enclosingMethods;
 
+  /// Setters declared on the enclosing class. Kept apart from the methods
+  /// because they are assignable but not callable — folding them together
+  /// would let a bare `brightness()` compile into a setter call.
+  final List<String> _enclosingSetters;
+
   /// A constructor returns `this` and may have initializing formals.
   final bool isConstructor;
 
@@ -52,6 +57,7 @@ class FunctionCompiler {
       : globalInits = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
+        _enclosingSetters = const [],
         isConstructor = false,
         isMember = false;
 
@@ -59,13 +65,15 @@ class FunctionCompiler {
       : decl = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
+        _enclosingSetters = const [],
         isConstructor = false,
         isMember = false;
 
   FunctionCompiler.member(
     this.unit,
     this.enclosingFields,
-    this._enclosingMethods, {
+    this._enclosingMethods,
+    this._enclosingSetters, {
     required this.isConstructor,
   })  : decl = null,
         globalInits = null,
@@ -812,7 +820,9 @@ class FunctionCompiler {
     // the setter — so one path covers them.
     if (target is SimpleIdentifier &&
         _resolve(target.name) == null &&
-        (_isField(target.name) || _enclosingMethods.contains(target.name))) {
+        (_isField(target.name) ||
+            _enclosingMethods.contains(target.name) ||
+            _enclosingSetters.contains(target.name))) {
       _propertyAssignment(expr, target, _emitThis);
       return;
     }
@@ -976,6 +986,7 @@ class FunctionCompiler {
       unit,
       enclosingFields,
       _enclosingMethods,
+      _enclosingSetters,
       isConstructor: false,
     );
     sub.outerLocals.addAll(outer);
@@ -1043,7 +1054,11 @@ class FunctionCompiler {
       name = operand.identifier.name;
     } else if (operand is SimpleIdentifier &&
         _resolve(operand.name) == null &&
-        _isField(operand.name)) {
+        (_isField(operand.name) || _enclosingMethods.contains(operand.name) ||
+            _enclosingSetters.contains(operand.name))) {
+      // Accessors as well as fields: GET_PROP and SET_PROP both fall back to
+      // them, so `value++` in a method works the same way `value = value + 1`
+      // already did.
       emitTarget = _emitThis;
       name = operand.name;
     }
@@ -1107,19 +1122,48 @@ class FunctionCompiler {
   void _cascadeSection(Expression section) {
     if (section is AssignmentExpression) {
       final target = section.leftHandSide;
-      if (target is PropertyAccess) {
-        // The receiver is already there, so nothing more to emit for it.
-        _propertyAssignment(section, target.propertyName, () {});
-        return;
+      if (target is! PropertyAccess) {
+        throw CompileError(
+          'only property assignment works in a cascade so far',
+          section.offset,
+          hint: 'write "..name = value"',
+        );
       }
-      throw CompileError(
-        'only property assignment works in a cascade so far',
-        section.offset,
-        hint: 'write "..name = value"',
-      );
+      if (target.target != null) {
+        // `..a.b = v` would assign b on a, not on the cascade target. The
+        // compiler cannot reach through that yet, and quietly assigning to
+        // the wrong object is worse than refusing.
+        throw CompileError(
+          'a cascade cannot reach through another property yet',
+          section.offset,
+          hint: 'assign it separately: "var x = thing.a; x.b = v;"',
+        );
+      }
+
+      // The receiver is already on the stack. A compound assignment needs it
+      // twice — once to read the old value, once to write the new one — so
+      // the second ask duplicates what is there rather than re-evaluating.
+      var used = false;
+      void receiver() {
+        if (!used) {
+          used = true;
+          return;
+        }
+        _emit(Op.dup);
+      }
+
+      _propertyAssignment(section, target.propertyName, receiver);
+      return;
     }
 
     if (section is MethodInvocation) {
+      if (section.target != null) {
+        throw CompileError(
+          'a cascade cannot call through another property yet',
+          section.offset,
+          hint: 'call it separately: "var x = thing.list; x.add(v);"',
+        );
+      }
       final args = section.argumentList.arguments;
       for (final a in args) {
         if (a is NamedExpression) {

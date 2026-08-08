@@ -74,8 +74,16 @@ class AnalogPin {
   double get fraction => value / 4095.0;
 
   /// The reading mapped onto [low]..[high] — the usual thing wanted from a
-  /// potentiometer, without every program rewriting the arithmetic.
-  int scaled(int low, int high) => low + (fraction * (high - low) + 0.5) ~/ 1;
+  /// potentiometer, without every program rewriting the arithmetic. An
+  /// inverted range works too: scaled(100, 0) counts down.
+  int scaled(int low, int high) {
+    // Add-half-then-truncate rounds correctly only for non-negative values,
+    // and ~/ truncates toward zero — so an inverted range read a step high
+    // across half of every step. Doing the arithmetic on a positive span and
+    // flipping afterwards keeps both directions honest.
+    if (high >= low) return low + (fraction * (high - low) + 0.5) ~/ 1;
+    return low - (fraction * (low - high) + 0.5) ~/ 1;
+  }
 }
 
 /// A pin driven with a square wave — dimming an LED, driving a motor.

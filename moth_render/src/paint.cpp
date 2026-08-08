@@ -214,6 +214,35 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
   }
 }
 
+/* Whether a point lies on the stroke — the same geometry draw_arc uses, so
+ * what you can touch is exactly what you can see. Without this an arc laid
+ * over content takes every tap in its bounding box, which for a ring around
+ * a display is the entire display. */
+bool arc_hit(const Node &n, float px, float py) {
+  float thickness = n.f[MR_PROP_THICKNESS];
+  if (thickness <= 0.0f) thickness = 4.0f;
+
+  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
+  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
+  const float mid = outer - thickness * 0.5f;
+  if (mid <= 0.0f) return false;
+
+  const float half = thickness * 0.5f;
+  const float dx = px - cx, dy = py - cy;
+  const float dist = std::sqrt(dx * dx + dy * dy);
+  if (std::fabs(dist - mid) > half) return false;
+
+  float sweep = n.f[MR_PROP_ARC_SWEEP];
+  if (sweep <= 0.0f) return false;
+  if (sweep >= 360.0f) return true;
+
+  const float kDeg = 3.14159265358979f / 180.0f;
+  float rel = std::atan2(dx, -dy) / kDeg - n.f[MR_PROP_ARC_START];
+  while (rel < 0.0f) rel += 360.0f;
+  while (rel >= 360.0f) rel -= 360.0f;
+  return rel <= sweep;
+}
+
 static void paint_node(Scene &s, mr_node_id id, float opacity) {
   Node *n = s.get(id);
   if (!n) return;
