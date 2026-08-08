@@ -42,6 +42,11 @@ for (final v in window) {
 print('avg ${total ~/ window.length}');
 ```
 
+**Imports** — `import 'other.dart';` with a relative path. Declarations from
+every imported file share one namespace, so a class can extend one declared
+elsewhere. Import cycles are fine; each file is loaded once. `package:` and
+`dart:` imports are not supported.
+
 **Closures** — function values, lambdas, and functions passed around or kept
 in lists. A lambda written inside a method captures `this`, so it can reach
 that object's fields and methods.
@@ -153,7 +158,6 @@ for (var i = 0; i < 10; i++) {
 | Inheritance, getters/setters, static members | after M1b |
 | `async` / `await`, `Future` | after M2 |
 | Mixins, generics, extensions, records | not planned for v1 |
-| `import` of other files | not planned for v1 |
 
 All of the M1b items depend on one thing — a heap with a garbage collector —
 so they land together.

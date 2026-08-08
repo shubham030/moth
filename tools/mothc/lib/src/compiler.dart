@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:analyzer/dart/analysis/utilities.dart';
 import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
+import 'package:path/path.dart' as p;
 
 import 'errors.dart';
 import 'function_compiler.dart';
@@ -13,6 +15,15 @@ class CompileResult {
   final Uint8List blob;
   final LineInfo lineInfo;
   CompileResult(this.blob, this.lineInfo);
+}
+
+/// One parsed file. Errors are reported against whichever unit was being
+/// processed, so a message from an imported file points at that file.
+class SourceUnit {
+  final String path;
+  final String source;
+  final LineInfo lineInfo;
+  SourceUnit(this.path, this.source, this.lineInfo);
 }
 
 /// Compiles one Dart source file to a .mothb blob.
@@ -76,14 +87,23 @@ class Compiler {
 
   Compiler(this.path, this.source);
 
-  CompileResult compile() {
-    final parsed = parseString(
-      content: source,
-      path: path,
-      throwIfDiagnostics: false,
-    );
-    final unit = parsed.unit;
-    final lineInfo = parsed.lineInfo;
+  /// The file currently being processed, so an error can be shown against
+  /// the right source even when it came from an import.
+  SourceUnit? currentUnit;
+  final List<SourceUnit> _units = [];
+  final Set<String> _loaded = {};
+
+  /// Parses [unitPath], then its imports, depth first. A file already loaded
+  /// is skipped, so import cycles terminate.
+  void _loadUnit(String unitPath, String contents, int fromOffset) {
+    final absolute = p.normalize(p.absolute(unitPath));
+    if (!_loaded.add(absolute)) return;
+
+    final parsed =
+        parseString(content: contents, path: unitPath, throwIfDiagnostics: false);
+    final unit = SourceUnit(unitPath, contents, parsed.lineInfo);
+    _units.add(unit);
+    currentUnit = unit;
 
     final syntaxErrors = parsed.errors.where((e) => e.severity.name == 'ERROR');
     if (syntaxErrors.isNotEmpty) {
@@ -91,7 +111,49 @@ class Compiler {
       throw CompileError(first.message, first.offset);
     }
 
-    _collectDeclarations(unit);
+    // Imports first, so a superclass or function from another file is known
+    // before this file's declarations are collected.
+    for (final directive in parsed.unit.directives) {
+      if (directive is ImportDirective) {
+        final target = directive.uri.stringValue;
+        if (target == null || target.contains(':')) {
+          throw CompileError(
+            'only relative file imports are supported',
+            directive.offset,
+            hint: "package: and dart: imports need a package system; "
+                "try import 'widgets.dart';",
+          );
+        }
+        final resolved = p.join(p.dirname(unitPath), target);
+        final file = File(resolved);
+        if (!file.existsSync()) {
+          throw CompileError("cannot find '$target'", directive.uri.offset);
+        }
+        _loadUnit(resolved, file.readAsStringSync(), directive.offset);
+        currentUnit = unit; // restore after the nested load
+      } else if (directive is! LibraryDirective) {
+        throw CompileError(
+          'only import directives are supported',
+          directive.offset,
+        );
+      }
+    }
+
+    _pendingUnits.add((unit, parsed.unit));
+  }
+
+  final List<(SourceUnit, CompilationUnit)> _pendingUnits = [];
+  final Map<int, SourceUnit> _declarationUnit = {};
+  final Map<int, SourceUnit> _classUnit = {};
+
+  CompileResult compile() {
+    _loadUnit(path, source, 0);
+
+    for (final (unit, ast) in _pendingUnits) {
+      currentUnit = unit;
+      _collectDeclarations(ast);
+    }
+    final lineInfo = _units.first.lineInfo;
 
     if (!functionIndex.containsKey('main')) {
       throw CompileError(
@@ -109,6 +171,7 @@ class Compiler {
     functions.addAll(List<FunctionBlob?>.filled(_reservedCount, null));
 
     for (var i = 0; i < _declarations.length; i++) {
+      currentUnit = _declarationUnit[i] ?? currentUnit;
       functions[i] = FunctionCompiler(this, _declarations[i]).compile();
     }
 
@@ -116,6 +179,7 @@ class Compiler {
     // slot 0 is the receiver. The class table records where they landed.
     final classes = <ClassBlob>[];
     for (var i = 0; i < classDeclarations.length; i++) {
+      currentUnit = _classUnit[i] ?? currentUnit;
       classes.add(_compileClass(i, functions));
     }
 
@@ -172,6 +236,7 @@ class Compiler {
         throw CompileError("'$name' is already defined", decl.offset);
       }
       functionIndex[name] = _declarations.length;
+      _declarationUnit[_declarations.length] = currentUnit!;
       _declarations.add(decl);
     }
   }
@@ -446,6 +511,7 @@ class Compiler {
     }
 
     classIndex[name] = classDeclarations.length;
+    _classUnit[classDeclarations.length] = currentUnit!;
     classDeclarations.add(decl);
     classFields.add(fields);
     classFieldInits.add(inits);
