@@ -3,7 +3,7 @@
 //   dart run tools/mothc/bin/mothc.dart examples/ui/counter_app.dart
 //   ./build/mothsim examples/ui/counter_app.mothb --size 466x466 --round --tap 240,240
 
-import 'lib/widgets.dart';
+import 'package:moth/widgets.dart';
 
 // ---- the app -------------------------------------------------------------
 
