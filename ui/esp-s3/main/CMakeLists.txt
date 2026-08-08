@@ -8,6 +8,7 @@ idf_component_register(
     "${ROOT}/moth_render/esp-s3/main/panel.c"
     "${ROOT}/vm/src/vm.c"
     "${ROOT}/vm/src/object.c"
+    "${ROOT}/vm/src/verify.c"
     "${ROOT}/vm/src/loader.c"
     "${ROOT}/ui/src/moth_ui.c"
     "${ROOT}/moth_render/src/scene.cpp"

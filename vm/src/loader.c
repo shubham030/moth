@@ -261,6 +261,13 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
   vm->k_remove_last = find_string_const(vm, "removeLast");
   vm->k_clear = find_string_const(vm, "clear");
 
+  /* Everything above checks the tables; this checks the code itself, so a
+   * blob arriving over the network cannot reach the interpreter unbalanced. */
+  char verr[160];
+  if (!moth_verify(vm, verr, sizeof verr)) {
+    return fail(vm, MOTH_ERR_FORMAT, "%s", verr);
+  }
+
   vm->blob = blob;
   vm->blob_len = len;
   vm->loaded = true;

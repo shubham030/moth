@@ -94,10 +94,10 @@ Dart program draws in a desktop window and on the board.
   nesting, which is fine on a host stack but risks overflowing an ESP-IDF
   task stack (a few KB) if deeply nested structures are collected on device.
   Needs an explicit mark stack or a depth cap.
-- **No bytecode verifier.** Load-time checks cover table bounds and indices,
-  and the interpreter bounds-checks operands, but nothing proves the operand
-  stack stays balanced across jumps. Required before M4 accepts blobs over
-  the network — see docs/BYTECODE.md.
+- ~~No bytecode verifier~~ — done: every function is abstractly interpreted
+  at load, so unbalanced or malformed code is refused before it runs.
+  Types are still unchecked, which is a language guarantee rather than a
+  memory-safety one.
 - **Native argument counts are taken from the blob.** `moth_register` does
   not record an arity for the host to cross-check against.
 
