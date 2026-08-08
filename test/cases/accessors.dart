@@ -28,6 +28,37 @@ class Counter {
   }
 }
 
+/// A getter and a zero-argument method are the same shape once compiled, so
+/// the class member's kind is recorded rather than guessed from arity.
+class Mixed {
+  int _n = 0;
+
+  int get value => _n;
+  set value(int v) {
+    _n = v;
+  }
+
+  /// Same arity as the getter, and must stay callable.
+  int twice() => _n * 2;
+
+  void bump() {
+    value++; // ++ through the accessor pair
+  }
+}
+
+/// A setter with no getter beside it, assigned by bare name from a method.
+class WriteOnly {
+  int raw = -1;
+
+  set level(int v) {
+    raw = v * 10;
+  }
+
+  void preset() {
+    level = 4;
+  }
+}
+
 void main() {
   var t = Thermo();
   t.celsius = 25;
@@ -50,4 +81,15 @@ void main() {
   print(c.value);
   c.value = -100;
   print(c.value);
+
+  var m = Mixed();
+  m.value = 7;
+  print(m.value);
+  print(m.twice()); // a method sharing the accessors' arity stays callable
+  m.bump();
+  print(m.value);
+
+  var w = WriteOnly();
+  w.preset();
+  print(w.raw);
 }

@@ -399,9 +399,12 @@ class Compiler {
                 : p.normalize(p.join(cfg.parent.path, rootUri));
             roots.add(p.normalize(p.join(base, packageUri)));
           }
-        } on FormatException {
-          // A broken package_config is not worth failing the build over; the
-          // bundled copy below is very likely what was wanted anyway.
+        } catch (_) {
+          // Any shape of broken package_config — bad JSON, a null packages
+          // list, a missing rootUri — falls through to the bundled copy,
+          // which is very likely what was wanted anyway. Catching only
+          // FormatException let valid JSON of the wrong shape kill the build
+          // with a stack trace.
         }
         break;
       }
@@ -430,6 +433,18 @@ class Compiler {
 
   static String _plainName(String key) =>
       key.endsWith('=') ? key.substring(0, key.length - 1) : key;
+
+  /// 0 method, 1 getter, 2 setter — matching MEMBER_* in vm/src/internal.h.
+  /// Kept out of the key itself so inheritance still overrides by name.
+  int _memberKindOf(String key) {
+    if (key.endsWith('=')) return 2;
+    return _getterKeys.contains(key) ? 1 : 0;
+  }
+
+  /// Keys that were declared with `get`. A getter and a zero-argument method
+  /// are the same shape once compiled, so this is the only thing that
+  /// distinguishes them.
+  final Set<String> _getterKeys = {};
 
   /// Inherited methods, with the subclass's own replacing them by name.
   Map<String, int> effectiveMethodSlots(int index) {
@@ -460,7 +475,9 @@ class Compiler {
       final slots = <(String, int)>[];
       for (final member in decl.members) {
         if (member is MethodDeclaration) {
-          slots.add((_memberKey(member), next++));
+          final key = _memberKey(member);
+          if (member.isGetter) _getterKeys.add(key);
+          slots.add((key, next++));
         }
       }
       classMethodSlots.add(slots);
@@ -474,9 +491,15 @@ class Compiler {
     // a superclass field or call a superclass method without qualification.
     final fields = effectiveFields(index);
     final inheritedMethods = effectiveMethodSlots(index);
+    // Callable and readable members; setters are kept apart because they are
+    // assignable but not callable.
     final methodNames = [
       for (final k in inheritedMethods.keys)
         if (!k.endsWith('=')) k,
+    ];
+    final setterNames = [
+      for (final k in inheritedMethods.keys)
+        if (k.endsWith('=')) _plainName(k),
     ];
 
     var ctor = noCtor;
@@ -488,7 +511,7 @@ class Compiler {
     // it appears among the members (and exists even when synthesized).
     if (classCtorIndex.containsKey(index)) {
       ctor = classCtorIndex[index]!;
-      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames,
+      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames, setterNames,
               isConstructor: true)
           .compileMember(
         name: '${decl.name.lexeme}()',
@@ -542,7 +565,7 @@ class Compiler {
         final reserved = classMethodSlots[index]
             .firstWhere((s) => s.$1 == _memberKey(member))
             .$2;
-        functions[reserved] = FunctionCompiler.member(this, fields, methodNames,
+        functions[reserved] = FunctionCompiler.member(this, fields, methodNames, setterNames,
                 isConstructor: false)
             .compileMember(
           name: '${decl.name.lexeme}.${member.name.lexeme}',
@@ -564,7 +587,11 @@ class Compiler {
       // Inherited entries included, own ones already replacing them by name.
       [
         for (final entry in inheritedMethods.entries)
-          (constants.addString(_plainName(entry.key)), entry.value),
+          (
+            constants.addString(_plainName(entry.key)),
+            entry.value,
+            _memberKindOf(entry.key),
+          ),
       ],
       ctor,
     );
@@ -608,6 +635,21 @@ class Compiler {
         decl.offset,
       );
     }
+    // Fields share the namespace with methods and accessors, and the VM
+    // resolves fields first — so a setter with a field's name is silently
+    // dead code, which in a hardware API is the line that drives the pin.
+    final fieldNames = fields.toSet();
+    for (final member in decl.members) {
+      if (member is MethodDeclaration && fieldNames.contains(member.name.lexeme)) {
+        throw CompileError(
+          "'${member.name.lexeme}' is already a field of this class",
+          member.offset,
+          hint: 'a field and an accessor cannot share a name — the field wins '
+              'and the accessor would never run; rename one',
+        );
+      }
+    }
+
     final seen = <String>{};
     for (final member in decl.members) {
       if (member is MethodDeclaration) {

@@ -66,6 +66,61 @@ void main() {
     expect(out, isNotEmpty);
   });
 
+  test('a method tear-off traps instead of silently calling the method', () {
+    // Reading `obj.method` used to invoke it — side effects and all — because
+    // a getter and a zero-argument method look identical by arity. The
+    // compiler cannot tell what `c` is, so this is caught at run time, and
+    // trapping is the honest answer until tear-offs exist.
+    final source = '''
+class Counter {
+  int n = 0;
+  void bump() { n += 1; }
+}
+
+void main() {
+  var c = Counter();
+  var f = c.bump;
+  print(c.n);
+  print(f);
+}
+''';
+    File('${dir.path}/main.dart').writeAsStringSync(source);
+    final blob = '${dir.path}/out.mothb';
+    final built = Process.runSync(
+        'dart', ['run', mothc, '${dir.path}/main.dart', '-o', blob]);
+    expect(built.exitCode, 0, reason: 'the compiler cannot know the receiver');
+
+    final mothrun = '$repoRoot/build/vm/mothrun';
+    final ran = Process.runSync(mothrun, [blob]);
+    final out = '${ran.stdout}${ran.stderr}';
+    expect(out, contains('no field or getter'));
+    expect(out, isNot(contains('\n1')),
+        reason: 'bump() must not have run');
+  });
+
+  test('a field and an accessor cannot share a name', () {
+    // The VM resolves fields first, so the accessor would never run — in a
+    // hardware API that is the line that drives the pin.
+    final out = compile('''
+class Servo {
+  int angle = 0;
+  set angle(int v) { angle = v; }
+}
+
+void main() { print(1); }
+''');
+    expect(out, contains('already a field'));
+  });
+
+  test('a cascade cannot reach through another property', () {
+    // Assigning to the wrong object silently is worse than refusing.
+    final out = compile('''
+class C { var log = []; }
+void main() { var c = C()..log.add(1); print(c.log); }
+''');
+    expect(out, contains('cannot call through another property'));
+  });
+
   test('dart: imports say why they cannot work', () {
     final out = compile("import 'dart:io';\nvoid main() { print(1); }\n");
     expect(out, contains('not available on a microcontroller'));
