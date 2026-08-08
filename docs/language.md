@@ -150,17 +150,80 @@ for (var i = 0; i < 10; i++) {
 }
 ```
 
+## Getters and setters
+
+A property can be computed rather than stored, and assigning to one can do
+work:
+
+```dart
+class Thermo {
+  int raw = 0;
+
+  int get celsius => raw ~/ 10;
+  set celsius(int c) {
+    raw = c * 10;
+  }
+
+  bool get isFreezing => celsius <= 0;
+}
+
+var t = Thermo();
+t.celsius = 25;      // runs the setter
+print(t.isFreezing); // runs the getter
+```
+
+They compile to ordinary methods sharing the property's name; the VM tells a
+getter from a setter by how many values it takes. Reading a property tries the
+object's fields first and only then an accessor, so a plain field can later
+become a getter without touching any caller.
+
+This is what makes [package:moth's hardware API](hardware.md) worth using:
+`led.value = true` really does drive the pin.
+
 ## What does not work yet
 
 | Feature | Milestone |
 | --- | --- |
 | Maps | M1b |
 | Static members, named constructors, named parameters | after M1b |
-| `async` / `await`, `Future` | after M2 |
+| `async` / `await`, `Future` | needs an event loop; see below |
+| Networking — WiFi, sockets, HTTP | not started |
 | Mixins, generics, extensions, records | not planned for v1 |
 
-All of the M1b items depend on one thing — a heap with a garbage collector —
-so they land together.
+## No async, and why
+
+There is no event loop on the device, so there is nothing for a `Future` to
+complete on. `async`, `await` and `Future` are rejected at compile time rather
+than half-supported:
+
+```
+main.dart:1:26: async functions are not supported yet
+  Future<int> twice(int n) async {
+                           ^
+  hint: moth has no event loop, so there is nothing for a Future to complete
+        on — write it synchronously, and use millis() to spread slow work
+        across frames
+```
+
+A program owns its own loop, so waiting is explicit — you call `delay()`, or
+you check `millis()` and do a slice of work per frame:
+
+```dart
+var nextRead = 0;
+while (true) {
+  final now = millis();
+  if (now >= nextRead) {
+    nextRead = now + 1000;
+    print(sensor.value);   // once a second, without blocking the frame
+  }
+  pumpFrame(16);
+  delay(16);
+}
+```
+
+That is the whole concurrency story today: one thread, one loop, no
+preemption. It is a real limitation, not a simplification — a driver that
+needs to wait on an interrupt has to be written in C behind a built-in.
 
 ## Strictness worth knowing about
 
