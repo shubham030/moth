@@ -1,6 +1,7 @@
 #include "push.h"
 
 #include <errno.h>
+#include <stdbool.h>
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -25,6 +26,14 @@ struct moth_push {
 static void set_nonblocking(int fd) {
   int flags = fcntl(fd, F_GETFL, 0);
   if (flags >= 0) fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+}
+
+/* True when a failed read simply had nothing to give. Anything else — a reset
+ * connection, a client killed mid-transfer — has to drop the client, or the
+ * channel stays occupied by a peer that will never send another byte and no
+ * further push is ever accepted. */
+static bool read_would_block(void) {
+  return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
 }
 
 static void drop_client(moth_push *p) {
@@ -66,7 +75,7 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
 
   if (p->client < 0) {
     int c = accept(p->listener, NULL, NULL);
-    if (c < 0) return NULL;
+    if (c < 0) return NULL; /* nothing waiting, or a transient failure */
     set_nonblocking(c);
     p->client = c;
   }
@@ -74,7 +83,10 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
   if (p->header_got < HEADER_LEN) {
     ssize_t n = read(p->client, p->header + p->header_got, HEADER_LEN - p->header_got);
     if (n == 0) { drop_client(p); return NULL; }
-    if (n < 0) return NULL; /* would block */
+    if (n < 0) {
+      if (!read_would_block()) drop_client(p);
+      return NULL;
+    }
     p->header_got += (size_t)n;
     if (p->header_got < HEADER_LEN) return NULL;
 
@@ -90,7 +102,12 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
   while (p->blob_got < p->blob_len) {
     ssize_t n = read(p->client, p->blob + p->blob_got, p->blob_len - p->blob_got);
     if (n == 0) { drop_client(p); return NULL; }
-    if (n < 0) return NULL; /* would block; resume next poll */
+    if (n < 0) {
+      /* Partway through a blob: a dropped peer means the half-read blob is
+       * junk, so the whole transfer is abandoned rather than resumed. */
+      if (!read_would_block()) drop_client(p);
+      return NULL;
+    }
     p->blob_got += (size_t)n;
   }
 

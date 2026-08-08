@@ -60,6 +60,48 @@ static void pump_input(void) {
   }
 }
 
+static void register_host_natives(moth_vm *vm);
+
+/* Loads a blob into a throwaway VM to find out whether it would run, without
+ * touching the one that is running. The natives have to match what the real
+ * VM offers, or a valid program would look unresolvable here. */
+static bool blob_is_loadable(const uint8_t *b, size_t len, char *err, size_t err_len) {
+  moth_vm *probe = moth_new();
+  if (!probe) return false;
+  register_host_natives(probe);
+  moth_ui_register(probe);
+
+  moth_status st = moth_load(probe, b, len);
+  if (st != MOTH_OK) snprintf(err, err_len, "%s", moth_error(probe));
+  moth_free(probe);
+  return st == MOTH_OK;
+}
+
+/* Takes a pushed blob if one has arrived and it survives verification.
+ * Rejecting here rather than after the swap is the whole point: a bad blob
+ * must not be able to take the running program down with it. */
+static bool accept_push(void) {
+  if (!g_sim.push || g_sim.pending) return false;
+
+  size_t len = 0;
+  uint8_t *blob = moth_push_poll(g_sim.push, &len);
+  if (!blob) return false;
+
+  char err[256] = {0};
+  if (!blob_is_loadable(blob, len, err, sizeof err)) {
+    fprintf(stderr, "push: rejected (%zu bytes): %s\n", len, err);
+    fflush(stderr);
+    free(blob);
+    return false; /* the running program never noticed */
+  }
+
+  g_sim.pending = blob;
+  g_sim.pending_len = len;
+  printf("push: %zu bytes received, restarting\n", len);
+  fflush(stdout);
+  return true;
+}
+
 /* Called from uiCommit — the only moment the host gets control while the
  * Dart program's loop is running. */
 static void on_frame(bool repainted, void *user) {
@@ -68,17 +110,7 @@ static void on_frame(bool repainted, void *user) {
 
   /* A push asks the running program to stop; the display stays up, so the
    * replacement draws over a live screen rather than a blank one. */
-  if (g_sim.push && !g_sim.pending) {
-    size_t len = 0;
-    uint8_t *blob = moth_push_poll(g_sim.push, &len);
-    if (blob) {
-      g_sim.pending = blob;
-      g_sim.pending_len = len;
-      printf("push: %zu bytes received, restarting\n", len);
-      fflush(stdout);
-      moth_request_halt(g_sim.vm);
-    }
-  }
+  if (accept_push()) moth_request_halt(g_sim.vm);
 
   g_sim.frame++;
   for (int i = 0; i < g_sim.ntaps; i++) {
@@ -249,7 +281,17 @@ int main(int argc, char **argv) {
       }
     }
 
-    if (!g_sim.pending) break;
+    /* The program ended on its own. Keep the window up and keep listening:
+     * a push aimed at a finished program used to be read off the socket and
+     * dropped, so mothc reported success and nothing happened. */
+    if (!g_sim.pending) {
+      if (!g_sim.push) break;
+      while (!g_sim.quit && !accept_push()) {
+        pump_input();
+        SDL_Delay(16);
+      }
+      if (!g_sim.pending) break; /* the window was closed, not a push */
+    }
 
     /* Swap in the pushed program. The old program's nodes go with it —
      * otherwise the new UI draws on top of a tree it does not own. */
