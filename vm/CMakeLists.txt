@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(moth_vm STATIC
   src/vm.c
   src/object.c
+  src/verify.c
   src/loader.c
 )
 target_include_directories(moth_vm PUBLIC include)

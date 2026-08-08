@@ -135,6 +135,9 @@ int moth_format_double(char *buf, size_t n, double d);
 void moth_collect(moth_vm *vm);
 void moth_free_objects(moth_vm *vm);
 
+/* verify.c — abstract-interprets every function's stack depth at load. */
+bool moth_verify(moth_vm *vm, char *err, size_t err_len);
+
 typedef struct {
   uint16_t name_const;
   uint8_t arity;

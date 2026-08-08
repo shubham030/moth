@@ -164,11 +164,19 @@ that every method and constructor index is in range and has a receiver slot.
 At run time, operand reads are bounds-checked against the function's code and
 operand-driven pops are checked against stack depth.
 
-That is enough to reject the malformed blobs seen so far, but it is **not a
-verifier**. A blob is still trusted to keep the operand stack balanced across
-jumps. Before M4 accepts blobs over the network, this needs a real
-verification pass — abstract interpretation of stack depth along every path —
-or the push channel needs to be authenticated. Tracked on the roadmap.
+Then every function is **verified** before anything runs: each is abstractly
+interpreted along all reachable paths, tracking operand-stack depth. An
+instruction reached twice must be reached at the same depth, which rejects
+unbalanced jumps; the same walk checks for underflow and overflow, operand
+indices, call arities, jumps that land outside the code or off an
+instruction boundary, and unknown opcodes.
+
+Fuzzing 500 byte-mutated blobs: 457 are refused at load, 9 trap during the
+run, 34 are harmless (mutations inside constant data), and none crash.
+
+What verification still does not check is types — a program can put text
+where a number belongs and trap at run time. That is a language-level
+guarantee moth does not make yet, not a memory-safety hole.
 
 ## Not yet
 
