@@ -56,8 +56,17 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
         if (!((glyph[row] >> col) & 1)) continue;
         float px = pen_x + (float)(col * scale);
         float py = n.y + (float)(row * scale);
-        if (px + scale <= n.x || px >= n.x + n.w) continue; /* clip to the box */
-        fill_rect(s, px, py, (float)scale, (float)scale, color, opacity);
+
+        /* Clip to the node's box on both axes. Clamping rather than skipping
+         * matters once scale > 1, where a block can straddle the edge and
+         * would otherwise be drawn whole, spilling over a sibling. */
+        float x0 = px < n.x ? n.x : px;
+        float y0 = py < n.y ? n.y : py;
+        float x1 = px + (float)scale, y1 = py + (float)scale;
+        if (x1 > n.x + n.w) x1 = n.x + n.w;
+        if (y1 > n.y + n.h) y1 = n.y + n.h;
+        if (x1 <= x0 || y1 <= y0) continue;
+        fill_rect(s, x0, y0, x1 - x0, y1 - y0, color, opacity);
       }
     }
     pen_x += (float)(MOTH_GLYPH_PX * scale);
