@@ -21,6 +21,7 @@ var dayOfMonth = 8;
 var monthName = 'AUG';
 var weekday = 'FRI';
 
+final black = 0xFF000000;
 final palette = 0xFFE8A33D; // the ring, and anything that should catch the eye
 final dim = 0xFF6B6B76;
 final bright = 0xFFF2EFE7;
@@ -57,97 +58,79 @@ class WatchFace extends Component {
   bool hasGps = false;
 
   Widget build() {
-    final inset = uiSafeArea(0);
+    return Box()
+      ..color = black
+      ..growFactor = 1
+      ..kids = [
+        // The face itself, inset to the round panel's safe area.
+        Box()
+          ..color = black
+          ..growFactor = 1
+          ..pad = uiSafeArea(0)
+          ..space = 18
+          ..align = alignCenter
+          ..crossAlign = alignCenter
+          ..onTap = () {
+            setState(() {
+              showSeconds = !showSeconds;
+            });
+          }
+          ..kids = [
+            Text()
+              ..value = showSeconds
+                  ? '${clock.display}:${clock.two(clock.seconds)}'
+                  : clock.display
+              ..size = showSeconds ? 48 : 72
+              ..tint = bright,
+            Text()
+              ..value = clock.date
+              ..size = 20
+              ..tint = dim,
+            Box()
+              ..color = 0xFF2A2A31
+              ..fixedHeight = 2
+              ..fixedWidth = 200,
+            Box()
+              ..direction = directionRow
+              ..space = 14
+              ..align = alignCenter
+              ..crossAlign = alignCenter
+              ..kids = [percent(), dot(), gpsLabel()],
+            Text()
+              ..value = 'TAP FOR SECONDS'
+              ..size = 14
+              ..tint = 0xFF44444E,
+          ],
 
-    var time = Text();
-    time.value = showSeconds ? '${clock.display}:${clock.two(clock.seconds)}' : clock.display;
-    time.size = showSeconds ? 48 : 72;
-    time.tint = bright;
-
-    var date = Text();
-    date.value = clock.date;
-    date.size = 20;
-    date.tint = dim;
-
-    var rule = Box();
-    rule.color = 0xFF2A2A31;
-    rule.fixedHeight = 2;
-    rule.fixedWidth = 200;
-
-    var status = Box();
-    status.direction = directionRow;
-    status.space = 14;
-    status.align = alignCenter;
-    status.crossAlign = alignCenter;
-    status.kids = [percent(), dot(), gpsLabel()];
-
-    var hint = Text();
-    hint.value = 'TAP FOR SECONDS';
-    hint.size = 14;
-    hint.tint = 0xFF44444E;
-
-    var column = Box();
-    column.color = 0xFF000000;
-    column.growFactor = 1;
-    column.space = 18;
-    column.align = alignCenter;
-    column.crossAlign = alignCenter;
-    column.pad = inset;
-    column.kids = [time, date, rule, status, hint];
-    column.onTap = () {
-      setState(() {
-        showSeconds = !showSeconds;
-      });
-    };
-
-    // The ring sits over everything, inscribed in the full display rather
-    // than the safe area — it is meant to hug the bezel.
-    var ring = Arc();
-    ring.color = palette;
-    ring.thickness = 6;
-    ring.start = 0;
-    ring.sweep = clock.minuteSweep;
-    ring.size = uiWidth();
-
-    // A dim full ring underneath, so the gap reads as a track rather than a
-    // missing piece.
-    var track = Arc();
-    track.color = 0xFF1C1C21;
-    track.thickness = 6;
-    track.sweep = 360;
-    track.size = uiWidth();
-
-    var root = Box();
-    root.color = 0xFF000000;
-    root.growFactor = 1;
-    root.kids = [column, track, ring];
-    return root;
+        // The track, then the minute hand over it, hugging the bezel.
+        Arc()
+          ..color = 0xFF1C1C21
+          ..thickness = 6
+          ..sweep = 360
+          ..size = uiWidth(),
+        Arc()
+          ..color = palette
+          ..thickness = 6
+          ..sweep = clock.minuteSweep
+          ..size = uiWidth(),
+      ];
   }
 
-  Widget percent() {
-    var t = Text();
-    t.value = '$battery%';
-    t.size = 18;
-    t.tint = dim;
-    return t;
-  }
+  Widget percent() => Text()
+    ..value = '$battery%'
+    ..size = 18
+    ..tint = dim;
 
-  Widget dot() {
-    var d = Box();
-    d.color = hasGps ? 0xFF7FD17F : 0xFFE05252;
-    d.fixedWidth = 10;
-    d.fixedHeight = 10;
-    d.corner = 5; // now actually drawn as a circle
-    return d;
-  }
+  Widget dot() => Box()
+    ..color = hasGps ? 0xFF7FD17F : 0xFFE05252
+    ..fixedWidth = 10
+    ..fixedHeight = 10
+    ..corner = 5; // a real circle now that radius is drawn
 
-  Widget gpsLabel() {
-    var t = Text();
-    t.value = hasGps ? 'GPS' : 'NO GPS';
-    t.size = 18;
-    t.tint = dim;
-    return t;
-  }
+  Widget gpsLabel() => Text()
+    ..value = hasGps ? 'GPS' : 'NO GPS'
+    ..size = 18
+    ..tint = dim;
 }
 
 final face = WatchFace();

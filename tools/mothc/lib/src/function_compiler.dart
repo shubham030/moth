@@ -592,6 +592,8 @@ class FunctionCompiler {
         _conditional(expr);
       case MethodInvocation():
         _call(expr);
+      case CascadeExpression():
+        _cascade(expr);
       default:
         throw CompileError(
           'this kind of expression is not supported yet',
@@ -1085,6 +1087,57 @@ class FunctionCompiler {
     _emit(valueSlot);
     _popScope();
     return true;
+  }
+
+  /// `target..a = 1..b()` — the target is evaluated once and stays on the
+  /// stack; each section works on a copy and throws its own result away. The
+  /// whole expression is the target, which is what lets a widget be
+  /// configured and passed along in one expression.
+  void _cascade(CascadeExpression expr) {
+    _expression(expr.target);
+
+    for (final section in expr.cascadeSections) {
+      _emit(Op.dup);
+      _cascadeSection(section);
+      _emit(Op.pop); // a section's value is discarded; the target is the result
+    }
+  }
+
+  /// One `..something`, compiled with the receiver already on the stack.
+  void _cascadeSection(Expression section) {
+    if (section is AssignmentExpression) {
+      final target = section.leftHandSide;
+      if (target is PropertyAccess) {
+        // The receiver is already there, so nothing more to emit for it.
+        _propertyAssignment(section, target.propertyName, () {});
+        return;
+      }
+      throw CompileError(
+        'only property assignment works in a cascade so far',
+        section.offset,
+        hint: 'write "..name = value"',
+      );
+    }
+
+    if (section is MethodInvocation) {
+      final args = section.argumentList.arguments;
+      for (final a in args) {
+        if (a is NamedExpression) {
+          throw CompileError('named arguments are not supported yet', a.offset);
+        }
+        _expression(a);
+      }
+      _emit(Op.invoke);
+      _emitU16(unit.constants.addString(section.methodName.name));
+      _emit(args.length);
+      return;
+    }
+
+    throw CompileError(
+      'this kind of cascade section is not supported yet',
+      section.offset,
+      hint: 'assignments and method calls work',
+    );
   }
 
   void _call(MethodInvocation call) {

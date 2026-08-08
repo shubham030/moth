@@ -150,6 +150,27 @@ for (var i = 0; i < 10; i++) {
 }
 ```
 
+## Cascades
+
+`..` configures an object without naming it repeatedly. The target is
+evaluated once, each section runs against it, and the expression's value is
+the target — so a widget tree nests instead of unrolling into a list of
+assignments to temporaries:
+
+```dart
+Box()
+  ..color = 0xFF000000
+  ..pad = 24
+  ..kids = [
+    Text()..value = '14:32'..size = 72,
+    Text()..value = 'FRI 8 AUG'..size = 20,
+  ]
+```
+
+Assignments and method calls both work as sections. This is what gives a
+`build()` method the shape a Flutter developer expects; named parameters,
+which would let it read `Box(color: black, kids: [...])`, are still to come.
+
 ## Getters and setters
 
 A property can be computed rather than stored, and assigning to one can do
