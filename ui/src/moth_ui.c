@@ -75,6 +75,17 @@ static moth_value n_ui_frame_of(moth_vm *vm, int argc, const moth_value *argv, v
   return moth_int((int64_t)f[which]);
 }
 
+/* On a round panel the corners are behind the bezel; this is the rectangle
+ * an app can safely fill. */
+static moth_value n_ui_safe_area(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
+  int f[4];
+  mr_safe_area(&f[0], &f[1], &f[2], &f[3]);
+  int64_t which = want_int(argv[0], 0);
+  if (which < 0 || which > 3) return moth_int(0);
+  return moth_int(f[which]);
+}
+
 /* ---- tree -------------------------------------------------------------- */
 
 static moth_value n_ui_create(moth_vm *vm, int argc, const moth_value *argv, void *user) {
@@ -196,6 +207,7 @@ void moth_ui_register(moth_vm *vm) {
   moth_register(vm, "uiHeight", n_ui_height, NULL);
   moth_register(vm, "uiRoot", n_ui_root, NULL);
   moth_register(vm, "uiFrameOf", n_ui_frame_of, NULL);
+  moth_register(vm, "uiSafeArea", n_ui_safe_area, NULL);
   moth_register(vm, "uiCreate", n_ui_create, NULL);
   moth_register(vm, "uiDestroy", n_ui_destroy, NULL);
   moth_register(vm, "uiAttach", n_ui_attach, NULL);

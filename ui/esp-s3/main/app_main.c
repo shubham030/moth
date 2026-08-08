@@ -61,7 +61,8 @@ static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
 void app_main(void) {
   ESP_ERROR_CHECK(panel_init());
 
-  mr_config cfg = {PANEL_W, PANEL_H};
+  /* 1.75" CO5300 is circular: corners sit behind the bezel. */
+  mr_config cfg = {PANEL_W, PANEL_H, MR_SHAPE_ROUND};
   if (!mr_init(&cfg)) {
     ESP_LOGE(TAG, "renderer init failed");
     return;
