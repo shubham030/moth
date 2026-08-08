@@ -9,7 +9,7 @@
 // The fifth finding — one tap firing twice — needs a real tap, so it lives in
 // tap_check.dart.
 
-import 'lib/widgets.dart';
+import 'package:moth/widgets.dart';
 
 var failures = 0;
 

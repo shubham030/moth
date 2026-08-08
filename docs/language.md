@@ -155,7 +155,7 @@ for (var i = 0; i < 10; i++) {
 | Feature | Milestone |
 | --- | --- |
 | Maps | M1b |
-| Inheritance, getters/setters, static members | after M1b |
+| Static members, named constructors, named parameters | after M1b |
 | `async` / `await`, `Future` | after M2 |
 | Mixins, generics, extensions, records | not planned for v1 |
 

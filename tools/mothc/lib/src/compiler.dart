@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -125,15 +126,32 @@ class Compiler {
     for (final directive in parsed.unit.directives) {
       if (directive is ImportDirective) {
         final target = directive.uri.stringValue;
-        if (target == null || target.contains(':')) {
+        if (target == null) {
+          throw CompileError('this import is not a plain string',
+              directive.offset);
+        }
+        if (target.startsWith('dart:')) {
           throw CompileError(
-            'only relative file imports are supported',
+            "'$target' is not available on a microcontroller",
             directive.offset,
-            hint: "package: and dart: imports need a package system; "
-                "try import 'widgets.dart';",
+            hint: "moth's own libraries live under package:moth — "
+                "try import 'package:moth/moth.dart';",
           );
         }
-        final resolved = p.join(p.dirname(unitPath), target);
+
+        final String resolved;
+        if (target.startsWith('package:')) {
+          resolved = _resolvePackageUri(target, directive.uri.offset);
+        } else if (target.contains(':')) {
+          throw CompileError(
+            "'$target' is not a kind of import moth understands",
+            directive.offset,
+            hint: "use a relative path, or package:<name>/<file>.dart",
+          );
+        } else {
+          resolved = p.join(p.dirname(unitPath), target);
+        }
+
         final file = File(resolved);
         if (!file.existsSync()) {
           throw CompileError("cannot find '$target'", directive.uri.offset);
@@ -329,6 +347,78 @@ class Compiler {
         ? <(String, Expression)>[]
         : effectiveFieldInits(superIdx);
     return [...inherited, ...classFieldInits[index]];
+  }
+
+  /// Turns `package:moth/widgets.dart` into a path on disk.
+  ///
+  /// Two ways, in order. A `.dart_tool/package_config.json` beside the program
+  /// — what `dart pub get` writes — is authoritative, so a program in a real
+  /// pub package resolves the way the Dart SDK would. Failing that, moth's own
+  /// packages ship next to the compiler, so `package:moth/...` works in a
+  /// bare directory with no pub setup at all. That second path is what keeps
+  /// the first program someone writes a single file.
+  String _resolvePackageUri(String uri, int offset) {
+    final rest = uri.substring('package:'.length);
+    final slash = rest.indexOf('/');
+    if (slash <= 0 || slash == rest.length - 1) {
+      throw CompileError("'$uri' is missing a file after the package name",
+          offset,
+          hint: 'it should look like package:moth/moth.dart');
+    }
+    final packageName = rest.substring(0, slash);
+    final filePath = rest.substring(slash + 1);
+
+    for (final root in _packageRoots(packageName)) {
+      final candidate = p.join(root, filePath);
+      if (File(candidate).existsSync()) return candidate;
+    }
+    throw CompileError("cannot find '$uri'", offset,
+        hint: packageName == 'moth'
+            ? "moth's libraries should sit in packages/moth/lib beside the "
+                'compiler — is the checkout complete?'
+            : "add it to pubspec.yaml and run 'dart pub get'");
+  }
+
+  /// Candidate lib/ directories for a package, best source first.
+  List<String> _packageRoots(String name) {
+    final roots = <String>[];
+
+    // What `dart pub get` wrote, if the program lives in a pub package.
+    var dir = Directory(p.dirname(p.absolute(path)));
+    while (true) {
+      final cfg = File(p.join(dir.path, '.dart_tool', 'package_config.json'));
+      if (cfg.existsSync()) {
+        try {
+          final json = jsonDecode(cfg.readAsStringSync());
+          for (final pkg in (json['packages'] as List)) {
+            if (pkg['name'] != name) continue;
+            final rootUri = pkg['rootUri'] as String;
+            final packageUri = (pkg['packageUri'] as String?) ?? 'lib/';
+            final base = rootUri.startsWith('file://')
+                ? Uri.parse(rootUri).toFilePath()
+                : p.normalize(p.join(cfg.parent.path, rootUri));
+            roots.add(p.normalize(p.join(base, packageUri)));
+          }
+        } on FormatException {
+          // A broken package_config is not worth failing the build over; the
+          // bundled copy below is very likely what was wanted anyway.
+        }
+        break;
+      }
+      final parent = dir.parent;
+      if (parent.path == dir.path) break;
+      dir = parent;
+    }
+
+    // moth's own packages, which ship with the compiler.
+    final here = p.dirname(p.dirname(p.absolute(Platform.script.toFilePath())));
+    for (final guess in [
+      p.join(here, '..', '..', 'packages', name, 'lib'),
+      p.join(here, '..', 'packages', name, 'lib'),
+    ]) {
+      roots.add(p.normalize(guess));
+    }
+    return roots;
   }
 
   /// Distinguishes a setter from a getter or method of the same name. Dart
