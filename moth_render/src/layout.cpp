@@ -14,10 +14,10 @@ static bool is_auto(float v) { return v < 0.0f; }
 static void leaf_auto_size(const Node &n, float &w, float &h) {
   switch (n.kind) {
     case MR_NODE_LABEL: {
-      /* Exact, because the font is a fixed-size bitmap at integer scale. */
-      float fs = n.f[MR_PROP_FONT_SIZE];
-      w = text_width(n.text.size(), fs);
-      h = text_height(fs);
+      /* A label given an explicit width wraps to it, and grows taller. With
+       * no width it stays on one line and reports what it needs. */
+      const float limit = is_auto(n.f[MR_PROP_WIDTH]) ? 0.0f : n.f[MR_PROP_WIDTH];
+      measure_text(n.text, n.f[MR_PROP_FONT_SIZE], limit, w, h);
       break;
     }
     case MR_NODE_IMAGE:  w = 32; h = 32; break; /* TODO(R2): intrinsic size */

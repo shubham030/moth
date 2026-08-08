@@ -8,7 +8,6 @@
  */
 #include "scene_internal.hpp"
 
-#include "font8x8_basic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -180,37 +179,58 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   }
 }
 
-/* Blits the 8x8 glyphs, each pixel expanded to a scale x scale block.
- * Clipped to the node's box, so a label never paints outside its layout. */
+/* Draws a label: wrapped into lines, each glyph blended by its own coverage.
+ *
+ * The font stores alpha rather than on/off pixels, so this is the whole of
+ * antialiasing — no rasterizer, just the stored value scaling the blend. Text
+ * is clipped to the node's box on both axes so a label can never paint over
+ * a sibling. */
 static void draw_text(Scene &s, const Node &n, float opacity) {
-  int scale = text_scale(n.f[MR_PROP_FONT_SIZE]);
-  uint32_t color = n.u[MR_PROP_TEXT_COLOR];
-  float pen_x = n.x;
+  const moth_font *f = font_for(n.f[MR_PROP_FONT_SIZE]);
+  const uint32_t color = n.u[MR_PROP_TEXT_COLOR];
 
-  for (size_t i = 0; i < n.text.size(); i++) {
-    unsigned char ch = (unsigned char)n.text[i];
-    if (ch > 127) ch = '?'; /* the font covers ASCII only */
-    const unsigned char *glyph = font8x8_basic[ch];
+  std::vector<TextLine> lines;
+  wrap_text(f, n.text, n.w > 0.0f ? n.w : 0.0f, lines);
 
-    for (int row = 0; row < MOTH_GLYPH_PX; row++) {
-      for (int col = 0; col < MOTH_GLYPH_PX; col++) {
-        if (!((glyph[row] >> col) & 1)) continue;
-        float px = pen_x + (float)(col * scale);
-        float py = n.y + (float)(row * scale);
+  const float clip_x0 = n.x, clip_x1 = n.x + n.w;
+  const float clip_y0 = n.y, clip_y1 = n.y + n.h;
 
-        /* Clip to the node's box on both axes. Clamping rather than skipping
-         * matters once scale > 1, where a block can straddle the edge and
-         * would otherwise be drawn whole, spilling over a sibling. */
-        float x0 = px < n.x ? n.x : px;
-        float y0 = py < n.y ? n.y : py;
-        float x1 = px + (float)scale, y1 = py + (float)scale;
-        if (x1 > n.x + n.w) x1 = n.x + n.w;
-        if (y1 > n.y + n.h) y1 = n.y + n.h;
-        if (x1 <= x0 || y1 <= y0) continue;
-        fill_rect(s, x0, y0, x1 - x0, y1 - y0, color, opacity);
+  float line_y = n.y;
+  for (const TextLine &line : lines) {
+    float pen = n.x;
+    for (uint32_t i = 0; i < line.len; i++) {
+      const unsigned char ch = (unsigned char)n.text[line.start + i];
+      if (ch < f->first || ch > f->last) continue;
+      const moth_glyph *g = &f->glyphs[ch - f->first];
+
+      if (g->box_w > 0 && g->box_h > 0) {
+        /* ofs_y is measured from the top of the line, as the generator
+         * recorded it from the same origin the metrics use. */
+        const float gx = pen + (float)g->ofs_x;
+        const float gy = line_y + (float)g->ofs_y;
+
+        for (int row = 0; row < g->box_h; row++) {
+          const float py = gy + (float)row;
+          if (py < clip_y0 || py >= clip_y1) continue;
+          const int y = (int)py;
+          if (y < 0 || y >= s.cfg.height) continue;
+          uint32_t *dst = s.framebuffer.data() + (size_t)y * s.cfg.width;
+
+          for (int col = 0; col < g->box_w; col++) {
+            const float px = gx + (float)col;
+            if (px < clip_x0 || px >= clip_x1) continue;
+            const int x = (int)px;
+            if (x < 0 || x >= s.cfg.width) continue;
+
+            const uint8_t a = moth_glyph_alpha(f, g, col, row);
+            if (!a) continue;
+            dst[x] = blend(dst[x], color, opacity * (float)a / 255.0f);
+          }
+        }
       }
+      pen += (float)g->adv_w;
     }
-    pen_x += (float)(MOTH_GLYPH_PX * scale);
+    line_y += (float)f->line_height;
   }
 }
 
