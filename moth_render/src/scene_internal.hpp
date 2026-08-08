@@ -1,4 +1,5 @@
 #pragma once
+#include "moth_font.h"
 #include "moth_render.h"
 
 #include <string>
@@ -58,22 +59,34 @@ struct Scene {
 
 Scene &scene();
 
-/* Text is drawn from an 8x8 bitmap font at integer scale, so a glyph is
- * always a whole number of pixels and layout can measure it exactly. */
-#define MOTH_GLYPH_PX 8
+/* text.cpp — fonts, measurement and wrapping.
+ *
+ * Layout and paint have to agree exactly on where every glyph goes, so both
+ * go through here rather than each doing its own arithmetic. That is also why
+ * wrapping lives here: the height layout reserves and the lines paint draws
+ * must come from the same call. */
 
-inline int text_scale(float font_size) {
-  int scale = (int)(font_size / MOTH_GLYPH_PX + 0.5f);
-  return scale < 1 ? 1 : scale;
-}
+/* The nearest generated face at or below `size`, never null. */
+const moth_font *font_for(float size);
 
-inline float text_width(size_t chars, float font_size) {
-  return (float)(chars * MOTH_GLYPH_PX * (size_t)text_scale(font_size));
-}
+/* Pen advance for a run of bytes, in pixels. */
+float text_advance(const moth_font *f, const char *s, size_t len);
 
-inline float text_height(float font_size) {
-  return (float)(MOTH_GLYPH_PX * text_scale(font_size));
-}
+/* One wrapped line, as a range into the original string. */
+struct TextLine {
+  uint32_t start, len;
+  float width;
+};
+
+/* Breaks `text` into lines that fit `max_w`, at spaces where it can and
+ * mid-word only when a single word cannot fit. A `max_w` of zero or less
+ * means no wrapping, and the result is one line. */
+void wrap_text(const moth_font *f, const std::string &text, float max_w,
+               std::vector<TextLine> &out);
+
+/* The size a label wants: its widest line, and one line height per line. */
+void measure_text(const std::string &text, float font_size, float max_w,
+                  float &out_w, float &out_h);
 
 /* paint.cpp — true when a point lands on an arc's stroke, as drawn. An arc's
  * box spans the whole ring, so testing that box would have a decorative

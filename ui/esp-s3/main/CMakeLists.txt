@@ -14,11 +14,13 @@ idf_component_register(
     "${ROOT}/moth_render/src/scene.cpp"
     "${ROOT}/moth_render/src/layout.cpp"
     "${ROOT}/moth_render/src/paint.cpp"
+    "${ROOT}/moth_render/src/text.cpp"
   INCLUDE_DIRS
     .
     "${ROOT}/vm/include"
     "${ROOT}/ui/include"
     "${ROOT}/moth_render/include"
+    "${ROOT}/moth_render/src"
     "${ROOT}/moth_render/esp-s3/main"
   PRIV_REQUIRES esp_lcd esp_driver_gpio esp_driver_spi esp_driver_i2c esp_timer
   EMBED_FILES program.mothb
