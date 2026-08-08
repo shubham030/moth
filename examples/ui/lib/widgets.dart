@@ -188,11 +188,16 @@ class Element {
     uiAttach(parentNode, node, index);
     mounted.add(this);
 
+    // Mounted with their real slot rather than -1 ("append"). The order is the
+    // same either way, but a child that later changes kind reads slotIndex to
+    // find its place, and -1 would send the replacement to the end.
+    var slot = 0;
     for (final childWidget in widget.children()) {
       var child = Element(childWidget);
       child.parent = this;
-      child.mount(node, -1);
+      child.mount(node, slot);
       kids.add(child);
+      slot += 1;
     }
   }
 
@@ -264,9 +269,27 @@ class Element {
     var previous = kids;
     kids = [];
 
+    // Unkeyed children in a keyed list still match by position, against the
+    // previous unkeyed children. Without this a single keyed sibling would
+    // remount every unkeyed one on each rebuild, losing their state.
+    var scan = 0;
+
     for (var i = 0; i < nextChildren.length; i++) {
       var w = nextChildren[i];
-      var reused = findByKey(previous, w.key);
+      Element? reused;
+      if (w.key != '') {
+        reused = findByKey(previous, w.key);
+      } else {
+        while (scan < previous.length) {
+          var candidate = previous[scan];
+          scan += 1;
+          if (candidate != null && candidate.widget.key == '') {
+            previous[scan - 1] = null; // claimed
+            reused = candidate;
+            break;
+          }
+        }
+      }
       if (reused == null) {
         var child = Element(w);
         child.parent = this;
@@ -319,6 +342,21 @@ class Element {
     if (kids.length == 0) return;
     kids[0] = kids[0].updateOrReplace(next);
     node = kids[0].node;
+
+    // A composite borrows its child's node. If that node was just replaced,
+    // every ancestor that borrowed ours is now naming a destroyed node — and
+    // uiAttach on a destroyed id fails silently, so a later keyed reorder
+    // would quietly skip this subtree.
+    var borrowed = this;
+    var up = parent;
+    while (up != null &&
+        !up.ownsNode &&
+        up.kids.length > 0 &&
+        up.kids[0] == borrowed) {
+      up.node = node;
+      borrowed = up;
+      up = up.parent;
+    }
   }
 
   Function? tapHandler() => widget.tapHandler();
@@ -365,11 +403,23 @@ void pumpFrame(int dtMs) {
     packed = uiPoll();
   }
 
+  // A build() that calls setState re-dirties itself, so an unbounded drain
+  // would never return and the frame would simply stop. Bounding it turns
+  // that mistake into a message instead of a hang.
+  var passes = 0;
   while (dirtyElements.length > 0) {
+    passes += 1;
+    if (passes > 100) {
+      print(
+        'moth: setState appears to be called from build() — '
+        'giving up on this frame',
+      );
+      dirtyElements = [];
+      break;
+    }
     var el = dirtyElements.removeLast();
     el.rebuild();
   }
 
   uiCommit();
 }
-
