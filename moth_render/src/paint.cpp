@@ -27,6 +27,25 @@ static uint32_t blend(uint32_t dst, uint32_t src, float extra_opacity) {
   return 0xFF000000u | ch(16) | ch(8) | ch(0);
 }
 
+static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
+
+/* Signed distance to a rounded rectangle: negative inside, and crossing zero
+ * exactly at the edge. Coverage is then just how far a pixel's centre sits
+ * inside that boundary, which is what gives a smooth edge for free. */
+static float sd_round_rect(float px, float py, float cx, float cy,
+                           float hw, float hh, float r) {
+  if (r > hw) r = hw;
+  if (r > hh) r = hh;
+  float qx = std::fabs(px - cx) - (hw - r);
+  float qy = std::fabs(py - cy) - (hh - r);
+  float ax = qx > 0.0f ? qx : 0.0f;
+  float ay = qy > 0.0f ? qy : 0.0f;
+  float outside = std::sqrt(ax * ax + ay * ay);
+  float inside = qx > qy ? qx : qy;
+  if (inside > 0.0f) inside = 0.0f;
+  return outside + inside - r;
+}
+
 static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
                       uint32_t argb, float opacity) {
   int x0 = std::max(0, (int)std::floor(fx));
@@ -36,6 +55,128 @@ static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
   for (int y = y0; y < y1; y++) {
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
     for (int x = x0; x < x1; x++) row[x] = blend(row[x], argb, opacity);
+  }
+}
+
+/* Fills a rectangle whose corners are rounded, antialiased. Falls back to the
+ * square version when there is no radius, which is the common case and much
+ * cheaper. */
+static void fill_round_rect(Scene &s, float fx, float fy, float fw, float fh,
+                            float radius, uint32_t argb, float opacity) {
+  if (radius <= 0.5f || fw <= 0.0f || fh <= 0.0f) {
+    fill_rect(s, fx, fy, fw, fh, argb, opacity);
+    return;
+  }
+  int x0 = std::max(0, (int)std::floor(fx));
+  int y0 = std::max(0, (int)std::floor(fy));
+  int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
+  int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+
+  const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
+  const float hw = fw * 0.5f, hh = fh * 0.5f;
+
+  for (int y = y0; y < y1; y++) {
+    uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+    for (int x = x0; x < x1; x++) {
+      float d = sd_round_rect((float)x + 0.5f, (float)y + 0.5f, cx, cy, hw, hh, radius);
+      float cov = clamp01(0.5f - d);
+      if (cov <= 0.0f) continue;
+      row[x] = blend(row[x], argb, opacity * cov);
+    }
+  }
+}
+
+/* Draws only the outline of a rounded rectangle, [width] px thick, inside the
+ * node's box. */
+static void stroke_round_rect(Scene &s, float fx, float fy, float fw, float fh,
+                              float radius, float width, uint32_t argb,
+                              float opacity) {
+  if (width <= 0.0f || fw <= 0.0f || fh <= 0.0f) return;
+  int x0 = std::max(0, (int)std::floor(fx));
+  int y0 = std::max(0, (int)std::floor(fy));
+  int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
+  int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+
+  const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
+  const float hw = fw * 0.5f, hh = fh * 0.5f;
+
+  for (int y = y0; y < y1; y++) {
+    uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+    for (int x = x0; x < x1; x++) {
+      float d = sd_round_rect((float)x + 0.5f, (float)y + 0.5f, cx, cy, hw, hh, radius);
+      /* The band between the edge and `width` inside it. */
+      float cov = clamp01(0.5f - d) - clamp01(0.5f - (d + width));
+      if (cov <= 0.0f) continue;
+      row[x] = blend(row[x], argb, opacity * cov);
+    }
+  }
+}
+
+/* A stroked ring segment with round caps, inscribed in the node's box.
+ *
+ * Angles are degrees clockwise from twelve o'clock, because that is how a
+ * progress ring is described rather than how atan2 reports them. Coverage is
+ * computed from the distance to the ring's centre line, so the edge is smooth
+ * without supersampling — an aliased arc on a round panel looks broken in a
+ * way an aliased rectangle does not. */
+static void draw_arc(Scene &s, const Node &n, float opacity) {
+  float thickness = n.f[MR_PROP_THICKNESS];
+  if (thickness <= 0.0f) thickness = 4.0f;
+
+  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
+  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
+  const float mid = outer - thickness * 0.5f; /* the centre line of the stroke */
+  if (mid <= 0.0f) return;
+
+  const float half = thickness * 0.5f;
+  float sweep = n.f[MR_PROP_ARC_SWEEP];
+  if (sweep <= 0.0f) return;
+  const bool closed = sweep >= 360.0f;
+  const float start = n.f[MR_PROP_ARC_START];
+
+  const float kDeg = 3.14159265358979f / 180.0f;
+  /* Cap centres sit on the centre line at each end of the sweep. */
+  const float a0 = start * kDeg, a1 = (start + sweep) * kDeg;
+  const float cap0x = cx + mid * std::sin(a0), cap0y = cy - mid * std::cos(a0);
+  const float cap1x = cx + mid * std::sin(a1), cap1y = cy - mid * std::cos(a1);
+
+  int x0 = std::max(0, (int)std::floor(cx - outer - 1.0f));
+  int y0 = std::max(0, (int)std::floor(cy - outer - 1.0f));
+  int x1 = std::min(s.cfg.width, (int)std::ceil(cx + outer + 1.0f));
+  int y1 = std::min(s.cfg.height, (int)std::ceil(cy + outer + 1.0f));
+
+  const uint32_t argb = n.u[MR_PROP_BG_COLOR];
+
+  for (int y = y0; y < y1; y++) {
+    uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+    for (int x = x0; x < x1; x++) {
+      const float dx = (float)x + 0.5f - cx;
+      const float dy = (float)y + 0.5f - cy;
+      const float dist = std::sqrt(dx * dx + dy * dy);
+
+      /* How far inside the stroke this pixel is, radially. */
+      float cov = clamp01(half + 0.5f - std::fabs(dist - mid));
+      if (cov > 0.0f && !closed) {
+        float ang = std::atan2(dx, -dy) / kDeg; /* 0 at twelve, clockwise */
+        float rel = ang - start;
+        while (rel < 0.0f) rel += 360.0f;
+        while (rel >= 360.0f) rel -= 360.0f;
+        if (rel > sweep) cov = 0.0f; /* past the end; the caps fill it in */
+      }
+
+      if (!closed) {
+        /* Round caps, as discs centred on the ends of the centre line. */
+        const float d0x = (float)x + 0.5f - cap0x, d0y = (float)y + 0.5f - cap0y;
+        const float d1x = (float)x + 0.5f - cap1x, d1y = (float)y + 0.5f - cap1y;
+        float c0 = clamp01(half + 0.5f - std::sqrt(d0x * d0x + d0y * d0y));
+        float c1 = clamp01(half + 0.5f - std::sqrt(d1x * d1x + d1y * d1y));
+        if (c0 > cov) cov = c0;
+        if (c1 > cov) cov = c1;
+      }
+
+      if (cov <= 0.0f) continue;
+      row[x] = blend(row[x], argb, opacity * cov);
+    }
   }
 }
 
@@ -73,16 +214,54 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
   }
 }
 
+/* Whether a point lies on the stroke — the same geometry draw_arc uses, so
+ * what you can touch is exactly what you can see. Without this an arc laid
+ * over content takes every tap in its bounding box, which for a ring around
+ * a display is the entire display. */
+bool arc_hit(const Node &n, float px, float py) {
+  float thickness = n.f[MR_PROP_THICKNESS];
+  if (thickness <= 0.0f) thickness = 4.0f;
+
+  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
+  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
+  const float mid = outer - thickness * 0.5f;
+  if (mid <= 0.0f) return false;
+
+  const float half = thickness * 0.5f;
+  const float dx = px - cx, dy = py - cy;
+  const float dist = std::sqrt(dx * dx + dy * dy);
+  if (std::fabs(dist - mid) > half) return false;
+
+  float sweep = n.f[MR_PROP_ARC_SWEEP];
+  if (sweep <= 0.0f) return false;
+  if (sweep >= 360.0f) return true;
+
+  const float kDeg = 3.14159265358979f / 180.0f;
+  float rel = std::atan2(dx, -dy) / kDeg - n.f[MR_PROP_ARC_START];
+  while (rel < 0.0f) rel += 360.0f;
+  while (rel >= 360.0f) rel -= 360.0f;
+  return rel <= sweep;
+}
+
 static void paint_node(Scene &s, mr_node_id id, float opacity) {
   Node *n = s.get(id);
   if (!n) return;
   opacity *= n->f[MR_PROP_OPACITY];
   if (opacity <= 0.0f) return;
 
-  fill_rect(s, n->x, n->y, n->w, n->h, n->u[MR_PROP_BG_COLOR], opacity);
-
-  if (n->kind == MR_NODE_LABEL && !n->text.empty()) {
-    draw_text(s, *n, opacity);
+  if (n->kind == MR_NODE_ARC) {
+    draw_arc(s, *n, opacity);
+  } else {
+    fill_round_rect(s, n->x, n->y, n->w, n->h, n->f[MR_PROP_RADIUS],
+                    n->u[MR_PROP_BG_COLOR], opacity);
+    if (n->f[MR_PROP_BORDER_WIDTH] > 0.0f) {
+      stroke_round_rect(s, n->x, n->y, n->w, n->h, n->f[MR_PROP_RADIUS],
+                        n->f[MR_PROP_BORDER_WIDTH], n->u[MR_PROP_BORDER_COLOR],
+                        opacity);
+    }
+    if (n->kind == MR_NODE_LABEL && !n->text.empty()) {
+      draw_text(s, *n, opacity);
+    }
   }
 
   for (mr_node_id c : n->children) paint_node(s, c, opacity);

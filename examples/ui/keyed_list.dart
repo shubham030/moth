@@ -5,7 +5,7 @@
 //
 //   ./build/mothsim examples/ui/keyed_list.mothb --tap 240,60 --tap 240,60
 
-import 'lib/widgets.dart';
+import 'package:moth/widgets.dart';
 
 final palette = [0xFF7AA2F7, 0xFFBB9AF7, 0xFF9ECE6A, 0xFFE0AF68];
 

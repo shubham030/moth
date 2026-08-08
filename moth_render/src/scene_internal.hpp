@@ -75,6 +75,11 @@ inline float text_height(float font_size) {
   return (float)(MOTH_GLYPH_PX * text_scale(font_size));
 }
 
+/* paint.cpp — true when a point lands on an arc's stroke, as drawn. An arc's
+ * box spans the whole ring, so testing that box would have a decorative
+ * overlay swallow every tap inside it. */
+bool arc_hit(const Node &n, float px, float py);
+
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);
 

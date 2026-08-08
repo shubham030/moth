@@ -37,6 +37,11 @@ class FunctionCompiler {
   /// mean `this.name(...)`.
   final List<String> _enclosingMethods;
 
+  /// Setters declared on the enclosing class. Kept apart from the methods
+  /// because they are assignable but not callable — folding them together
+  /// would let a bare `brightness()` compile into a setter call.
+  final List<String> _enclosingSetters;
+
   /// A constructor returns `this` and may have initializing formals.
   final bool isConstructor;
 
@@ -52,6 +57,7 @@ class FunctionCompiler {
       : globalInits = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
+        _enclosingSetters = const [],
         isConstructor = false,
         isMember = false;
 
@@ -59,13 +65,15 @@ class FunctionCompiler {
       : decl = null,
         enclosingFields = const [],
         _enclosingMethods = const [],
+        _enclosingSetters = const [],
         isConstructor = false,
         isMember = false;
 
   FunctionCompiler.member(
     this.unit,
     this.enclosingFields,
-    this._enclosingMethods, {
+    this._enclosingMethods,
+    this._enclosingSetters, {
     required this.isConstructor,
   })  : decl = null,
         globalInits = null,
@@ -96,6 +104,7 @@ class FunctionCompiler {
     required FunctionBody? body,
     required int offset,
     List<(String, Expression)> fieldInits = const [],
+    bool isSetter = false,
   }) {
     _declare('this', offset);
     final arity = 1 + _declareParams(params);
@@ -130,6 +139,13 @@ class FunctionCompiler {
       _emit(Op.load);
       _emit(0);
       _emit(Op.ret); // constructors evaluate to the new instance
+    } else if (isSetter) {
+      // `a.b = v` evaluates to v in Dart. OP_SET_PROP leaves whatever the
+      // setter returned, so returning the parameter keeps that true and keeps
+      // the opcode's stack effect the same as a plain field write.
+      _emit(Op.load);
+      _emit(1); // slot 0 is the receiver, slot 1 the assigned value
+      _emit(Op.ret);
     } else {
       _emit(Op.retNull);
     }
@@ -161,6 +177,28 @@ class FunctionCompiler {
   }
 
   void _compileBodyStatements(FunctionBody body, int offset) {
+    // `await` is rejected where it appears, but a body marked async without
+    // one used to compile as though the keyword were not there — so a function
+    // returning Future<int> in Dart returned a plain int here, and a program
+    // that printed it silently disagreed with Dart. Refusing the declaration
+    // is the only honest answer until there is an event loop to run it on.
+    if (body.isAsynchronous) {
+      throw CompileError(
+        'async functions are not supported yet',
+        body.offset,
+        hint: 'moth has no event loop, so there is nothing for a Future to '
+            'complete on — write it synchronously, and use millis() to spread '
+            'slow work across frames',
+      );
+    }
+    if (body.isGenerator) {
+      throw CompileError(
+        'generator functions (sync* and async*) are not supported yet',
+        body.offset,
+        hint: 'return a List instead',
+      );
+    }
+
     if (body is BlockFunctionBody) {
       _block(body.block);
     } else if (body is ExpressionFunctionBody) {
@@ -562,6 +600,8 @@ class FunctionCompiler {
         _conditional(expr);
       case MethodInvocation():
         _call(expr);
+      case CascadeExpression():
+        _cascade(expr);
       default:
         throw CompileError(
           'this kind of expression is not supported yet',
@@ -712,7 +752,10 @@ class FunctionCompiler {
 
   void _identifier(SimpleIdentifier id) {
     final slot = _resolve(id.name);
-    if (slot == null && _isField(id.name)) {
+    // A bare name inside a method can be a field or a getter on this object.
+    // Both read the same way — OP_GET_PROP tries the field first and falls
+    // back to the getter — so one path covers them.
+    if (slot == null && (_isField(id.name) || _enclosingMethods.contains(id.name))) {
       _emitThis();
       _emit(Op.getProp);
       _emitU16(unit.constants.addString(id.name));
@@ -772,9 +815,14 @@ class FunctionCompiler {
           expr, target.identifier, () => _expression(target.prefix));
       return;
     }
+    // A bare name on the left can be a field or a setter on this object. Both
+    // write the same way — OP_SET_PROP tries the field first and falls back to
+    // the setter — so one path covers them.
     if (target is SimpleIdentifier &&
         _resolve(target.name) == null &&
-        _isField(target.name)) {
+        (_isField(target.name) ||
+            _enclosingMethods.contains(target.name) ||
+            _enclosingSetters.contains(target.name))) {
       _propertyAssignment(expr, target, _emitThis);
       return;
     }
@@ -938,6 +986,7 @@ class FunctionCompiler {
       unit,
       enclosingFields,
       _enclosingMethods,
+      _enclosingSetters,
       isConstructor: false,
     );
     sub.outerLocals.addAll(outer);
@@ -1005,7 +1054,11 @@ class FunctionCompiler {
       name = operand.identifier.name;
     } else if (operand is SimpleIdentifier &&
         _resolve(operand.name) == null &&
-        _isField(operand.name)) {
+        (_isField(operand.name) || _enclosingMethods.contains(operand.name) ||
+            _enclosingSetters.contains(operand.name))) {
+      // Accessors as well as fields: GET_PROP and SET_PROP both fall back to
+      // them, so `value++` in a method works the same way `value = value + 1`
+      // already did.
       emitTarget = _emitThis;
       name = operand.name;
     }
@@ -1049,6 +1102,86 @@ class FunctionCompiler {
     _emit(valueSlot);
     _popScope();
     return true;
+  }
+
+  /// `target..a = 1..b()` — the target is evaluated once and stays on the
+  /// stack; each section works on a copy and throws its own result away. The
+  /// whole expression is the target, which is what lets a widget be
+  /// configured and passed along in one expression.
+  void _cascade(CascadeExpression expr) {
+    _expression(expr.target);
+
+    for (final section in expr.cascadeSections) {
+      _emit(Op.dup);
+      _cascadeSection(section);
+      _emit(Op.pop); // a section's value is discarded; the target is the result
+    }
+  }
+
+  /// One `..something`, compiled with the receiver already on the stack.
+  void _cascadeSection(Expression section) {
+    if (section is AssignmentExpression) {
+      final target = section.leftHandSide;
+      if (target is! PropertyAccess) {
+        throw CompileError(
+          'only property assignment works in a cascade so far',
+          section.offset,
+          hint: 'write "..name = value"',
+        );
+      }
+      if (target.target != null) {
+        // `..a.b = v` would assign b on a, not on the cascade target. The
+        // compiler cannot reach through that yet, and quietly assigning to
+        // the wrong object is worse than refusing.
+        throw CompileError(
+          'a cascade cannot reach through another property yet',
+          section.offset,
+          hint: 'assign it separately: "var x = thing.a; x.b = v;"',
+        );
+      }
+
+      // The receiver is already on the stack. A compound assignment needs it
+      // twice — once to read the old value, once to write the new one — so
+      // the second ask duplicates what is there rather than re-evaluating.
+      var used = false;
+      void receiver() {
+        if (!used) {
+          used = true;
+          return;
+        }
+        _emit(Op.dup);
+      }
+
+      _propertyAssignment(section, target.propertyName, receiver);
+      return;
+    }
+
+    if (section is MethodInvocation) {
+      if (section.target != null) {
+        throw CompileError(
+          'a cascade cannot call through another property yet',
+          section.offset,
+          hint: 'call it separately: "var x = thing.list; x.add(v);"',
+        );
+      }
+      final args = section.argumentList.arguments;
+      for (final a in args) {
+        if (a is NamedExpression) {
+          throw CompileError('named arguments are not supported yet', a.offset);
+        }
+        _expression(a);
+      }
+      _emit(Op.invoke);
+      _emitU16(unit.constants.addString(section.methodName.name));
+      _emit(args.length);
+      return;
+    }
+
+    throw CompileError(
+      'this kind of cascade section is not supported yet',
+      section.offset,
+      hint: 'assignments and method calls work',
+    );
   }
 
   void _call(MethodInvocation call) {

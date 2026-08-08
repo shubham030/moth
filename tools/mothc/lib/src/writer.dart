@@ -4,7 +4,7 @@ import 'dart:typed_data';
 /// Must match MOTH_BYTECODE_VERSION in vm/include/moth_vm.h. The loader
 /// compares exactly, so a mismatch is refused at load rather than trapping
 /// partway through the program.
-const int bytecodeVersion = 4;
+const int bytecodeVersion = 5;
 
 /// Sentinel for "this program has no top-level initializers to run".
 const int noInit = 0xFFFF;
@@ -72,8 +72,10 @@ class ClassBlob {
   final int nameConst;
   final List<int> fieldNameConsts;
 
-  /// name constant -> function index
-  final List<(int, int)> methods;
+  /// (name constant, function index, member kind) — 0 method, 1 getter,
+  /// 2 setter. The kind is explicit because arity cannot tell a getter from
+  /// a zero-argument method, and guessing made `obj.method` call it.
+  final List<(int, int, int)> methods;
   final int ctor;
 
   ClassBlob(this.nameConst, this.fieldNameConsts, this.methods, this.ctor);
@@ -152,9 +154,10 @@ Uint8List writeBlob({
       u16(f);
     }
     u16(c.methods.length);
-    for (final (nameConst, fnIndex) in c.methods) {
+    for (final (nameConst, fnIndex, kind) in c.methods) {
       u16(nameConst);
       u16(fnIndex);
+      u8(kind);
     }
     u16(c.ctor);
   }
