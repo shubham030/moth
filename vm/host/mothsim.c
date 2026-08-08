@@ -32,6 +32,8 @@ static struct {
   long quit_after; /* 0 = run until the window closes */
 
   /* Hot push: a newly arrived program waiting to replace the running one. */
+  const char *shot_path; /* write the last frame here, for docs and review */
+
   moth_push *push;
   uint8_t *pending;
   size_t pending_len;
@@ -126,7 +128,28 @@ static void on_frame(bool repainted, void *user) {
     SDL_RenderCopy(g_sim.renderer, g_sim.texture, NULL, NULL);
     SDL_RenderPresent(g_sim.renderer);
   }
-  if (g_sim.quit_after && g_sim.frame >= g_sim.quit_after) g_sim.quit = true;
+  if (g_sim.quit_after && g_sim.frame >= g_sim.quit_after) {
+    /* Dump the framebuffer before tearing down, so a headless run can show
+     * what it drew. Plain PPM: no library, and every tool reads it. */
+    if (g_sim.shot_path) {
+      FILE *f = fopen(g_sim.shot_path, "wb");
+      if (f) {
+        const uint32_t *px = mr_framebuffer();
+        fprintf(f, "P6\n%d %d\n255\n", g_sim.width, g_sim.height);
+        for (int i = 0; i < g_sim.width * g_sim.height; i++) {
+          unsigned char rgb[3] = {(unsigned char)((px[i] >> 16) & 0xFF),
+                                  (unsigned char)((px[i] >> 8) & 0xFF),
+                                  (unsigned char)(px[i] & 0xFF)};
+          fwrite(rgb, 1, 3, f);
+        }
+        fclose(f);
+        printf("wrote %s\n", g_sim.shot_path);
+        fflush(stdout);
+      }
+      g_sim.shot_path = NULL;
+    }
+    g_sim.quit = true;
+  }
   if (g_sim.quit) {
     /* Closing the window ends the program even mid-loop, the way pulling
      * power would on a board. */
@@ -212,11 +235,13 @@ int main(int argc, char **argv) {
       g_sim.taps[g_sim.ntaps].y = y;
       g_sim.taps[g_sim.ntaps].at_frame = 20 + g_sim.ntaps * 20;
       g_sim.ntaps++;
+    } else if (strcmp(argv[i], "--shot") == 0 && i + 1 < argc) {
+      g_sim.shot_path = argv[++i];
     } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
       g_sim.quit_after = atol(argv[++i]);
     } else if (argv[i][0] == '-') {
       fprintf(stderr, "usage: mothsim <program.mothb> [--size WxH] [--round] [--listen PORT]\n"
-              "                [--tap X,Y] [--frames N]\n");
+              "                [--tap X,Y] [--frames N] [--shot OUT.ppm]\n");
       return 64;
     } else if (!path) {
       path = argv[i];
