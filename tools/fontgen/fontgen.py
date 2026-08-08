@@ -21,6 +21,8 @@ Metrics follow FreeType's model, since that is what Pillow reports:
 """
 
 import argparse
+import os
+import subprocess
 import sys
 
 from PIL import Image, ImageDraw, ImageFont
@@ -83,6 +85,8 @@ def main():
     ap.add_argument("--chars", default=ASCII)
     ap.add_argument("--bpp", type=int, default=4, choices=[1, 2, 4, 8])
     ap.add_argument("--weight", help="named instance of a variable font, e.g. Bold")
+    ap.add_argument("--no-reindex", action="store_true",
+                    help="skip rebuilding the font registry")
     args = ap.parse_args()
 
     font = ImageFont.truetype(args.ttf, args.size)
@@ -141,6 +145,13 @@ def main():
 
     print(f"{args.out}: {len(chars)} glyphs, {len(blob)} bytes of bitmap, "
           f"line height {line_height}")
+
+    # Adding a font should be one command, so the registry the renderer reads
+    # is rebuilt here rather than left as a hand edit to remember.
+    if not args.no_reindex:
+        reindex = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "reindex.py")
+        subprocess.run([sys.executable, reindex], check=False)
 
 
 if __name__ == "__main__":

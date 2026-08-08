@@ -9,23 +9,9 @@
 
 #include <algorithm>
 
-#include "fonts/moth_font_14.h"
-#include "fonts/moth_font_20.h"
-#include "fonts/moth_font_48.h"
-#include "fonts/moth_font_72.h"
+#include "fonts/registry.h"
 
 namespace mr {
-
-/* Faces are generated at fixed sizes, so a request lands on the nearest one at
- * or below it — scaling a bitmap face up is exactly the blockiness these
- * replaced. Ordered small to large. */
-static const moth_font *const kFaces[] = {
-    &moth_font_14,
-    &moth_font_20,
-    &moth_font_48,
-    &moth_font_72,
-};
-static const int kFaceCount = (int)(sizeof kFaces / sizeof kFaces[0]);
 
 const moth_font *font_for(float size) {
   /* Rank by the size a face was generated at, not by line_height — the
