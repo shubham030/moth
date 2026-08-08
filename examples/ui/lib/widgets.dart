@@ -32,6 +32,11 @@ final eventClicked = 2;
 
 /// An immutable description of a piece of UI. Cheap to build and throw away.
 class Widget {
+  /// Optional identity. When set, the reconciler matches children by key
+  /// instead of by position, so a reordered child keeps its element — and
+  /// therefore its node — rather than having a sibling's state applied to it.
+  String key = '';
+
   String typeName() => 'Widget';
   int kind() => kBox;
   List children() => [];
@@ -181,6 +186,15 @@ class Element {
   }
 
   void reconcileChildren(List nextChildren) {
+    var keyed = false;
+    for (final w in nextChildren) {
+      if (w.key != '') keyed = true;
+    }
+    if (keyed) {
+      reconcileKeyed(nextChildren);
+      return;
+    }
+
     var shared = kids.length;
     if (nextChildren.length < shared) shared = nextChildren.length;
 
@@ -197,6 +211,49 @@ class Element {
       var gone = kids.removeLast();
       gone.unmount();
     }
+  }
+
+  /// Match by key, so moving a child moves its element rather than pouring a
+  /// different widget's state into whatever element sat at that position.
+  void reconcileKeyed(List nextChildren) {
+    var previous = kids;
+    kids = [];
+
+    for (final w in nextChildren) {
+      var reused = findByKey(previous, w.key);
+      if (reused == null) {
+        var child = Element(w);
+        child.parent = this;
+        child.mount(node);
+        kids.add(child);
+      } else {
+        reused.update(w);
+        kids.add(reused);
+      }
+    }
+
+    // Anything left behind is genuinely gone.
+    for (final leftover in previous) {
+      if (leftover != null) leftover.unmount();
+    }
+
+    // Put the renderer's children back in the order the widgets describe.
+    for (var i = 0; i < kids.length; i++) {
+      uiAttach(node, kids[i].node, i);
+    }
+  }
+
+  /// Takes the match out of [pool] so one element is never reused twice.
+  Element? findByKey(List pool, String key) {
+    if (key == '') return null;
+    for (var i = 0; i < pool.length; i++) {
+      var candidate = pool[i];
+      if (candidate != null && candidate.widget.key == key) {
+        pool[i] = null;
+        return candidate;
+      }
+    }
+    return null;
   }
 
   void unmount() {
