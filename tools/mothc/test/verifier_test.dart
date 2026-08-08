@@ -82,6 +82,18 @@ void main() {
     final out = runWith([opInt8, 7, opStore, 0, opRetNull]);
     expect(out, isNot(contains('stack underflow')));
   });
+
+  test('a blob from an older bytecode version is refused at load', () {
+    // The version lives at offset 4, right after the MOTH magic. Without an
+    // exact check a VM would accept a blob using opcodes it does not have and
+    // trap partway through the program, having already done half of it.
+    final older = base.patched(4, [3, 0]);
+    final f = File(
+        '${Directory.systemTemp.createTempSync('moth_verify').path}/old.mothb')
+      ..writeAsBytesSync(older);
+    final r = Process.runSync(mothrun.path, [f.path]);
+    expect('${r.stdout}${r.stderr}', contains('bytecode version 3'));
+  });
 }
 
 /// Small helper so the tests read as "the blob, with these bytes swapped in".

@@ -18,7 +18,7 @@ All multi-byte integers are little-endian.
 
 ```
 magic        4 bytes   "MOTH"
-version      u16       MOTH_BYTECODE_VERSION (currently 3)
+version      u16       MOTH_BYTECODE_VERSION (currently 4)
 flags        u16       reserved, 0
 constants    u16 count, then each: tag u8 + payload
 natives      u16 count, then each: name_const u16 + argc u8
@@ -181,4 +181,19 @@ guarantee moth does not make yet, not a memory-safety hole.
 ## Not yet
 
 Closures, inheritance, getters/setters, static members, exceptions, `async`.
-The format version bumps on any change that invalidates existing blobs.
+
+## Versioning
+
+The version bumps on any change an older VM could not run correctly — a new
+opcode, a changed operand layout, a new section. The loader compares exactly,
+so a board running an older VM refuses a newer blob at load with a clear
+message, rather than accepting it and trapping on an unknown opcode partway
+through. That distinction matters most for hot push, where the blob and the
+firmware are updated separately and can drift apart.
+
+| version | added                                    |
+|---------|------------------------------------------|
+| 1       | integers, locals, control flow, calls    |
+| 2       | top-level variables                      |
+| 3       | heap, strings, lists, classes            |
+| 4       | `OP_CLOSURE`, `OP_CALL_VALUE`            |
