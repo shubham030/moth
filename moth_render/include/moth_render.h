@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#define MR_CONTRACT_VERSION 1
+#define MR_CONTRACT_VERSION 2
 
 typedef uint32_t mr_node_id; /* opaque; 0 is never a valid node */
 #define MR_NODE_NONE ((mr_node_id)0)
@@ -66,15 +66,26 @@ typedef enum { MR_FLOW, MR_ABSOLUTE } mr_position;
 
 /* ---- lifecycle -------------------------------------------------------- */
 
+/* A round panel still has a rectangular framebuffer, but its corners are
+ * behind the bezel. Layout stays rectangular; the safe area is what an app
+ * should keep its content inside. */
+typedef enum { MR_SHAPE_RECT, MR_SHAPE_ROUND } mr_shape;
+
 typedef struct {
   int width;  /* display px */
   int height;
+  mr_shape shape; /* MR_SHAPE_RECT when zero-initialised */
 } mr_config;
 
 bool mr_init(const mr_config *cfg);
 void mr_shutdown(void);
 uint32_t mr_contract_version(void);
 mr_node_id mr_root(void); /* box spanning the display; owned by the backend */
+
+/* The largest rectangle guaranteed to be visible. On a rectangular panel
+ * that is the whole display; on a round one it is the inscribed square,
+ * which is why a round 466px panel gives about 330px of usable width. */
+void mr_safe_area(int *x, int *y, int *w, int *h);
 
 /* ---- tree ------------------------------------------------------------- */
 

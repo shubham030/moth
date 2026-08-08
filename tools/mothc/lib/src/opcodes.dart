@@ -122,4 +122,5 @@ const kNatives = <String, int>{
   'uiPoll': 0, // node * 8 + kind, or -1 when the queue is empty
   'uiEventValue': 0,
   'uiFrameOf': 2, // node, 0..3 -> x, y, w, h
+  'uiSafeArea': 1, // 0..3 -> x, y, w, h of the always-visible rectangle
 };

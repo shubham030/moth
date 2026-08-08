@@ -71,6 +71,25 @@ bool mr_init(const mr_config *cfg) {
   return true;
 }
 
+void mr_safe_area(int *x, int *y, int *w, int *h) {
+  Scene &s = scene();
+  int w_px = s.cfg.width, h_px = s.cfg.height;
+  if (s.cfg.shape == MR_SHAPE_ROUND) {
+    /* Inscribed square of the circle: side = diameter / sqrt(2). */
+    int diameter = w_px < h_px ? w_px : h_px;
+    int side = (int)((float)diameter * 0.70710678f);
+    if (x) *x = (w_px - side) / 2;
+    if (y) *y = (h_px - side) / 2;
+    if (w) *w = side;
+    if (h) *h = side;
+    return;
+  }
+  if (x) *x = 0;
+  if (y) *y = 0;
+  if (w) *w = w_px;
+  if (h) *h = h_px;
+}
+
 void mr_shutdown(void) { scene() = Scene{}; }
 
 uint32_t mr_contract_version(void) { return MR_CONTRACT_VERSION; }

@@ -20,6 +20,7 @@ static struct {
   SDL_Renderer *renderer;
   SDL_Texture *texture;
   int width, height;
+  bool round;
   bool quit;
 
   /* Synthetic taps, so the click path can be exercised without a mouse —
@@ -132,6 +133,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "mothsim: --size wants WIDTHxHEIGHT, e.g. 466x466\n");
         return 64;
       }
+    } else if (strcmp(argv[i], "--round") == 0) {
+      g_sim.round = true;
     } else if (strcmp(argv[i], "--tap") == 0 && i + 1 < argc) {
       if (g_sim.ntaps >= 8) { fprintf(stderr, "mothsim: at most 8 taps\n"); return 64; }
       int x, y;
@@ -146,7 +149,7 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
       g_sim.quit_after = atol(argv[++i]);
     } else if (argv[i][0] == '-') {
-      fprintf(stderr, "usage: mothsim <program.mothb> [--size WxH] [--tap X,Y] [--frames N]\n");
+      fprintf(stderr, "usage: mothsim <program.mothb> [--size WxH] [--round] [--tap X,Y] [--frames N]\n");
       return 64;
     } else if (!path) {
       path = argv[i];
@@ -182,7 +185,8 @@ int main(int argc, char **argv) {
   g_sim.texture = SDL_CreateTexture(g_sim.renderer, SDL_PIXELFORMAT_ARGB8888,
                                     SDL_TEXTUREACCESS_STREAMING, g_sim.width, g_sim.height);
 
-  mr_config cfg = {g_sim.width, g_sim.height};
+  mr_config cfg = {g_sim.width, g_sim.height,
+                   g_sim.round ? MR_SHAPE_ROUND : MR_SHAPE_RECT};
   if (!mr_init(&cfg)) {
     fprintf(stderr, "mothsim: renderer init failed\n");
     return 1;

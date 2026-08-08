@@ -294,9 +294,14 @@ class CounterApp extends Component {
     body.kids = [readout, hint, bar];
 
     // The whole surface is tappable, and the handler captures `this`.
+    // Keep content inside the visible rectangle — on a round panel that is
+    // the inscribed square, so the corners are never used.
+    var inset = uiSafeArea(0);
+    if (inset < 16) inset = 16;
+
     var surface = Box();
     surface.color = 0xFF16161E;
-    surface.pad = 16;
+    surface.pad = inset;
     surface.align = alignCenter;
     surface.growFactor = 1; // fill the display, not just the content
     surface.kids = [body];
@@ -321,7 +326,8 @@ int lastBarNode() {
 void main() {
   var app = CounterApp();
   runApp(app);
-  print('mounted ${mounted.length} elements on ${uiWidth()}x${uiHeight()}');
+  print('mounted ${mounted.length} elements on ${uiWidth()}x${uiHeight()}, '
+      'safe area ${uiSafeArea(2)}x${uiSafeArea(3)} at ${uiSafeArea(0)},${uiSafeArea(1)}');
 
   var last = millis();
   var reported = -1;

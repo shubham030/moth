@@ -44,6 +44,21 @@ conformance suite (§7).
 v1 deliberately small; `arc`, `textinput`, `canvas` are post-v1 additions and
 require a contract version bump (§8).
 
+## 2.5 Display shape
+
+A panel declares itself rectangular or round. Layout stays rectangular
+either way — a round panel still has a rectangular framebuffer — but the
+corners of a round one sit behind the bezel.
+
+`mr_safe_area()` reports the largest rectangle guaranteed to be visible: the
+whole display when rectangular, the inscribed square when round. For a 466px
+circular panel that is 329x329 at (68, 68), since the inscribed square of a
+circle has side `diameter / sqrt(2)`.
+
+Apps should keep content inside it rather than hardcoding a padding. Nothing
+clips to the circle: a background may still cover the full framebuffer, which
+is usually what you want.
+
 ## 3. Tree operations
 
 `create(kind) → id`, `destroy(id)` (recursive, detaches first),
