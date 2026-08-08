@@ -23,6 +23,7 @@ typedef enum {
   MR_NODE_IMAGE,
   MR_NODE_SLIDER,
   MR_NODE_SWITCH,
+  MR_NODE_ARC, /* a stroked ring segment, for gauges and progress */
 } mr_node_kind;
 
 typedef enum {
@@ -54,6 +55,10 @@ typedef enum {
   MR_PROP_VALUE,
   MR_PROP_MIN,
   MR_PROP_MAX,
+  /* arc — appended, so every index above keeps its number */
+  MR_PROP_ARC_START, /* degrees, 0 at twelve o'clock, clockwise */
+  MR_PROP_ARC_SWEEP, /* degrees; >= 360 draws a closed ring */
+  MR_PROP_THICKNESS, /* stroke width, px */
   MR_PROP_COUNT
 } mr_prop;
 
