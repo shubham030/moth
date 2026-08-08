@@ -339,9 +339,12 @@ class Compiler {
     for (var i = 0; i < classDeclarations.length; i++) {
       final decl = classDeclarations[i];
       // A class with field initializers needs a constructor even if it
-      // declares none, so those initializers have somewhere to run.
+      // declares none, so those initializers have somewhere to run. The
+      // inherited ones count: a subclass with no fields of its own still has
+      // to run its superclass's, which is why this asks for the effective
+      // list rather than the class's own.
       final hasCtor = decl.members.any((m) => m is ConstructorDeclaration);
-      if (hasCtor || classFieldInits[i].isNotEmpty) {
+      if (hasCtor || effectiveFieldInits(i).isNotEmpty) {
         classCtorIndex[i] = next++;
       }
       final slots = <(String, int)>[];
