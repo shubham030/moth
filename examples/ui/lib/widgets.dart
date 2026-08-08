@@ -119,10 +119,27 @@ class Component extends Widget {
 
 // ---- elements ------------------------------------------------------------
 
-/// Every element that owns a renderer node, so a tap on a node id can be
-/// routed back to the widget that produced it.
+/// Every live element. A composite adopts its child's node rather than owning
+/// one, so several elements can report the same node id — only the owner is a
+/// hit-test target.
 var mounted = [];
 var dirtyElements = [];
+
+/// Forgets an element that is going away, so a destroyed node can never be
+/// dispatched to and a dirty element cannot be rebuilt after unmounting.
+void forgetElement(Element gone) {
+  var keptMounted = [];
+  for (final e in mounted) {
+    if (e != gone) keptMounted.add(e);
+  }
+  mounted = keptMounted;
+
+  var keptDirty = [];
+  for (final e in dirtyElements) {
+    if (e != gone) keptDirty.add(e);
+  }
+  dirtyElements = keptDirty;
+}
 
 class Element {
   Widget widget;
@@ -130,6 +147,16 @@ class Element {
   var kids = [];
   bool isDirty = false;
   Element? parent;
+
+  /// The renderer node this element's node was attached to, and its position
+  /// among that node's children. Kept so a replacement can take the same
+  /// place rather than being appended at the end.
+  int hostNode = 0;
+  int slotIndex = -1;
+
+  /// False for composites, which borrow their child's node. Exactly one
+  /// element owns any given node.
+  bool ownsNode = false;
 
   Element(this.widget);
 
@@ -139,13 +166,16 @@ class Element {
     dirtyElements.add(this);
   }
 
-  void mount(int parentNode) {
+  void mount(int parentNode, int index) {
+    hostNode = parentNode;
+    slotIndex = index;
+
     if (widget.composite()) {
       // A composite has no node of its own; it adopts its child's.
       widget.attachElement(this);
       var child = Element(widget.build());
       child.parent = this;
-      child.mount(parentNode);
+      child.mount(parentNode, index);
       kids = [child];
       node = child.node;
       mounted.add(this);
@@ -153,36 +183,51 @@ class Element {
     }
 
     node = uiCreate(widget.kind());
+    ownsNode = true;
     widget.apply(node);
-    uiAttach(parentNode, node, -1);
+    uiAttach(parentNode, node, index);
     mounted.add(this);
 
     for (final childWidget in widget.children()) {
       var child = Element(childWidget);
       child.parent = this;
-      child.mount(node);
+      child.mount(node, -1);
       kids.add(child);
     }
   }
 
-  /// Reconcile against a new description of the same thing.
+  /// Reconcile against a new description of the same kind of thing. Callers
+  /// go through updateOrReplace, which handles a change of kind.
   void update(Widget next) {
-    if (next.typeName() != widget.typeName()) {
-      // Different kind of widget: replace the node entirely.
-      var parentless = node;
-      widget = next;
-      uiDestroy(parentless);
-      return;
-    }
-
     widget = next;
     if (widget.composite()) {
+      // The rebuilt parent handed us a fresh widget object; it needs to know
+      // which element it belongs to or its setState would go nowhere.
+      widget.attachElement(this);
       rebuild();
       return;
     }
 
     widget.apply(node); // property diffing happens in the renderer
     reconcileChildren(widget.children());
+  }
+
+  /// Returns the element to use afterwards: this one when the widget kind is
+  /// unchanged, a freshly mounted one when it is not.
+  Element updateOrReplace(Widget next) {
+    if (next.typeName() == widget.typeName()) {
+      update(next);
+      return this;
+    }
+    var host = hostNode;
+    var index = slotIndex;
+    var owner = parent;
+    unmount();
+
+    var fresh = Element(next);
+    fresh.parent = owner;
+    fresh.mount(host, index);
+    return fresh;
   }
 
   void reconcileChildren(List nextChildren) {
@@ -199,12 +244,12 @@ class Element {
     if (nextChildren.length < shared) shared = nextChildren.length;
 
     for (var i = 0; i < shared; i++) {
-      kids[i].update(nextChildren[i]);
+      kids[i] = kids[i].updateOrReplace(nextChildren[i]);
     }
     for (var i = shared; i < nextChildren.length; i++) {
       var child = Element(nextChildren[i]);
       child.parent = this;
-      child.mount(node);
+      child.mount(node, i);
       kids.add(child);
     }
     while (kids.length > nextChildren.length) {
@@ -219,16 +264,16 @@ class Element {
     var previous = kids;
     kids = [];
 
-    for (final w in nextChildren) {
+    for (var i = 0; i < nextChildren.length; i++) {
+      var w = nextChildren[i];
       var reused = findByKey(previous, w.key);
       if (reused == null) {
         var child = Element(w);
         child.parent = this;
-        child.mount(node);
+        child.mount(node, i);
         kids.add(child);
       } else {
-        reused.update(w);
-        kids.add(reused);
+        kids.add(reused.updateOrReplace(w));
       }
     }
 
@@ -239,6 +284,7 @@ class Element {
 
     // Put the renderer's children back in the order the widgets describe.
     for (var i = 0; i < kids.length; i++) {
+      kids[i].slotIndex = i;
       uiAttach(node, kids[i].node, i);
     }
   }
@@ -258,10 +304,12 @@ class Element {
 
   void unmount() {
     for (final k in kids) {
-      k.unmount();
+      if (k != null) k.unmount();
     }
     kids = [];
-    uiDestroy(node);
+    forgetElement(this);
+    // A composite's node belongs to its child, which has just destroyed it.
+    if (ownsNode) uiDestroy(node);
   }
 
   /// A composite rebuilds by asking its widget to describe itself again.
@@ -269,7 +317,7 @@ class Element {
     isDirty = false;
     var next = widget.build();
     if (kids.length == 0) return;
-    kids[0].update(next);
+    kids[0] = kids[0].updateOrReplace(next);
     node = kids[0].node;
   }
 
@@ -279,8 +327,11 @@ class Element {
 Element? rootElement;
 
 void runApp(Widget app) {
+  // Replace whatever was running. Without this a second runApp leaves the
+  // first tree attached, so both draw and hit-testing finds the older one.
+  if (rootElement != null) rootElement!.unmount();
   rootElement = Element(app);
-  rootElement!.mount(uiRoot());
+  rootElement!.mount(uiRoot(), -1);
 }
 
 /// One pass of the framework: drain events, rebuild dirty subtrees, commit.
@@ -292,20 +343,22 @@ void pumpFrame(int dtMs) {
     var nodeId = packed ~/ 8;
     var kind = packed % 8;
     if (kind == eventClicked) {
+      // Exactly one element owns a node; composites share their child's id
+      // and would otherwise make a single tap fire more than once.
+      Element? hit;
+      for (final el in mounted) {
+        if (el.ownsNode && el.node == nodeId) hit = el;
+      }
       // Hit-testing reports the innermost node; the handler may be on an
       // ancestor, so the event bubbles up until one takes it — as in Flutter.
-      for (final el in mounted) {
-        if (el.node == nodeId) {
-          var target = el;
-          while (target != null) {
-            var handler = target.tapHandler();
-            if (handler != null) {
-              handler();
-              target = null;
-            } else {
-              target = target.parent;
-            }
-          }
+      var target = hit;
+      while (target != null) {
+        var handler = target.tapHandler();
+        if (handler != null) {
+          handler();
+          target = null;
+        } else {
+          target = target.parent;
         }
       }
     }
