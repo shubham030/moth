@@ -88,6 +88,93 @@ class Outer extends Component {
   }
 }
 
+// ---- 5: a replaced child must land back in its own slot -----------------
+
+var middleIsBox = false;
+
+class Slots extends Component {
+  Widget build() {
+    var host = Box();
+    host.color = 0xFF16161E;
+    host.kids = [label('a'), middle(), label('c')];
+    return host;
+  }
+
+  Widget label(String v) {
+    var t = Text();
+    t.value = v;
+    return t;
+  }
+
+  Widget middle() {
+    if (!middleIsBox) return label('mid');
+    var b = Box();
+    b.color = 0xFF9ECE6A;
+    b.fixedHeight = 10;
+    return b;
+  }
+
+  void swap() {
+    setState(() {
+      middleIsBox = true;
+    });
+  }
+}
+
+// ---- 6: keyed and unkeyed children in one list --------------------------
+
+class Mixed extends Component {
+  Widget build() {
+    var kids = [];
+    var first = Text();
+    first.value = 'x';
+    first.key = 'x'; // one keyed child is enough to take the keyed path
+    kids.add(first);
+    var plain = Text();
+    plain.value = 'plain'; // no key: must still match positionally
+    kids.add(plain);
+
+    var host = Box();
+    host.color = 0xFF16161E;
+    host.kids = kids;
+    return host;
+  }
+
+  void again() {
+    setState(() {});
+  }
+}
+
+// ---- 7: a composite ancestor borrows a node that may be replaced --------
+
+var leafIsText = false;
+
+class Leaf extends Component {
+  Widget build() {
+    if (!leafIsText) {
+      var b = Box();
+      b.color = 0xFF7AA2F7;
+      b.fixedHeight = 12;
+      return b;
+    }
+    var t = Text();
+    t.value = 'leaf';
+    return t;
+  }
+
+  void flip() {
+    setState(() {
+      leafIsText = true;
+    });
+  }
+}
+
+var leaf = Leaf();
+
+class Wrapper extends Component {
+  Widget build() => leaf;
+}
+
 void main() {
   // --- case 1: a child changing widget kind ---
   var swapper = Swapper();
@@ -126,6 +213,34 @@ void main() {
   runApp(fresh);
   check('runApp replaces the previous tree',
       rootElement!.widget == fresh && mounted.length == before);
+
+  // --- case 5 ---
+  var slots = Slots();
+  runApp(slots);
+  slots.swap();
+  pumpFrame(16);
+  var mid = rootElement!.kids[0].kids[1];
+  check('a replaced child keeps its slot',
+      mid.widget.typeName() == 'Box' && mid.slotIndex == 1);
+
+  // --- case 6 ---
+  var mixed = Mixed();
+  runApp(mixed);
+  var plainBefore = rootElement!.kids[0].kids[1].node;
+  mixed.again();
+  pumpFrame(16);
+  // Node ids are never reused, so an unchanged id means the element survived.
+  check('unkeyed siblings survive a keyed rebuild',
+      rootElement!.kids[0].kids[1].node == plainBefore);
+
+  // --- case 7 ---
+  var wrapper = Wrapper();
+  runApp(wrapper);
+  var wrapEl = rootElement!;
+  var leafEl = wrapEl.kids[0];
+  leaf.flip(); // only the inner composite is dirty
+  pumpFrame(16);
+  check('composite ancestor tracks a replaced node', wrapEl.node == leafEl.node);
 
   print(failures == 0 ? 'all checks passed' : '$failures check(s) failed');
 
