@@ -331,6 +331,16 @@ class Compiler {
     return [...inherited, ...classFieldInits[index]];
   }
 
+  /// Distinguishes a setter from a getter or method of the same name. Dart
+  /// lets a class declare both `int get x` and `set x(int v)`, so the name
+  /// alone is not a unique key; the VM tells them apart by arity instead, and
+  /// the trailing '=' is stripped before the name reaches the class table.
+  static String _memberKey(MethodDeclaration m) =>
+      m.isSetter ? '${m.name.lexeme}=' : m.name.lexeme;
+
+  static String _plainName(String key) =>
+      key.endsWith('=') ? key.substring(0, key.length - 1) : key;
+
   /// Inherited methods, with the subclass's own replacing them by name.
   Map<String, int> effectiveMethodSlots(int index) {
     final superIdx = classSuper[index];
@@ -360,7 +370,7 @@ class Compiler {
       final slots = <(String, int)>[];
       for (final member in decl.members) {
         if (member is MethodDeclaration) {
-          slots.add((member.name.lexeme, next++));
+          slots.add((_memberKey(member), next++));
         }
       }
       classMethodSlots.add(slots);
@@ -374,7 +384,10 @@ class Compiler {
     // a superclass field or call a superclass method without qualification.
     final fields = effectiveFields(index);
     final inheritedMethods = effectiveMethodSlots(index);
-    final methodNames = inheritedMethods.keys.toList();
+    final methodNames = [
+      for (final k in inheritedMethods.keys)
+        if (!k.endsWith('=')) k,
+    ];
 
     var ctor = noCtor;
     final fieldInits = effectiveFieldInits(index);
@@ -436,15 +449,8 @@ class Compiler {
                 'e.g. "print(thing.describe())"',
           );
         }
-        if (member.isGetter || member.isSetter) {
-          throw CompileError(
-            'getters and setters are not supported yet',
-            member.offset,
-            hint: 'use a plain method for now',
-          );
-        }
         final reserved = classMethodSlots[index]
-            .firstWhere((s) => s.$1 == member.name.lexeme)
+            .firstWhere((s) => s.$1 == _memberKey(member))
             .$2;
         functions[reserved] = FunctionCompiler.member(this, fields, methodNames,
                 isConstructor: false)
@@ -453,6 +459,7 @@ class Compiler {
           params: member.parameters?.parameters ?? const [],
           body: member.body,
           offset: member.offset,
+          isSetter: member.isSetter,
         );
         continue;
       }
@@ -467,7 +474,7 @@ class Compiler {
       // Inherited entries included, own ones already replacing them by name.
       [
         for (final entry in inheritedMethods.entries)
-          (constants.addString(entry.key), entry.value),
+          (constants.addString(_plainName(entry.key)), entry.value),
       ],
       ctor,
     );
@@ -514,7 +521,7 @@ class Compiler {
     final seen = <String>{};
     for (final member in decl.members) {
       if (member is MethodDeclaration) {
-        if (!seen.add(member.name.lexeme)) {
+        if (!seen.add(_memberKey(member))) {
           throw CompileError(
             "'${member.name.lexeme}' is declared twice in this class",
             member.offset,

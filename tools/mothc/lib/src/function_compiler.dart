@@ -96,6 +96,7 @@ class FunctionCompiler {
     required FunctionBody? body,
     required int offset,
     List<(String, Expression)> fieldInits = const [],
+    bool isSetter = false,
   }) {
     _declare('this', offset);
     final arity = 1 + _declareParams(params);
@@ -130,6 +131,13 @@ class FunctionCompiler {
       _emit(Op.load);
       _emit(0);
       _emit(Op.ret); // constructors evaluate to the new instance
+    } else if (isSetter) {
+      // `a.b = v` evaluates to v in Dart. OP_SET_PROP leaves whatever the
+      // setter returned, so returning the parameter keeps that true and keeps
+      // the opcode's stack effect the same as a plain field write.
+      _emit(Op.load);
+      _emit(1); // slot 0 is the receiver, slot 1 the assigned value
+      _emit(Op.ret);
     } else {
       _emit(Op.retNull);
     }
@@ -712,7 +720,10 @@ class FunctionCompiler {
 
   void _identifier(SimpleIdentifier id) {
     final slot = _resolve(id.name);
-    if (slot == null && _isField(id.name)) {
+    // A bare name inside a method can be a field or a getter on this object.
+    // Both read the same way — OP_GET_PROP tries the field first and falls
+    // back to the getter — so one path covers them.
+    if (slot == null && (_isField(id.name) || _enclosingMethods.contains(id.name))) {
       _emitThis();
       _emit(Op.getProp);
       _emitU16(unit.constants.addString(id.name));
@@ -772,9 +783,12 @@ class FunctionCompiler {
           expr, target.identifier, () => _expression(target.prefix));
       return;
     }
+    // A bare name on the left can be a field or a setter on this object. Both
+    // write the same way — OP_SET_PROP tries the field first and falls back to
+    // the setter — so one path covers them.
     if (target is SimpleIdentifier &&
         _resolve(target.name) == null &&
-        _isField(target.name)) {
+        (_isField(target.name) || _enclosingMethods.contains(target.name))) {
       _propertyAssignment(expr, target, _emitThis);
       return;
     }

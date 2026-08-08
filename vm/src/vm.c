@@ -10,6 +10,8 @@
 static const char *type_name(moth_value v);
 static const char *const_name(moth_vm *vm, uint16_t idx);
 static int field_slot(moth_vm *vm, uint16_t class_index, uint16_t name_const);
+static uint16_t method_with_arity(moth_vm *vm, uint16_t class_index, uint16_t name_const,
+                                  int arity);
 
 static moth_status trap(moth_vm *vm, moth_frame *fr, moth_status st, const char *fmt, ...) {
   char msg[128];
@@ -412,10 +414,12 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
       case OP_GET_PROP: {
         NEED(2);
         uint16_t name = read_u16(&fr->ip);
-        moth_value target = POP();
+        /* The receiver stays on the stack: if this turns out to be a getter
+         * rather than a field, it is already in place as the callee's slot 0. */
+        moth_value target = PEEK_AT(0);
         if (name == vm->k_length) {
-          if (IS_LIST(target)) { PUSH(moth_int(AS_LIST(target)->count)); break; }
-          if (moth_is_string(target)) { PUSH(moth_int(AS_STRING(target)->len)); break; }
+          if (IS_LIST(target)) { (void)POP(); PUSH(moth_int(AS_LIST(target)->count)); break; }
+          if (moth_is_string(target)) { (void)POP(); PUSH(moth_int(AS_STRING(target)->len)); break; }
         }
         if (!IS_INSTANCE(target)) {
           return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no property '%s'",
@@ -423,27 +427,71 @@ static moth_status run_function(moth_vm *vm, uint16_t fn_index) {
         }
         moth_instance *inst = AS_INSTANCE(target);
         int slot = field_slot(vm, inst->class_index, name);
-        if (slot < 0) {
-          return trap(vm, fr, MOTH_ERR_TYPE, "no field named '%s'", const_name(vm, name));
+        if (slot >= 0) {
+          (void)POP();
+          PUSH(inst->fields[slot]);
+          break;
         }
-        PUSH(inst->fields[slot]);
+
+        /* No field of that name, so look for a getter: a method with the
+         * property's name taking nothing but the receiver. */
+        uint16_t getter = method_with_arity(vm, inst->class_index, name, 1);
+        if (getter == 0xFFFF) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no field or getter named '%s'",
+                      const_name(vm, name));
+        }
+        if (vm->nframes >= MOTH_FRAMES_MAX) {
+          return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
+        }
+        const moth_func *gcallee = &vm->funcs[getter];
+        moth_value *gslots = vm->sp - 1;
+        for (int i = gcallee->arity; i < gcallee->nlocals; i++) PUSH(moth_null());
+        moth_frame *gf = &vm->frames[vm->nframes++];
+        gf->fn = gcallee;
+        gf->ip = gcallee->code;
+        gf->slots = gslots;
+        fr = gf;
         break;
       }
       case OP_SET_PROP: {
         NEED(2);
         uint16_t name = read_u16(&fr->ip);
-        moth_value value = POP(), target = POP();
+        /* Receiver beneath, value on top — the exact order a setter wants for
+         * its two slots, so neither is popped until we know it is a field. */
+        moth_value target = PEEK_AT(1);
         if (!IS_INSTANCE(target)) {
           return trap(vm, fr, MOTH_ERR_TYPE, "'%s' has no property '%s' to set",
                       type_name(target), const_name(vm, name));
         }
         moth_instance *inst = AS_INSTANCE(target);
         int slot = field_slot(vm, inst->class_index, name);
-        if (slot < 0) {
-          return trap(vm, fr, MOTH_ERR_TYPE, "no field named '%s'", const_name(vm, name));
+        if (slot >= 0) {
+          moth_value value = POP();
+          (void)POP();
+          inst->fields[slot] = value;
+          PUSH(value); /* assignment is an expression */
+          break;
         }
-        inst->fields[slot] = value;
-        PUSH(value); /* assignment is an expression */
+
+        /* A setter takes the receiver and the value. The compiler gives it an
+         * implicit `return value`, so the assignment still evaluates to what
+         * was assigned and this opcode's stack effect is unchanged. */
+        uint16_t setter = method_with_arity(vm, inst->class_index, name, 2);
+        if (setter == 0xFFFF) {
+          return trap(vm, fr, MOTH_ERR_TYPE, "no field or setter named '%s'",
+                      const_name(vm, name));
+        }
+        if (vm->nframes >= MOTH_FRAMES_MAX) {
+          return trap(vm, fr, MOTH_ERR_STACK_OVERFLOW, "call stack overflow (infinite recursion?)");
+        }
+        const moth_func *scallee = &vm->funcs[setter];
+        moth_value *sslots = vm->sp - 2;
+        for (int i = scallee->arity; i < scallee->nlocals; i++) PUSH(moth_null());
+        moth_frame *sf = &vm->frames[vm->nframes++];
+        sf->fn = scallee;
+        sf->ip = scallee->code;
+        sf->slots = sslots;
+        fr = sf;
         break;
       }
       case OP_INVOKE: {
@@ -610,6 +658,22 @@ static const char *const_name(moth_vm *vm, uint16_t idx) {
     snprintf(out, sizeof buf[0], "?");
   }
   return out;
+}
+
+/* Getters and setters compile to ordinary methods sharing the property's
+ * name, so arity is what tells them apart: a getter takes only the receiver,
+ * a setter takes the value as well. A class cannot declare two members with
+ * one name, so this is never ambiguous. */
+static uint16_t method_with_arity(moth_vm *vm, uint16_t class_index, uint16_t name_const,
+                                  int arity) {
+  moth_class *cls = &vm->classes[class_index];
+  for (uint16_t i = 0; i < cls->nmethods; i++) {
+    if (cls->methods[i].name_const != name_const) continue;
+    if (vm->funcs[cls->methods[i].func_index].arity == arity) {
+      return cls->methods[i].func_index;
+    }
+  }
+  return 0xFFFF;
 }
 
 static int field_slot(moth_vm *vm, uint16_t class_index, uint16_t name_const) {
