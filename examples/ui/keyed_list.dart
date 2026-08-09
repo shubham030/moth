@@ -18,9 +18,7 @@ class ListApp extends Component {
   Widget build() {
     var rows = [];
     for (var i = 0; i < order.length; i++) {
-      var label = Text();
-      label.value = order[i];
-      label.size = 16;
+      var label = Text(order[i], style: TextStyle(fontSize: 16));
 
       var row = Box();
       if (useKeys) row.key = order[i]; // identity follows the item
@@ -31,9 +29,7 @@ class ListApp extends Component {
       rows.add(row);
     }
 
-    var title = Text();
-    title.value = useKeys ? 'keyed, $rotations rotations' : 'unkeyed';
-    title.size = 16;
+    var title = Text(useKeys ? 'keyed, $rotations rotations' : 'unkeyed', style: TextStyle(fontSize: 16));
 
     var list = Box();
     list.space = 8;

@@ -171,15 +171,18 @@ match against; moth says so rather than guessing.
 This is what lets a widget tree read as a tree:
 
 ```dart
-Box(
+Container(
   color: 0xFF0E0E12,
-  pad: 20,
-  align: alignCenter,
+  padding: 20,
   onTap: () => setState(() => count += 1),
-  kids: [
-    Text(value: 'tapped $count times', size: 20),
-    Box(color: 0xFF2A2A31, fixedHeight: 2, fixedWidth: 180),
-  ],
+  child: Column(
+    mainAxisAlignment: mainAxisCenter,
+    spacing: 12,
+    children: [
+      Text('tapped $count times', style: TextStyle(fontSize: 20)),
+      Divider(thickness: 2, width: 180),
+    ],
+  ),
 )
 ```
 
