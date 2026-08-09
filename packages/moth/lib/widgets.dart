@@ -38,7 +38,17 @@ final propThickness = 25;
 final positionAbsolute = 1;
 
 final directionRow = 1;
+
+/// mr_align: how children sit along an axis.
+final alignStart = 0;
 final alignCenter = 1;
+final alignEnd = 2;
+final alignSpaceBetween = 3;
+
+/// Only meaningful across the axis: makes a child fill the box's other
+/// dimension, which is what lets a column's contents centre on the screen
+/// rather than on their own widest line.
+final alignStretch = 4;
 final eventClicked = 2;
 
 // ---- widgets -------------------------------------------------------------
@@ -100,8 +110,11 @@ class Box extends Widget {
     uiSetInt(node, propCrossAlign, crossAlign);
     uiSetNum(node, propBorderWidth, borderWidth);
     uiSetInt(node, propBorderColor, borderColor);
-    if (fixedHeight >= 0) uiSetNum(node, propHeight, fixedHeight);
-    if (fixedWidth >= 0) uiSetNum(node, propWidth, fixedWidth);
+    // Always written, never conditionally skipped: the reconciler reuses an
+    // element, so a size set on one build and dropped on the next would stay
+    // set forever. -1 is MR_AUTO, which is how a size is cleared.
+    uiSetNum(node, propHeight, fixedHeight >= 0 ? fixedHeight : -1);
+    uiSetNum(node, propWidth, fixedWidth >= 0 ? fixedWidth : -1);
   }
 }
 
@@ -150,6 +163,11 @@ class Text extends Widget {
   int size = 16;
   int tint = 0xFFC0CAF5;
 
+  /// Wrap to this many pixels, breaking at spaces. Left unset the text stays
+  /// on one line and the box grows to fit it; set, the box grows downwards
+  /// instead. A '\n' always breaks, wrapped or not.
+  int wrapWidth = -1;
+
   String typeName() => 'Text';
   int kind() => kLabel;
 
@@ -157,6 +175,8 @@ class Text extends Widget {
     uiSetText(node, propText, value);
     uiSetNum(node, propFontSize, size);
     uiSetInt(node, propTextColor, tint);
+    // Same reason as Box: a label that wrapped once must be able to stop.
+    uiSetNum(node, propWidth, wrapWidth > 0 ? wrapWidth : -1);
   }
 }
 

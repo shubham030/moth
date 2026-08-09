@@ -1,4 +1,5 @@
 #pragma once
+#include "moth_font.h"
 #include "moth_render.h"
 
 #include <string>
@@ -6,8 +7,28 @@
 
 namespace mr {
 
+/* One wrapped line, as a range into the original string. */
+struct TextLine {
+  uint32_t start, len;
+  float width;
+};
+
+
 struct Node {
   bool alive = false;
+
+  /* Wrapped lines, and the width they were wrapped at. Layout fills these and
+   * paint reads them: two independent wraps of the same string is how a label
+   * ends up reserving room for one line and drawing three. */
+  std::vector<TextLine> lines;
+  float lines_width = -1.0f;
+  const moth_font *lines_font = nullptr;
+
+  /* The width arrange last handed this label. A label with no width of its own
+   * is measured before its parent decides how wide it gets, so the first pass
+   * has nothing to wrap against; this carries that answer back so the second
+   * pass measures against the width the label will really have. */
+  float wrap_hint = -1.0f;
   mr_node_kind kind = MR_NODE_BOX;
   mr_node_id parent = MR_NODE_NONE;
   std::vector<mr_node_id> children;
@@ -58,22 +79,35 @@ struct Scene {
 
 Scene &scene();
 
-/* Text is drawn from an 8x8 bitmap font at integer scale, so a glyph is
- * always a whole number of pixels and layout can measure it exactly. */
-#define MOTH_GLYPH_PX 8
+/* text.cpp — fonts, measurement and wrapping.
+ *
+ * Layout and paint have to agree exactly on where every glyph goes, so both
+ * go through here rather than each doing its own arithmetic. That is also why
+ * wrapping lives here: the height layout reserves and the lines paint draws
+ * must come from the same call. */
 
-inline int text_scale(float font_size) {
-  int scale = (int)(font_size / MOTH_GLYPH_PX + 0.5f);
-  return scale < 1 ? 1 : scale;
-}
+/* The face to draw `text` at `size` with: the largest one at or below the
+ * size that can actually render the string. Faces are subsetted, so ranking
+ * by size alone hands back a digits-only face for a word and draws nothing.
+ * Never null. */
+const moth_font *font_for(float size, const std::string &text);
 
-inline float text_width(size_t chars, float font_size) {
-  return (float)(chars * MOTH_GLYPH_PX * (size_t)text_scale(font_size));
-}
+/* Advance for one character, including a stand-in for glyphs the face lacks. */
+float glyph_advance(const moth_font *f, unsigned char ch);
 
-inline float text_height(float font_size) {
-  return (float)(MOTH_GLYPH_PX * text_scale(font_size));
-}
+/* The glyph, or null when this face cannot draw the character. */
+const moth_glyph *glyph_or_null(const moth_font *f, unsigned char ch);
+
+/* Breaks `text` into lines that fit `max_w`, at spaces where it can and
+ * mid-word only when a single word cannot fit. A `max_w` of zero or less
+ * means no wrapping, and the result is one line. */
+void wrap_text(const moth_font *f, const std::string &text, float max_w,
+               std::vector<TextLine> &out);
+
+/* Wraps a label to `max_w` and caches the result on the node, so paint draws
+ * exactly the lines layout reserved room for. Re-wraps only when the width it
+ * was last wrapped at has changed. Fills n.w/n.h with what the text needs. */
+void layout_text(Node &n, float max_w, float &out_w, float &out_h);
 
 /* paint.cpp — true when a point lands on an arc's stroke, as drawn. An arc's
  * box spans the whole ring, so testing that box would have a decorative

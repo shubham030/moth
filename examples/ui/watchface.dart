@@ -61,6 +61,9 @@ class WatchFace extends Component {
     return Box()
       ..color = black
       ..growFactor = 1
+      // Stretch, so the face below spans the display and its contents centre
+      // on the screen rather than on their own widest line.
+      ..crossAlign = alignStretch
       ..kids = [
         // The face itself, inset to the round panel's safe area.
         Box()

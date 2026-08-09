@@ -8,7 +8,6 @@
  */
 #include "scene_internal.hpp"
 
-#include "font8x8_basic.h"
 
 #include <algorithm>
 #include <cmath>
@@ -52,6 +51,21 @@ static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
   int y0 = std::max(0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
   int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+  if (x1 <= x0 || y1 <= y0) return;
+
+  /* An opaque fill has nothing to blend with, and backgrounds are the biggest
+   * rectangles on screen — a full-screen panel is a fifth of a million pixels,
+   * and taking the general path for each cost more than everything else in a
+   * frame put together. */
+  if (((argb >> 24) & 0xFF) == 0xFF && opacity >= 1.0f) {
+    const uint32_t solid = 0xFF000000u | (argb & 0x00FFFFFFu);
+    for (int y = y0; y < y1; y++) {
+      uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+      std::fill(row + x0, row + x1, solid);
+    }
+    return;
+  }
+
   for (int y = y0; y < y1; y++) {
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
     for (int x = x0; x < x1; x++) row[x] = blend(row[x], argb, opacity);
@@ -112,66 +126,105 @@ static void stroke_round_rect(Scene &s, float fx, float fy, float fw, float fh,
   }
 }
 
-/* A stroked ring segment with round caps, inscribed in the node's box.
- *
- * Angles are degrees clockwise from twelve o'clock, because that is how a
- * progress ring is described rather than how atan2 reports them. Coverage is
- * computed from the distance to the ring's centre line, so the edge is smooth
- * without supersampling — an aliased arc on a round panel looks broken in a
- * way an aliased rectangle does not. */
-static void draw_arc(Scene &s, const Node &n, float opacity) {
+/* The ring an arc describes: the centre line of its stroke, and half its
+ * width. Everything the stroke can touch lies within `half + 1` of that
+ * circle. */
+struct ArcRing {
+  float cx, cy, mid, half;
+};
+
+static bool arc_ring(const Node &n, ArcRing &out) {
   float thickness = n.f[MR_PROP_THICKNESS];
   if (thickness <= 0.0f) thickness = 4.0f;
 
-  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
   const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
-  const float mid = outer - thickness * 0.5f; /* the centre line of the stroke */
-  if (mid <= 0.0f) return;
+  out.cx = n.x + n.w * 0.5f;
+  out.cy = n.y + n.h * 0.5f;
+  out.mid = outer - thickness * 0.5f;
+  out.half = thickness * 0.5f;
+  return out.mid > 0.0f;
+}
 
-  const float half = thickness * 0.5f;
+/* Degrees clockwise from twelve o'clock — how a progress ring is described,
+ * rather than how atan2 reports angles. */
+static float arc_angle_at(float dx, float dy) {
+  const float kDeg = 3.14159265358979f / 180.0f;
+  return std::atan2(dx, -dy) / kDeg;
+}
+
+static bool arc_within_sweep(const Node &n, float dx, float dy, float sweep) {
+  float rel = arc_angle_at(dx, dy) - n.f[MR_PROP_ARC_START];
+  while (rel < 0.0f) rel += 360.0f;
+  while (rel >= 360.0f) rel -= 360.0f;
+  return rel <= sweep;
+}
+
+/* Coverage from the round cap at one end of the sweep, or 0 if the pixel is
+ * nowhere near it. */
+static float arc_cap_coverage(float px, float py, float capx, float capy,
+                              float half) {
+  const float dx = px - capx, dy = py - capy;
+  const float q = dx * dx + dy * dy;
+  const float reach = half + 1.0f;
+  if (q > reach * reach) return 0.0f;
+  return clamp01(half + 0.5f - std::sqrt(q));
+}
+
+/* A stroked ring segment with round caps, inscribed in the node's box.
+ *
+ * Coverage comes from the distance to the stroke's centre line, so the edge is
+ * smooth without supersampling — an aliased arc on a round panel looks broken
+ * in a way an aliased rectangle does not. */
+static void draw_arc(Scene &s, const Node &n, float opacity) {
+  ArcRing r;
+  if (!arc_ring(n, r)) return;
+
   float sweep = n.f[MR_PROP_ARC_SWEEP];
   if (sweep <= 0.0f) return;
   const bool closed = sweep >= 360.0f;
-  const float start = n.f[MR_PROP_ARC_START];
 
   const float kDeg = 3.14159265358979f / 180.0f;
-  /* Cap centres sit on the centre line at each end of the sweep. */
-  const float a0 = start * kDeg, a1 = (start + sweep) * kDeg;
-  const float cap0x = cx + mid * std::sin(a0), cap0y = cy - mid * std::cos(a0);
-  const float cap1x = cx + mid * std::sin(a1), cap1y = cy - mid * std::cos(a1);
+  const float a0 = n.f[MR_PROP_ARC_START] * kDeg;
+  const float a1 = (n.f[MR_PROP_ARC_START] + sweep) * kDeg;
+  const float cap0x = r.cx + r.mid * std::sin(a0), cap0y = r.cy - r.mid * std::cos(a0);
+  const float cap1x = r.cx + r.mid * std::sin(a1), cap1y = r.cy - r.mid * std::cos(a1);
 
-  int x0 = std::max(0, (int)std::floor(cx - outer - 1.0f));
-  int y0 = std::max(0, (int)std::floor(cy - outer - 1.0f));
-  int x1 = std::min(s.cfg.width, (int)std::ceil(cx + outer + 1.0f));
-  int y1 = std::min(s.cfg.height, (int)std::ceil(cy + outer + 1.0f));
+  /* Everything the stroke can touch lies in an annulus a pixel wider than the
+   * stroke on each side. Rejecting against its squared radii costs a multiply
+   * where taking the distance costs a square root, and nearly all of the box
+   * is rejected — on a 466px panel that is ~20k roots instead of ~217k. */
+  const float r_in = r.mid - r.half - 1.0f;
+  const float r_out = r.mid + r.half + 1.0f;
+  const float r_in2 = r_in > 0.0f ? r_in * r_in : 0.0f;
+  const float r_out2 = r_out * r_out;
+
+  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
+  const int x0 = std::max(0, (int)std::floor(r.cx - outer - 1.0f));
+  const int y0 = std::max(0, (int)std::floor(r.cy - outer - 1.0f));
+  const int x1 = std::min(s.cfg.width, (int)std::ceil(r.cx + outer + 1.0f));
+  const int y1 = std::min(s.cfg.height, (int)std::ceil(r.cy + outer + 1.0f));
 
   const uint32_t argb = n.u[MR_PROP_BG_COLOR];
 
   for (int y = y0; y < y1; y++) {
+    const float dy = (float)y + 0.5f - r.cy;
+    const float dy2 = dy * dy;
+    if (dy2 > r_out2) continue;
+
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
     for (int x = x0; x < x1; x++) {
-      const float dx = (float)x + 0.5f - cx;
-      const float dy = (float)y + 0.5f - cy;
-      const float dist = std::sqrt(dx * dx + dy * dy);
+      const float dx = (float)x + 0.5f - r.cx;
+      const float d2 = dx * dx + dy2;
+      if (d2 > r_out2 || d2 < r_in2) continue;
 
-      /* How far inside the stroke this pixel is, radially. */
-      float cov = clamp01(half + 0.5f - std::fabs(dist - mid));
-      if (cov > 0.0f && !closed) {
-        float ang = std::atan2(dx, -dy) / kDeg; /* 0 at twelve, clockwise */
-        float rel = ang - start;
-        while (rel < 0.0f) rel += 360.0f;
-        while (rel >= 360.0f) rel -= 360.0f;
-        if (rel > sweep) cov = 0.0f; /* past the end; the caps fill it in */
-      }
-
+      float cov = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
       if (!closed) {
-        /* Round caps, as discs centred on the ends of the centre line. */
-        const float d0x = (float)x + 0.5f - cap0x, d0y = (float)y + 0.5f - cap0y;
-        const float d1x = (float)x + 0.5f - cap1x, d1y = (float)y + 0.5f - cap1y;
-        float c0 = clamp01(half + 0.5f - std::sqrt(d0x * d0x + d0y * d0y));
-        float c1 = clamp01(half + 0.5f - std::sqrt(d1x * d1x + d1y * d1y));
-        if (c0 > cov) cov = c0;
-        if (c1 > cov) cov = c1;
+        if (cov > 0.0f && !arc_within_sweep(n, dx, dy, sweep)) cov = 0.0f;
+        if (cov < 1.0f) {
+          const float px = (float)x + 0.5f, py = (float)y + 0.5f;
+          cov = std::max(cov, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
+          cov = std::max(cov, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
+        }
       }
 
       if (cov <= 0.0f) continue;
@@ -180,37 +233,73 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   }
 }
 
-/* Blits the 8x8 glyphs, each pixel expanded to a scale x scale block.
- * Clipped to the node's box, so a label never paints outside its layout. */
+/* Draws a label from the lines layout already wrapped.
+ *
+ * The font stores alpha rather than on/off pixels, so this is the whole of
+ * antialiasing — no rasterizer, just the stored value scaling the blend.
+ * Nothing is re-wrapped here: doing that independently is how a label
+ * reserves room for one line and then draws three. */
 static void draw_text(Scene &s, const Node &n, float opacity) {
-  int scale = text_scale(n.f[MR_PROP_FONT_SIZE]);
-  uint32_t color = n.u[MR_PROP_TEXT_COLOR];
-  float pen_x = n.x;
+  if (!n.lines_font || n.lines.empty()) return;
+  const moth_font *f = n.lines_font;
+  const uint32_t color = n.u[MR_PROP_TEXT_COLOR];
 
-  for (size_t i = 0; i < n.text.size(); i++) {
-    unsigned char ch = (unsigned char)n.text[i];
-    if (ch > 127) ch = '?'; /* the font covers ASCII only */
-    const unsigned char *glyph = font8x8_basic[ch];
+  const int box_x0 = (int)std::floor(n.x);
+  const int box_x1 = (int)std::ceil(n.x + n.w);
+  const int box_y0 = (int)std::floor(n.y);
+  const int box_y1 = (int)std::ceil(n.y + n.h);
 
-    for (int row = 0; row < MOTH_GLYPH_PX; row++) {
-      for (int col = 0; col < MOTH_GLYPH_PX; col++) {
-        if (!((glyph[row] >> col) & 1)) continue;
-        float px = pen_x + (float)(col * scale);
-        float py = n.y + (float)(row * scale);
+  float line_y = n.y;
+  for (const TextLine &line : n.lines) {
+    float pen = n.x;
+    for (uint32_t i = 0; i < line.len; i++) {
+      const unsigned char ch = (unsigned char)n.text[line.start + i];
+      const moth_glyph *g = glyph_or_null(f, ch);
 
-        /* Clip to the node's box on both axes. Clamping rather than skipping
-         * matters once scale > 1, where a block can straddle the edge and
-         * would otherwise be drawn whole, spilling over a sibling. */
-        float x0 = px < n.x ? n.x : px;
-        float y0 = py < n.y ? n.y : py;
-        float x1 = px + (float)scale, y1 = py + (float)scale;
-        if (x1 > n.x + n.w) x1 = n.x + n.w;
-        if (y1 > n.y + n.h) y1 = n.y + n.h;
-        if (x1 <= x0 || y1 <= y0) continue;
-        fill_rect(s, x0, y0, x1 - x0, y1 - y0, color, opacity);
+      if (!g) {
+        /* A character this face cannot draw. Showing a hollow box beats
+         * closing the gap silently, which turns "12.5" into "125". */
+        const float nd = glyph_advance(f, ch);
+        const float top = line_y + (float)f->line_height * 0.25f;
+        const float hgt = (float)f->line_height * 0.5f;
+        stroke_round_rect(s, pen + 1.0f, top, nd - 2.0f, hgt, 1.0f, 1.0f,
+                          color, opacity * 0.55f);
+        pen += nd;
+        continue;
       }
+
+      if (g->box_w > 0 && g->box_h > 0) {
+        const float gx = pen + (float)g->ofs_x;
+        const float gy = line_y + (float)g->ofs_y;
+
+        /* Clamp the glyph's own range once rather than testing every pixel
+         * against the box. The left edge is clamped against the node box, not
+         * the pen: a glyph with a negative ofs_x — 'f' and 'j' in Inter —
+         * legitimately starts a hair before the pen, and clipping there ate
+         * an ink column off any line beginning with one. */
+        int c0 = 0, c1 = g->box_w;
+        int r0 = 0, r1 = g->box_h;
+        if (gx < (float)box_x0) c0 = (int)((float)box_x0 - gx);
+        if (gx + (float)g->box_w > (float)box_x1) c1 = (int)((float)box_x1 - gx);
+        if (gy < (float)box_y0) r0 = (int)((float)box_y0 - gy);
+        if (gy + (float)g->box_h > (float)box_y1) r1 = (int)((float)box_y1 - gy);
+
+        for (int row = r0; row < r1; row++) {
+          const int y = (int)(gy + (float)row);
+          if (y < 0 || y >= s.cfg.height) continue;
+          uint32_t *dst = s.framebuffer.data() + (size_t)y * s.cfg.width;
+          for (int col = c0; col < c1; col++) {
+            const int x = (int)(gx + (float)col);
+            if (x < 0 || x >= s.cfg.width) continue;
+            const uint8_t a = moth_glyph_alpha(f, g, col, row);
+            if (!a) continue;
+            dst[x] = blend(dst[x], color, opacity * (float)a / 255.0f);
+          }
+        }
+      }
+      pen += (float)g->adv_w;
     }
-    pen_x += (float)(MOTH_GLYPH_PX * scale);
+    line_y += (float)f->line_height;
   }
 }
 
@@ -219,28 +308,16 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
  * over content takes every tap in its bounding box, which for a ring around
  * a display is the entire display. */
 bool arc_hit(const Node &n, float px, float py) {
-  float thickness = n.f[MR_PROP_THICKNESS];
-  if (thickness <= 0.0f) thickness = 4.0f;
+  ArcRing r;
+  if (!arc_ring(n, r)) return false;
 
-  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
-  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
-  const float mid = outer - thickness * 0.5f;
-  if (mid <= 0.0f) return false;
+  const float dx = px - r.cx, dy = py - r.cy;
+  if (std::fabs(std::sqrt(dx * dx + dy * dy) - r.mid) > r.half) return false;
 
-  const float half = thickness * 0.5f;
-  const float dx = px - cx, dy = py - cy;
-  const float dist = std::sqrt(dx * dx + dy * dy);
-  if (std::fabs(dist - mid) > half) return false;
-
-  float sweep = n.f[MR_PROP_ARC_SWEEP];
+  const float sweep = n.f[MR_PROP_ARC_SWEEP];
   if (sweep <= 0.0f) return false;
   if (sweep >= 360.0f) return true;
-
-  const float kDeg = 3.14159265358979f / 180.0f;
-  float rel = std::atan2(dx, -dy) / kDeg - n.f[MR_PROP_ARC_START];
-  while (rel < 0.0f) rel += 360.0f;
-  while (rel >= 360.0f) rel -= 360.0f;
-  return rel <= sweep;
+  return arc_within_sweep(n, dx, dy, sweep);
 }
 
 static void paint_node(Scene &s, mr_node_id id, float opacity) {

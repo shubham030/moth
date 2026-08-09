@@ -133,10 +133,17 @@ Desktop-first; no Dart dependency until the framework exists.
 - [x] R0 — Backend contract (docs/BACKEND.md) + component scaffold with SDL harness
 - [ ] R1 — Flex layout per §4 of the contract, passing the layout goldens;
       flat-color software paint (boxes visible in the harness)
-- [x] R2a — text: 8x8 bitmap font at integer scale, measured exactly by
-      layout (no external dependency; readable, not scalable)
-- [ ] R2b — ThorVG: rounded rects, borders, anti-aliased scalable text, images
-- [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one)
+- [x] R2a — Software paint: flat fills, rounded rects, borders, arcs with
+      antialiasing, and antialiased bitmap text with real metrics and
+      wrapping (tools/fontgen generates the faces)
+- [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
+      gradients, images
+- [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one).
+      **Measured on the ESP32-S3, 466x466:** a full repaint costs 164ms even
+      for a single 20x20 box — that is clearing an 868KB framebuffer in PSRAM
+      and pushing it over QSPI, before anything is drawn. The watch face costs
+      298ms. No amount of drawing less gets below the floor; only repainting
+      what changed does.
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
 

@@ -57,6 +57,15 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'all checks passed'
 
+      - name: Text wrapping
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -e
+          out=$(./build/mothsim examples/ui/wrap_check.mothb --frames 40)
+          echo "$out"
+          echo "$out" | grep -q 'all checks passed'
+
       - name: A tap fires exactly one handler
         env:
           SDL_VIDEODRIVER: dummy
