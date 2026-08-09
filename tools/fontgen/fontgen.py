@@ -50,30 +50,46 @@ def pack_row(alphas, bpp: int) -> bytes:
 
 
 def render_glyph(font, ch, bpp):
-    """Returns (bitmap bytes, box_w, box_h, ofs_x, ofs_y, adv_w)."""
-    adv = font.getlength(ch)
-    bbox = font.getbbox(ch)  # (x0, y0, x1, y1) relative to the pen at the top
-    if bbox is None:
-        return b"", 0, 0, 0, 0, int(round(adv))
+    """Returns (bitmap bytes, box_w, box_h, ofs_x, ofs_y, adv_w).
 
-    x0, y0, x1, y1 = bbox
+    The ink box is measured from the rendered pixels rather than taken from
+    getbbox. Those two disagree for some glyphs — getbbox reports a box the
+    rasterizer does not fill the same way — and cropping to the reported box
+    sliced ink off the right of every glyph. Scanning what was actually drawn
+    cannot drift from what will be drawn.
+    """
+    adv = int(round(font.getlength(ch)))
+
+    # Draw at a known origin on a canvas big enough that nothing can clip,
+    # including glyphs that reach left of the pen or above the ascender.
+    pad = max(8, args_size_hint(font))
+    canvas = Image.new("L", (pad * 4, pad * 4), 0)
+    origin = (pad, pad)
+    ImageDraw.Draw(canvas).text(origin, ch, font=font, fill=255)
+
+    ink = canvas.getbbox()
+    if ink is None:  # space and friends
+        return b"", 0, 0, 0, 0, adv
+
+    x0, y0, x1, y1 = ink
     box_w, box_h = x1 - x0, y1 - y0
-    if box_w <= 0 or box_h <= 0:  # space and friends have no ink
-        return b"", 0, 0, 0, 0, int(round(adv))
-
-    # Draw into a canvas large enough that nothing clips, then take the box.
-    pad = 4
-    img = Image.new("L", (box_w + pad * 2, box_h + pad * 2), 0)
-    ImageDraw.Draw(img).text((pad - x0, pad - y0), ch, font=font, fill=255)
-    img = img.crop((pad, pad, pad + box_w, pad + box_h))
+    glyph = canvas.crop(ink)
 
     data = bytearray()
-    px = img.load()
+    px = glyph.load()
     for y in range(box_h):
         row = [quantize(px[x, y], bpp) for x in range(box_w)]
         data += pack_row(row, bpp)
 
-    return bytes(data), box_w, box_h, x0, y0, int(round(adv))
+    # Offsets are relative to the pen and the top of the line, which is where
+    # the text was drawn from.
+    return bytes(data), box_w, box_h, x0 - origin[0], y0 - origin[1], adv
+
+
+def args_size_hint(font):
+    """Canvas padding scaled to the font, so large sizes still fit."""
+    ascent, descent = font.getmetrics()
+    return ascent + descent
 
 
 def write_header(args, first, last, line_height, entries, blob):

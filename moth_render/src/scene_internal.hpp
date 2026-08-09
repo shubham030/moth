@@ -10,7 +10,14 @@ namespace mr {
 /* One wrapped line, as a range into the original string. */
 struct TextLine {
   uint32_t start, len;
+
+  /* Where the pen ends up: what wrapping decisions are made against. */
   float width;
+
+  /* How far the ink actually reaches. A glyph may paint past its own advance
+   * — Inter's '2' at 72px does — so a box sized by advance alone clips the
+   * last character of a line down its right edge. */
+  float ink;
 };
 
 

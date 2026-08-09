@@ -82,7 +82,7 @@ void wrap_text(const moth_font *f, const std::string &text, float max_w,
                std::vector<TextLine> &out) {
   out.clear();
   if (text.empty()) {
-    out.push_back({0, 0, 0.0f});
+    out.push_back({0, 0, 0.0f, 0.0f});
     return;
   }
   /* No width means no wrapping — but a newline still breaks, so the scan
@@ -92,14 +92,17 @@ void wrap_text(const moth_font *f, const std::string &text, float max_w,
   size_t line_start = 0;
   size_t last_break = std::string::npos; /* the space we could fall back to */
   float width = 0.0f, width_at_break = 0.0f;
+  float ink = 0.0f, ink_at_break = 0.0f;
 
   for (size_t i = 0; i < text.size(); i++) {
     const unsigned char ch = (unsigned char)text[i];
     if (ch == '\n') {
-      out.push_back({(uint32_t)line_start, (uint32_t)(i - line_start), width});
+      out.push_back({(uint32_t)line_start, (uint32_t)(i - line_start), width,
+                     std::max(ink, width)});
       line_start = i + 1;
       last_break = std::string::npos;
       width = 0.0f;
+      ink = 0.0f;
       continue;
     }
 
@@ -108,27 +111,35 @@ void wrap_text(const moth_font *f, const std::string &text, float max_w,
     if (ch == ' ') {
       last_break = i;
       width_at_break = width;
+      ink_at_break = ink;
     }
 
     if (width + adv > limit && i > line_start) {
       if (last_break != std::string::npos && last_break > line_start) {
         /* Break at the space, and drop it rather than leading the next line. */
         out.push_back({(uint32_t)line_start,
-                       (uint32_t)(last_break - line_start), width_at_break});
+                       (uint32_t)(last_break - line_start), width_at_break,
+                       std::max(ink_at_break, width_at_break)});
         line_start = last_break + 1;
         i = last_break; /* the loop's ++ resumes after the space */
       } else {
         /* One word wider than the box: break inside it, since the
          * alternative is drawing past the edge. */
-        out.push_back({(uint32_t)line_start, (uint32_t)(i - line_start), width});
+        out.push_back({(uint32_t)line_start, (uint32_t)(i - line_start), width,
+                       std::max(ink, width)});
         line_start = i;
         i -= 1;
       }
       last_break = std::string::npos;
       width = 0.0f;
+      ink = 0.0f;
       continue;
     }
 
+    /* Ink reaches ofs_x + box_w from the pen, which for many glyphs is past
+     * the advance the pen will move by. */
+    const moth_glyph *g = glyph_or_null(f, ch);
+    if (g) ink = std::max(ink, width + (float)g->ofs_x + (float)g->box_w);
     width += adv;
   }
 
@@ -136,7 +147,8 @@ void wrap_text(const moth_font *f, const std::string &text, float max_w,
    * pushed, and adding another reports a blank line that layout then reserves
    * room for. */
   if (line_start < text.size() || out.empty()) {
-    out.push_back({(uint32_t)line_start, (uint32_t)(text.size() - line_start), width});
+    out.push_back({(uint32_t)line_start, (uint32_t)(text.size() - line_start),
+                   width, std::max(ink, width)});
   }
 }
 
@@ -151,8 +163,10 @@ void layout_text(Node &n, float max_w, float &out_w, float &out_h) {
     n.lines_font = f;
   }
 
+  /* Size the box by ink, not by where the pen stops, or the last glyph on a
+   * line paints outside its own layout and gets clipped. */
   float widest = 0.0f;
-  for (const TextLine &l : n.lines) widest = std::max(widest, l.width);
+  for (const TextLine &l : n.lines) widest = std::max(widest, l.ink);
 
   out_w = widest;
   out_h = (float)n.lines.size() * (float)f->line_height;
