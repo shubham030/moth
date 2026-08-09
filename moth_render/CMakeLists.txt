@@ -9,8 +9,9 @@ add_library(moth_render STATIC
   src/scene.cpp
   src/layout.cpp
   src/paint.cpp
+  src/text.cpp
 )
-target_include_directories(moth_render PUBLIC include)
+target_include_directories(moth_render PUBLIC include PRIVATE src)
 target_compile_options(moth_render PRIVATE -Wall -Wextra)
 
 # TODO(R2): ThorVG via pkg-config (brew install thorvg) or vendored subdir.
