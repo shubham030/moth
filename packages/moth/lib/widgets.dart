@@ -38,6 +38,7 @@ final propThickness = 25;
 final positionAbsolute = 1;
 
 final directionRow = 1;
+final directionStack = 2;
 
 /// Flutter spells these MainAxisAlignment.center and so on. moth has no enums
 /// or static members yet, so they are top-level constants.
@@ -373,6 +374,32 @@ class Row extends Widget {
     uiSetInt(node, propMainAlign, mainAxisAlignment);
     uiSetInt(node, propCrossAlign, crossAxisAlignment);
     uiSetNum(node, propGap, spacing);
+    uiSetNum(node, propGrow, flex);
+  }
+}
+
+/// Overlays its children: each one is placed at the stack's origin, and later
+/// children paint over earlier ones.
+///
+///     Stack(children: [
+///       background,
+///       Arc(sweep: 200, size: uiWidth()),   // drawn on top
+///     ])
+///
+/// A child with no size of its own fills the stack, which is what makes a
+/// background layer work without being told how big to be.
+class Stack extends Widget {
+  var children;
+  int flex;
+
+  Stack({this.children = const [], this.flex = 1});
+
+  String typeName() => 'Stack';
+  int kind() => kBox;
+  List childWidgets() => children;
+
+  void apply(int node) {
+    uiSetInt(node, propDirection, directionStack);
     uiSetNum(node, propGrow, flex);
   }
 }

@@ -64,7 +64,11 @@ typedef enum {
 
 #define MR_AUTO (-1.0f) /* sentinel for width/height */
 
-typedef enum { MR_COLUMN, MR_ROW } mr_direction;
+/* MR_STACK lays every child at the container's origin rather than in a
+ * sequence, so they overlap. Absolutely positioned children already overlay,
+ * but expressing an overlay as a column that happens to skip them is a lie
+ * about the layout. */
+typedef enum { MR_COLUMN, MR_ROW, MR_STACK } mr_direction;
 /* space_between: main axis only; stretch: cross axis only (auto-sized children) */
 typedef enum { MR_ALIGN_START, MR_ALIGN_CENTER, MR_ALIGN_END, MR_ALIGN_SPACE_BETWEEN, MR_ALIGN_STRETCH } mr_align;
 typedef enum { MR_FLOW, MR_ABSOLUTE } mr_position;
