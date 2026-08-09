@@ -39,7 +39,8 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
 - [x] Classes: fields with initializers, constructors (including `this.x`
       parameters), methods, implicit `this`
 - [x] Single inheritance with method overriding
-- [ ] Named parameters and enums
+- [x] Named parameters (constructors and top-level functions)
+- [ ] Enums
 - [x] **`package:moth` device API** — the idiomatic Dart layer over the native
       boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
       ADR-009. Examples and docs get rewritten around it.

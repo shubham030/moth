@@ -77,22 +77,47 @@ class Widget {
 }
 
 class Box extends Widget {
-  int color = 0;
-  int pad = 0;
-  int space = 0;
-  int direction = 0;
-  int growFactor = 0;
-  int corner = 0;
-  int fixedHeight = -1;
-  int fixedWidth = -1;
-  int align = 0;
+  int color;
+  int pad;
+  int space;
+  int direction;
+  int growFactor;
+  int corner;
+  int fixedHeight;
+  int fixedWidth;
+  int align;
 
   /// Alignment across the box's other axis — for a column, that is horizontal.
-  int crossAlign = 0;
-  int borderWidth = 0;
-  int borderColor = 0;
-  var kids = [];
+  int crossAlign;
+  int borderWidth;
+  int borderColor;
+  var kids;
   Function? onTap;
+
+  /// Everything is named and defaulted, so a tree reads as a tree:
+  ///
+  ///     Box(color: black, pad: 12, kids: [
+  ///       Text(value: 'hello', size: 20),
+  ///     ])
+  ///
+  /// Matching happens at compile time, so this costs nothing at run time
+  /// over assigning the fields one by one.
+  Box({
+    this.color = 0,
+    this.pad = 0,
+    this.space = 0,
+    this.direction = 0,
+    this.growFactor = 0,
+    this.corner = 0,
+    this.fixedHeight = -1,
+    this.fixedWidth = -1,
+    this.align = 0,
+    this.crossAlign = 0,
+    this.borderWidth = 0,
+    this.borderColor = 0,
+    this.kids = const [],
+    this.onTap,
+  });
 
   String typeName() => 'Box';
   int kind() => kBox;
@@ -125,20 +150,30 @@ class Box extends Widget {
 /// The arc is inscribed in its own box, so it is normally placed absolutely
 /// over the whole display rather than laid out in the flow.
 class Arc extends Widget {
-  int color = 0xFFE0AF68;
-  int thickness = 6;
+  int color;
+  int thickness;
 
   /// Where the stroke begins, and how far round it goes.
-  int start = 0;
-  int sweep = 360;
+  int start;
+  int sweep;
 
   /// Size of the box the ring is inscribed in.
-  int size = 0;
+  int size;
 
   /// Offset from the parent's content box, since an arc is positioned rather
   /// than laid out.
-  int left = 0;
-  int top = 0;
+  int left;
+  int top;
+
+  Arc({
+    this.color = 0xFFE0AF68,
+    this.thickness = 6,
+    this.start = 0,
+    this.sweep = 360,
+    this.size = 0,
+    this.left = 0,
+    this.top = 0,
+  });
 
   String typeName() => 'Arc';
   int kind() => kArc;
@@ -159,14 +194,21 @@ class Arc extends Widget {
 }
 
 class Text extends Widget {
-  String value = '';
-  int size = 16;
-  int tint = 0xFFC0CAF5;
+  String value;
+  int size;
+  int tint;
 
   /// Wrap to this many pixels, breaking at spaces. Left unset the text stays
   /// on one line and the box grows to fit it; set, the box grows downwards
   /// instead. A '\n' always breaks, wrapped or not.
-  int wrapWidth = -1;
+  int wrapWidth;
+
+  Text({
+    this.value = '',
+    this.size = 16,
+    this.tint = 0xFFC0CAF5,
+    this.wrapWidth = -1,
+  });
 
   String typeName() => 'Text';
   int kind() => kLabel;
