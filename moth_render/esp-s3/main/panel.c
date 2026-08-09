@@ -8,6 +8,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_touch_cst9217.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 /* Waveshare 1.75C pin map — the C variant differs from the non-C board:
  * LCD_RST 1, TOUCH_RST 2. */
@@ -112,12 +113,18 @@ esp_err_t panel_init(void)
     return ESP_OK;
 }
 
+/* Where a frame's time actually goes. Measuring this before designing damage
+ * tracking, because "repaint less" and "push less" are different fixes and
+ * the totals alone do not say which dominates. */
+int64_t panel_convert_us, panel_push_us;
+
 esp_err_t panel_present_argb(const uint32_t *argb)
 {
     for (int y = 0; y < PANEL_H; y += CHUNK_LINES) {
         int lines = PANEL_H - y < CHUNK_LINES ? PANEL_H - y : CHUNK_LINES;
         const uint32_t *src = argb + (size_t)y * PANEL_W;
         int n = PANEL_W * lines;
+        int64_t t0 = esp_timer_get_time();
         for (int i = 0; i < n; i++) {
             uint32_t p = src[i];
             uint16_t px = (uint16_t)((((p >> 16) & 0xF8) << 8) |
@@ -125,7 +132,11 @@ esp_err_t panel_present_argb(const uint32_t *argb)
                                      ((p & 0xFF) >> 3));
             s_chunk[i] = (uint16_t)((px >> 8) | (px << 8));
         }
+        int64_t t1 = esp_timer_get_time();
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, PANEL_W, y + lines, s_chunk);
+        int64_t t2 = esp_timer_get_time();
+        panel_convert_us += t1 - t0;
+        panel_push_us += t2 - t1;
         if (err != ESP_OK) {
             return err;
         }

@@ -18,6 +18,9 @@
 
 static const char *TAG = "moth";
 
+/* Set to 1 to log where each frame's time goes. See docs/ROADMAP.md R3. */
+#define MOTH_FRAME_PROFILE 0
+
 extern const uint8_t program_start[] asm("_binary_program_mothb_start");
 extern const uint8_t program_end[] asm("_binary_program_mothb_end");
 
@@ -35,7 +38,36 @@ static void on_frame(bool repainted, void *user) {
   }
   mr_pointer(down ? x : last_x, down ? y : last_y, down);
 
-  if (repainted) panel_present_argb(mr_framebuffer());
+  if (repainted) {
+#if MOTH_FRAME_PROFILE
+    /* Splits a frame three ways: everything mr_commit did before this hook
+     * ran (layout and paint), the ARGB->RGB565 conversion, and the QSPI
+     * transfer. Off by default — it is a tool for deciding where to optimise,
+     * not something a running device should be logging. */
+    extern int64_t panel_convert_us, panel_push_us;
+    static int64_t last_hook_end;
+    static int frames;
+    static int64_t paint_us_total;
+
+    int64_t hook_start = esp_timer_get_time();
+    if (last_hook_end) paint_us_total += hook_start - last_hook_end;
+
+    int64_t c0 = panel_convert_us, p0 = panel_push_us;
+    panel_present_argb(mr_framebuffer());
+    last_hook_end = esp_timer_get_time();
+
+    if (++frames % 20 == 0) {
+      ESP_LOGI("moth",
+               "PHASES over 20 frames: paint+layout %lldms  convert %lldms  "
+               "qspi %lldms",
+               paint_us_total / 1000 / 20,
+               (panel_convert_us - c0) / 1000, (panel_push_us - p0) / 1000);
+      paint_us_total = 0;
+    }
+#else
+    panel_present_argb(mr_framebuffer());
+#endif
+  }
 }
 
 static moth_value n_print(moth_vm *vm, int argc, const moth_value *argv, void *user) {

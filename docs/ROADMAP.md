@@ -138,12 +138,24 @@ Desktop-first; no Dart dependency until the framework exists.
       wrapping (tools/fontgen generates the faces)
 - [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
       gradients, images
-- [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one).
-      **Measured on the ESP32-S3, 466x466:** a full repaint costs 164ms even
-      for a single 20x20 box — that is clearing an 868KB framebuffer in PSRAM
-      and pushing it over QSPI, before anything is drawn. The watch face costs
-      298ms. No amount of drawing less gets below the floor; only repainting
-      what changed does.
+- [ ] R3 — Damage tracking: repaint only what changed.
+      **Measured on an ESP32-S3 at 466x466** (set MOTH_FRAME_PROFILE=1 in
+      ui/esp-s3/main/app_main.c to reproduce):
+
+      | phase | watch face | one 20x20 box |
+      | --- | --- | --- |
+      | layout + paint | 234ms | ~108ms |
+      | ARGB to RGB565 | 22ms | 22ms |
+      | QSPI transfer | 2ms | 2ms |
+
+      The transfer is free and the conversion is minor: **paint is ~90% of a
+      frame**, and most of that is full-screen opaque fills into PSRAM, which
+      is why a nearly empty scene still costs ~130ms. So the win is in
+      painting less, not pushing less — partial-window writes to the panel
+      would optimise the one phase that is already 2ms. Skipping the
+      redundant full-frame clear when the root covers it opaquely already
+      took 24ms off (paint.cpp), before any tracking exists.
+
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
 
