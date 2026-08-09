@@ -34,7 +34,22 @@ static void measure(Scene &s, mr_node_id id, float &out_w, float &out_h) {
   if (!n) { out_w = out_h = 0; return; }
 
   float cw = 0, ch = 0; /* content size */
-  if (n->kind == MR_NODE_BOX) {
+  if (n->kind == MR_NODE_BOX &&
+      n->u[MR_PROP_FLEX_DIRECTION] == MR_STACK) {
+    /* A stack is as large as its largest child on each axis; nothing is laid
+     * end to end, so nothing accumulates. */
+    for (mr_node_id c : n->children) {
+      Node *cn = s.get(c);
+      if (!cn) continue;
+      float w, h;
+      measure(s, c, w, h);
+      if (cn->u[MR_PROP_POSITION] == MR_ABSOLUTE) continue;
+      cw = std::max(cw, w);
+      ch = std::max(ch, h);
+    }
+    cw += 2 * n->f[MR_PROP_PADDING];
+    ch += 2 * n->f[MR_PROP_PADDING];
+  } else if (n->kind == MR_NODE_BOX) {
     bool row = n->u[MR_PROP_FLEX_DIRECTION] == MR_ROW;
     float main_sum = 0, cross_max = 0;
     int flow_count = 0;
@@ -107,6 +122,29 @@ static void arrange(Scene &s, mr_node_id id) {
       if (flow_count > 1) spacing = gap + leftover / (float)(flow_count - 1);
       break;
     default: break;
+  }
+
+  if (n->u[MR_PROP_FLEX_DIRECTION] == MR_STACK) {
+    /* Every child at the content origin, so they overlap in the order they
+     * were added — later children paint on top, as in Flutter's Stack. */
+    for (mr_node_id c : n->children) {
+      Node *cn = s.get(c);
+      if (!cn) continue;
+      cn->x = n->x + pad + (cn->u[MR_PROP_POSITION] == MR_ABSOLUTE
+                                ? cn->f[MR_PROP_LEFT]
+                                : 0.0f);
+      cn->y = n->y + pad + (cn->u[MR_PROP_POSITION] == MR_ABSOLUTE
+                                ? cn->f[MR_PROP_TOP]
+                                : 0.0f);
+      /* A child with no size of its own fills the stack, which is what makes
+       * a background layer work without asking for a size. */
+      if (cn->u[MR_PROP_POSITION] != MR_ABSOLUTE) {
+        if (is_auto(cn->f[MR_PROP_WIDTH])) cn->w = n->w - 2 * pad;
+        if (is_auto(cn->f[MR_PROP_HEIGHT])) cn->h = n->h - 2 * pad;
+      }
+      arrange(s, c);
+    }
+    return;
   }
 
   for (mr_node_id c : n->children) {
