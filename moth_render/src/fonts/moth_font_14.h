@@ -368,7 +368,7 @@ static const moth_glyph moth_font_14_glyphs[] = {
 };
 
 static const moth_font moth_font_14 = {
-  "moth_font_14", 14, 18, 14, 4,
+  "moth_font_14", 14, 18, 4,
   0x20, 0x7E,
   moth_font_14_glyphs, moth_font_14_bitmap,
 };

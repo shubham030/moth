@@ -11,13 +11,15 @@ namespace mr {
 
 static bool is_auto(float v) { return v < 0.0f; }
 
-static void leaf_auto_size(const Node &n, float &w, float &h) {
+static void leaf_auto_size(Node &n, float &w, float &h) {
   switch (n.kind) {
     case MR_NODE_LABEL: {
       /* A label given an explicit width wraps to it, and grows taller. With
-       * no width it stays on one line and reports what it needs. */
-      const float limit = is_auto(n.f[MR_PROP_WIDTH]) ? 0.0f : n.f[MR_PROP_WIDTH];
-      measure_text(n.text, n.f[MR_PROP_FONT_SIZE], limit, w, h);
+       * no width it stays on one line and reports what it needs — arrange may
+       * then stretch it, which the second pass in layout_run picks up. */
+      float limit = n.f[MR_PROP_WIDTH];
+      if (is_auto(limit)) limit = n.wrap_hint > 0.0f ? n.wrap_hint : 0.0f;
+      layout_text(n, limit, w, h);
       break;
     }
     case MR_NODE_IMAGE:  w = 32; h = 32; break; /* TODO(R2): intrinsic size */
@@ -144,16 +146,45 @@ static void arrange(Scene &s, mr_node_id id) {
   }
 }
 
+/* True when some label ended up at a width it was not wrapped at, and now
+ * needs more (or fewer) lines than layout reserved. */
+static bool relayout_labels(Scene &s, mr_node_id id) {
+  Node *n = s.get(id);
+  if (!n) return false;
+
+  bool changed = false;
+  if (n->kind == MR_NODE_LABEL && n->w > 0.0f && n->w != n->lines_width) {
+    float w, h;
+    n->wrap_hint = n->w; /* so the next measure wraps against the real width */
+    layout_text(*n, n->w, w, h);
+    if (h != n->h) changed = true;
+  }
+  for (mr_node_id c : n->children) {
+    if (relayout_labels(s, c)) changed = true;
+  }
+  return changed;
+}
+
 void layout_run(Scene &s) {
   Node *root = s.get((mr_node_id)1);
   if (!root) return;
   float w, h;
-  measure(s, (mr_node_id)1, w, h);
-  root->x = 0;
-  root->y = 0;
-  root->w = (float)s.cfg.width;
-  root->h = (float)s.cfg.height;
-  arrange(s, (mr_node_id)1);
+  /* Measure bottom-up, then place top-down. A label cannot know its own width
+   * during the first pass — stretching and growing are decided by its parent
+   * while arranging — so once widths are final, any label that ended up
+   * somewhere other than where it was wrapped is re-wrapped and the pass runs
+   * again. One repeat is enough: the second measure sees the real widths, and
+   * bounding it means a pathological tree settles rather than looping. */
+  for (int pass = 0; pass < 2; pass++) {
+    measure(s, (mr_node_id)1, w, h);
+    root->x = 0;
+    root->y = 0;
+    root->w = (float)s.cfg.width;
+    root->h = (float)s.cfg.height;
+    arrange(s, (mr_node_id)1);
+
+    if (!relayout_labels(s, (mr_node_id)1)) break;
+  }
 }
 
 } // namespace mr
