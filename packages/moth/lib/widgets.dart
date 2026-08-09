@@ -39,6 +39,18 @@ final positionAbsolute = 1;
 
 final directionRow = 1;
 
+/// Flutter spells these MainAxisAlignment.center and so on. moth has no enums
+/// or static members yet, so they are top-level constants.
+final mainAxisStart = 0;
+final mainAxisCenter = 1;
+final mainAxisEnd = 2;
+final mainAxisSpaceBetween = 3;
+
+final crossAxisStart = 0;
+final crossAxisCenter = 1;
+final crossAxisEnd = 2;
+final crossAxisStretch = 4;
+
 /// mr_align: how children sit along an axis.
 final alignStart = 0;
 final alignCenter = 1;
@@ -62,7 +74,7 @@ class Widget {
 
   String typeName() => 'Widget';
   int kind() => kBox;
-  List children() => [];
+  List childWidgets() => [];
   void apply(int node) {}
 
   /// Composite widgets describe themselves in terms of other widgets.
@@ -121,7 +133,7 @@ class Box extends Widget {
 
   String typeName() => 'Box';
   int kind() => kBox;
-  List children() => kids;
+  List childWidgets() => kids;
   Function? tapHandler() => onTap;
 
   void apply(int node) {
@@ -193,32 +205,260 @@ class Arc extends Widget {
   }
 }
 
+/// How text is drawn. Flutter's shape, minus the parts that need language
+/// features moth does not have yet — no const constructor, so a style is an
+/// ordinary object built at run time.
+class TextStyle {
+  int fontSize;
+  int color;
+
+  TextStyle({this.fontSize = 16, this.color = 0xFFC0CAF5});
+}
+
+final _defaultTextStyle = TextStyle();
+
+/// A run of text.
+///
+///     Text('hello')
+///     Text('hello', style: TextStyle(fontSize: 20, color: white))
+///
+/// The content is positional and the look goes in a [style], as in Flutter.
 class Text extends Widget {
-  String value;
-  int size;
-  int tint;
+  String data;
+  TextStyle? style;
 
-  /// Wrap to this many pixels, breaking at spaces. Left unset the text stays
-  /// on one line and the box grows to fit it; set, the box grows downwards
-  /// instead. A '\n' always breaks, wrapped or not.
-  int wrapWidth;
+  /// Wrap to this many pixels, breaking at spaces. Flutter decides this from
+  /// the enclosing constraints; moth has no constraint system yet, so it is
+  /// asked for directly.
+  int maxWidth;
 
-  Text({
-    this.value = '',
-    this.size = 16,
-    this.tint = 0xFFC0CAF5,
-    this.wrapWidth = -1,
-  });
+  Text(this.data, {this.style, this.maxWidth = -1});
 
   String typeName() => 'Text';
   int kind() => kLabel;
 
   void apply(int node) {
-    uiSetText(node, propText, value);
-    uiSetNum(node, propFontSize, size);
-    uiSetInt(node, propTextColor, tint);
-    // Same reason as Box: a label that wrapped once must be able to stop.
-    uiSetNum(node, propWidth, wrapWidth > 0 ? wrapWidth : -1);
+    var s = style;
+    if (s == null) s = _defaultTextStyle;
+    uiSetText(node, propText, data);
+    uiSetNum(node, propFontSize, s.fontSize);
+    uiSetInt(node, propTextColor, s.color);
+    // Always written: an element is reused, so a width set on one build and
+    // dropped on the next would otherwise stay set. -1 is MR_AUTO.
+    uiSetNum(node, propWidth, maxWidth > 0 ? maxWidth : -1);
+  }
+}
+
+/// A box with a single child — padding, colour, a size, a corner radius.
+///
+///     Container(
+///       color: black,
+///       padding: 20,
+///       child: Text('hello'),
+///     )
+///
+/// Flutter's takes a `decoration`; moth's takes the few properties its
+/// renderer actually draws, which is honest about what exists.
+class Container extends Widget {
+  int color;
+  int padding;
+  int width;
+  int height;
+  int borderRadius;
+  int borderWidth;
+  int borderColor;
+
+  /// Fills the space its parent gives it along the main axis.
+  int flex;
+
+  Widget? child;
+  Function? onTap;
+
+  Container({
+    this.color = 0,
+    this.padding = 0,
+    this.width = -1,
+    this.height = -1,
+    this.borderRadius = 0,
+    this.borderWidth = 0,
+    this.borderColor = 0,
+    this.flex = 0,
+    this.child,
+    this.onTap,
+  });
+
+  String typeName() => 'Container';
+  int kind() => kBox;
+  List childWidgets() => child == null ? [] : [child];
+  Function? tapHandler() => onTap;
+
+  void apply(int node) {
+    uiSetInt(node, propBgColor, color);
+    uiSetNum(node, propPadding, padding);
+    uiSetNum(node, propGrow, flex);
+    uiSetNum(node, propRadius, borderRadius);
+    uiSetNum(node, propBorderWidth, borderWidth);
+    uiSetInt(node, propBorderColor, borderColor);
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
+    uiSetNum(node, propHeight, height >= 0 ? height : -1);
+  }
+}
+
+/// Lays its children out vertically.
+///
+///     Column(
+///       mainAxisAlignment: mainAxisCenter,
+///       children: [Text('one'), Text('two')],
+///     )
+class Column extends Widget {
+  var children;
+  int mainAxisAlignment;
+  int crossAxisAlignment;
+
+  /// Gap between children. Flutter added this in 3.27; before that everyone
+  /// reached for SizedBox.
+  int spacing;
+
+  int flex;
+  Function? onTap;
+
+  Column({
+    this.children = const [],
+    this.mainAxisAlignment = 0,
+    this.crossAxisAlignment = 0,
+    this.spacing = 0,
+    this.flex = 1, // MainAxisSize.max, as Flutter defaults to
+    this.onTap,
+  });
+
+  String typeName() => 'Column';
+  int kind() => kBox;
+  List childWidgets() => children;
+  Function? tapHandler() => onTap;
+
+  void apply(int node) {
+    uiSetInt(node, propDirection, 0);
+    uiSetInt(node, propMainAlign, mainAxisAlignment);
+    uiSetInt(node, propCrossAlign, crossAxisAlignment);
+    uiSetNum(node, propGap, spacing);
+    uiSetNum(node, propGrow, flex);
+  }
+}
+
+/// Lays its children out horizontally.
+class Row extends Widget {
+  var children;
+  int mainAxisAlignment;
+  int crossAxisAlignment;
+  int spacing;
+  int flex;
+  Function? onTap;
+
+  Row({
+    this.children = const [],
+    this.mainAxisAlignment = 0,
+    this.crossAxisAlignment = 0,
+    this.spacing = 0,
+    this.flex = 1, // MainAxisSize.max, as Flutter defaults to
+    this.onTap,
+  });
+
+  String typeName() => 'Row';
+  int kind() => kBox;
+  List childWidgets() => children;
+  Function? tapHandler() => onTap;
+
+  void apply(int node) {
+    uiSetInt(node, propDirection, directionRow);
+    uiSetInt(node, propMainAlign, mainAxisAlignment);
+    uiSetInt(node, propCrossAlign, crossAxisAlignment);
+    uiSetNum(node, propGap, spacing);
+    uiSetNum(node, propGrow, flex);
+  }
+}
+
+/// Centres its child on both axes.
+class Center extends Widget {
+  Widget? child;
+
+  Center({this.child});
+
+  String typeName() => 'Center';
+  int kind() => kBox;
+  List childWidgets() => child == null ? [] : [child];
+
+  void apply(int node) {
+    uiSetNum(node, propGrow, 1);
+    uiSetInt(node, propMainAlign, alignCenter);
+    uiSetInt(node, propCrossAlign, alignCenter);
+  }
+}
+
+/// Insets its child.
+class Padding extends Widget {
+  int padding;
+  Widget? child;
+
+  Padding({this.padding = 0, this.child});
+
+  String typeName() => 'Padding';
+  int kind() => kBox;
+  List childWidgets() => child == null ? [] : [child];
+
+  void apply(int node) {
+    uiSetNum(node, propPadding, padding);
+  }
+}
+
+/// A box of a fixed size, with or without a child. The usual way to put a
+/// gap between two widgets.
+class SizedBox extends Widget {
+  int width;
+  int height;
+  Widget? child;
+
+  SizedBox({this.width = -1, this.height = -1, this.child});
+
+  String typeName() => 'SizedBox';
+  int kind() => kBox;
+  List childWidgets() => child == null ? [] : [child];
+
+  void apply(int node) {
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
+    uiSetNum(node, propHeight, height >= 0 ? height : -1);
+  }
+}
+
+/// Makes its child tappable.
+class GestureDetector extends Widget {
+  Function? onTap;
+  Widget? child;
+
+  GestureDetector({this.onTap, this.child});
+
+  String typeName() => 'GestureDetector';
+  int kind() => kBox;
+  List childWidgets() => child == null ? [] : [child];
+  Function? tapHandler() => onTap;
+
+  void apply(int node) {}
+}
+
+/// A horizontal rule.
+class Divider extends Widget {
+  int thickness;
+  int color;
+  int width;
+
+  Divider({this.thickness = 1, this.color = 0xFF2A2A31, this.width = -1});
+
+  String typeName() => 'Divider';
+  int kind() => kBox;
+
+  void apply(int node) {
+    uiSetInt(node, propBgColor, color);
+    uiSetNum(node, propHeight, thickness);
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
   }
 }
 
@@ -229,7 +469,7 @@ class Component extends Widget {
   Element? element;
 
   bool composite() => true;
-  Widget build() => Text();
+  Widget build() => Text('build() not overridden');
 
   void attachElement(Element e) {
     element = e;
@@ -317,7 +557,7 @@ class Element {
     // same either way, but a child that later changes kind reads slotIndex to
     // find its place, and -1 would send the replacement to the end.
     var slot = 0;
-    for (final childWidget in widget.children()) {
+    for (final childWidget in widget.childWidgets()) {
       var child = Element(childWidget);
       child.parent = this;
       child.mount(node, slot);
@@ -339,7 +579,7 @@ class Element {
     }
 
     widget.apply(node); // property diffing happens in the renderer
-    reconcileChildren(widget.children());
+    reconcileChildren(widget.childWidgets());
   }
 
   /// Returns the element to use afterwards: this one when the widget kind is

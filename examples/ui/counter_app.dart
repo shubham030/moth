@@ -13,14 +13,9 @@ class CounterApp extends Component {
   int count = 0;
 
   Widget build() {
-    var readout = Text();
-    readout.value = 'count: $count';
-    readout.size = 22;
+    var readout = Text('count: $count', style: TextStyle(fontSize: 22));
 
-    var hint = Text();
-    hint.value = count == 0 ? 'tap the panel' : 'tapped $count times';
-    hint.size = 14;
-    hint.tint = 0xFF9AA2B8;
+    var hint = Text(count == 0 ? 'tap the panel' : 'tapped $count times', style: TextStyle(fontSize: 14, color: 0xFF9AA2B8));
 
     var bar = Box();
     bar.color = palette[count % palette.length];
