@@ -18,7 +18,10 @@
 #include <stdint.h>
 
 typedef struct {
-  uint16_t bitmap_offset; /* into the font's bitmap blob */
+  /* Into the font's bitmap blob. 32 bits because a full ASCII face at 72px is
+   * already ~99KB: as uint16_t the tail of the table wrapped, and glyphs read
+   * from the wrong place in the blob with no warning in a C build. */
+  uint32_t bitmap_offset;
   uint8_t adv_w;          /* how far the pen moves afterwards */
   uint8_t box_w, box_h;   /* the inked box, which may be empty */
   int8_t ofs_x, ofs_y;    /* where that box sits, from the pen and the top */
@@ -28,7 +31,6 @@ typedef struct {
   const char *name;
   uint8_t size;        /* the pixel size it was generated at */
   uint8_t line_height; /* ascent + descent, which exceeds size */
-  uint8_t base_line;   /* ascent: the baseline, measured from the top */
   uint8_t bpp;
   uint8_t first, last; /* the contiguous code point range covered */
   const moth_glyph *glyphs;

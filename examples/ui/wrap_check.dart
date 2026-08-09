@@ -56,8 +56,14 @@ void main() {
 
   check('a short label stays one line', single > 0);
   check('a wrapped label is taller than one line', wrapped > single);
-  check('wrapping respects the width',
-      uiFrameOf(kids[1].node, 2) <= 200);
+  // The node's width is the prop that was set, so reading it back proves
+  // nothing — it would pass even if wrap_text ignored max_w entirely. What
+  // matters is that the height matches the number of lines the text needs at
+  // that width, which only holds if the wrap actually happened.
+  check('wrapping produces the right number of lines',
+      wrapped == single * 3);
+  check('a narrower box produces more lines',
+      longWord == single * 3);
   check('a word wider than the box still breaks', longWord > single);
   check('an explicit newline breaks', explicit > single);
   check('wrapped height is a whole number of lines',
