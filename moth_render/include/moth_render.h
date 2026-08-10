@@ -59,6 +59,10 @@ typedef enum {
   MR_PROP_ARC_START, /* degrees, 0 at twelve o'clock, clockwise */
   MR_PROP_ARC_SWEEP, /* degrees; >= 360 draws a closed ring */
   MR_PROP_THICKNESS, /* stroke width, px */
+  /* Where the stroke sits relative to the nominal circle, as Flutter's
+   * strokeAlign: -1 inside, 0 centred, 1 outside. */
+  MR_PROP_STROKE_ALIGN,
+  MR_PROP_STROKE_CAP, /* u32: mr_stroke_cap */
   MR_PROP_COUNT
 } mr_prop;
 
@@ -72,6 +76,10 @@ typedef enum { MR_COLUMN, MR_ROW, MR_STACK } mr_direction;
 /* space_between: main axis only; stretch: cross axis only (auto-sized children) */
 typedef enum { MR_ALIGN_START, MR_ALIGN_CENTER, MR_ALIGN_END, MR_ALIGN_SPACE_BETWEEN, MR_ALIGN_STRETCH } mr_align;
 typedef enum { MR_FLOW, MR_ABSOLUTE } mr_position;
+
+/* Butt ends the stroke square at the sweep; round adds a half-disc, which is
+ * what a gauge usually wants. */
+typedef enum { MR_CAP_BUTT, MR_CAP_ROUND } mr_stroke_cap;
 
 /* ---- lifecycle -------------------------------------------------------- */
 

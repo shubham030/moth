@@ -34,6 +34,17 @@ final propTextColor = 18;
 final propArcStart = 23;
 final propArcSweep = 24;
 final propThickness = 25;
+final propStrokeAlign = 26;
+final propStrokeCap = 27;
+
+/// Flutter's StrokeCap, for the ends of an arc.
+final strokeCapButt = 0;
+final strokeCapRound = 1;
+
+/// Flutter's strokeAlign constants, spelled the same way.
+final strokeAlignInside = -1.0;
+final strokeAlignCenter = 0.0;
+final strokeAlignOutside = 1.0;
 
 final positionAbsolute = 1;
 
@@ -166,6 +177,12 @@ class Arc extends Widget {
   int color;
   int thickness;
 
+  /// Where the stroke sits against the circle inscribed in this box.
+  double strokeAlign;
+
+  /// How the ends are finished.
+  int strokeCap;
+
   /// Where the stroke begins, and how far round it goes.
   int start;
   int sweep;
@@ -186,6 +203,8 @@ class Arc extends Widget {
     this.size = 0,
     this.left = 0,
     this.top = 0,
+    this.strokeAlign = -1.0, // inside, so an arc stays within its own box
+    this.strokeCap = 1, // round
   });
 
   String typeName() => 'Arc';
@@ -203,6 +222,8 @@ class Arc extends Widget {
     uiSetNum(node, propThickness, thickness);
     uiSetNum(node, propArcStart, start);
     uiSetNum(node, propArcSweep, sweep);
+    uiSetNum(node, propStrokeAlign, strokeAlign);
+    uiSetInt(node, propStrokeCap, strokeCap);
   }
 }
 
@@ -390,9 +411,19 @@ class Row extends Widget {
 /// background layer work without being told how big to be.
 class Stack extends Widget {
   var children;
-  int flex;
 
-  Stack({this.children = const [], this.flex = 1});
+  /// Fills the space its parent gives it. A stack with an explicit size does
+  /// not grow, or it would fight its siblings for room.
+  int flex;
+  int width;
+  int height;
+
+  Stack({
+    this.children = const [],
+    this.flex = 1,
+    this.width = -1,
+    this.height = -1,
+  });
 
   String typeName() => 'Stack';
   int kind() => kBox;
@@ -400,7 +431,108 @@ class Stack extends Widget {
 
   void apply(int node) {
     uiSetInt(node, propDirection, directionStack);
-    uiSetNum(node, propGrow, flex);
+    uiSetNum(node, propGrow, width >= 0 || height >= 0 ? 0 : flex);
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
+    uiSetNum(node, propHeight, height >= 0 ? height : -1);
+  }
+}
+
+/// A ring that fills clockwise from twelve o'clock to show progress.
+///
+///     CircularProgressIndicator(value: 0.4, size: 120)
+///
+/// [value] runs 0.0 to 1.0. This is the widget for a gauge, a countdown or a
+/// clock's minute hand — anything where a fraction is the point. Reach for
+/// [Arc] directly only when you need an arbitrary start angle or sweep.
+///
+/// Flutter's version takes its size from the constraints it is given; moth
+/// has no constraint system yet, so [size] is asked for. A null [value],
+/// which means "indeterminate" in Flutter, is not supported — there is no
+/// animation driver behind it here, and a spinner that does not spin would
+/// be worse than not offering one.
+class CircularProgressIndicator extends Component {
+  /// 0.0 to 1.0. Null is Flutter's "indeterminate", which draws the track
+  /// alone here — an indeterminate indicator is an animation, and moth has
+  /// no driver to spin it yet. Showing a still spinner would be worse.
+  double? value;
+
+  /// Defaults to 4.0, as Flutter's does.
+  double strokeWidth;
+
+  int? color;
+  int? backgroundColor;
+
+  /// -1 inside, 0 centred, 1 outside. Flutter centres by default.
+  double strokeAlign;
+
+  /// Flutter leaves this null and picks per style; Material 3 rounds, and a
+  /// round end is what a gauge wants, so that is the default here.
+  int strokeCap;
+
+  /// Flutter takes its size from the constraints it is given. moth has no
+  /// constraint system yet, so the size is asked for directly.
+  int size;
+
+  CircularProgressIndicator({
+    this.value,
+    this.strokeWidth = 4.0,
+    this.color,
+    this.backgroundColor,
+    this.strokeAlign = 0.0,
+    this.strokeCap = 1,
+    this.size = 0,
+  });
+
+  String typeName() => 'CircularProgressIndicator';
+
+  Widget build() {
+    var track = backgroundColor;
+    if (track == null) track = 0xFF1C1C21;
+    var fill = color;
+    if (fill == null) fill = 0xFFE0AF68;
+
+    var thickness = (strokeWidth + 0.5) ~/ 1;
+    if (thickness < 1) thickness = 1;
+
+    var v = value;
+    if (v == null) {
+      // Indeterminate: the track alone, so it reads as "no answer yet"
+      // rather than as a stalled 0%. Wrapped like the determinate case —
+      // an Arc positions itself absolutely, so returning one bare would take
+      // it out of the flow and drop it on top of its siblings.
+      return Stack(width: size, height: size, children: [
+        Arc(
+            color: track,
+            thickness: thickness,
+            sweep: 360,
+            size: size,
+            strokeAlign: strokeAlign,
+            strokeCap: strokeCap),
+      ]);
+    }
+
+    if (v < 0.0) v = 0.0;
+    if (v > 1.0) v = 1.0;
+
+    // Sized, so a row of indicators does not have every stack growing to
+    // fill and colliding with its neighbours.
+    return Stack(width: size, height: size, children: [
+      Arc(
+          color: track,
+          thickness: thickness,
+          sweep: 360,
+          size: size,
+          strokeAlign: strokeAlign,
+          strokeCap: strokeCap),
+      Arc(
+          color: fill,
+          thickness: thickness,
+          // Rounded rather than truncated, so the last degree is not lost.
+          sweep: (v * 360.0 + 0.5) ~/ 1,
+          size: size,
+          strokeAlign: strokeAlign,
+          strokeCap: strokeCap),
+    ]);
   }
 }
 

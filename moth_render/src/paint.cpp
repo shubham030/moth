@@ -137,11 +137,18 @@ static bool arc_ring(const Node &n, ArcRing &out) {
   float thickness = n.f[MR_PROP_THICKNESS];
   if (thickness <= 0.0f) thickness = 4.0f;
 
-  const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
+  /* The nominal circle is inscribed in the box; strokeAlign then says where
+   * the stroke sits against it — -1 wholly inside, 0 centred, 1 wholly
+   * outside, matching Flutter's parameter of the same name. */
+  const float radius = (n.w < n.h ? n.w : n.h) * 0.5f;
+  float align = n.f[MR_PROP_STROKE_ALIGN];
+  if (align < -1.0f) align = -1.0f;
+  if (align > 1.0f) align = 1.0f;
+
   out.cx = n.x + n.w * 0.5f;
   out.cy = n.y + n.h * 0.5f;
-  out.mid = outer - thickness * 0.5f;
   out.half = thickness * 0.5f;
+  out.mid = radius + align * out.half; /* -1 inside, 0 centred, 1 outside */
   return out.mid > 0.0f;
 }
 
@@ -220,7 +227,7 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
       float cov = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
       if (!closed) {
         if (cov > 0.0f && !arc_within_sweep(n, dx, dy, sweep)) cov = 0.0f;
-        if (cov < 1.0f) {
+        if (cov < 1.0f && n.u[MR_PROP_STROKE_CAP] == MR_CAP_ROUND) {
           const float px = (float)x + 0.5f, py = (float)y + 0.5f;
           cov = std::max(cov, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
           cov = std::max(cov, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
