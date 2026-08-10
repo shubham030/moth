@@ -181,7 +181,18 @@ void mr_set_u32(mr_node_id node, mr_prop prop, uint32_t v) {
 void mr_set_str(mr_node_id node, mr_prop prop, const char *utf8) {
   Node *n = scene().get(node);
   if (!n || !utf8) return;
-  if (prop == MR_PROP_TEXT) n->text = utf8;
+  if (prop == MR_PROP_TEXT) {
+    /* The wrapped lines are ranges into this string. Reusing them against
+     * different text indexes past the end of a shorter one — 'NO GPS'
+     * becoming 'GPS' is enough — so the cache dies with the text it
+     * described. */
+    if (n->text != utf8) {
+      n->text = utf8;
+      n->lines.clear();
+      n->lines_width = -1.0f;
+      n->lines_font = nullptr;
+    }
+  }
   else if (prop == MR_PROP_IMAGE_SRC) n->image_src = utf8;
   else return;
   scene().dirty = true;

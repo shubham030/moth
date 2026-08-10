@@ -355,10 +355,13 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
  * clearing first would be writing the same memory twice. On a 466x466 panel
  * that is 868KB of PSRAM per pass, and both passes were happening every
  * frame. */
-static bool covers_frame_opaque(Scene &s, mr_node_id id) {
+static bool covers_frame_opaque(Scene &s, mr_node_id id, float inherited) {
   Node *n = s.get(id);
   if (!n || n->kind != MR_NODE_BOX) return false;
-  if (n->f[MR_PROP_OPACITY] < 1.0f) return false;
+  /* Opacity multiplies down the tree, so a child's own being 1.0 says
+   * nothing — a translucent ancestor makes it blend, and blending against a
+   * buffer that was never cleared shows the previous frame underneath. */
+  if (inherited * n->f[MR_PROP_OPACITY] < 1.0f) return false;
   if (((n->u[MR_PROP_BG_COLOR] >> 24) & 0xFF) != 0xFF) return false;
   if (n->f[MR_PROP_RADIUS] > 0.5f) return false; /* corners would show through */
   return n->x <= 0.0f && n->y <= 0.0f &&
@@ -371,10 +374,11 @@ void paint_run(Scene &s) {
    * clear is writing 868KB of PSRAM that the very next fill overwrites.
    * Measured on an ESP32-S3 at 466x466: 24ms a frame. */
   Node *root = s.get((mr_node_id)1);
-  bool covered = covers_frame_opaque(s, (mr_node_id)1);
+  bool covered = covers_frame_opaque(s, (mr_node_id)1, 1.0f);
   if (!covered && root) {
+    const float under_root = root->f[MR_PROP_OPACITY];
     for (mr_node_id c : root->children) {
-      if (covers_frame_opaque(s, c)) { covered = true; break; }
+      if (covers_frame_opaque(s, c, under_root)) { covered = true; break; }
     }
   }
   if (!covered) {

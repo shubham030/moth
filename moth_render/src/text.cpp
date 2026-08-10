@@ -156,15 +156,25 @@ void layout_text(Node &n, float max_w, float &out_w, float &out_h) {
   const moth_font *f = font_for(n.f[MR_PROP_FONT_SIZE], n.text);
 
   /* Wrapping the same string twice a frame is how layout and paint end up
-   * disagreeing, so it happens once and the result lives on the node. */
+   * disagreeing, so it happens once and the result lives on the node.
+   *
+   * The lines are ranges into n.text, so the text is part of the key —
+   * mr_set_str drops them when it changes. Keying only on font and width let
+   * a shorter string inherit a longer one's ranges and read past its end. */
   if (n.lines_font != f || n.lines_width != max_w || n.lines.empty()) {
     wrap_text(f, n.text, max_w, n.lines);
     n.lines_width = max_w;
     n.lines_font = f;
   }
 
-  /* Size the box by ink, not by where the pen stops, or the last glyph on a
-   * line paints outside its own layout and gets clipped. */
+  /* Size the box by ink rather than by where the pen stops.
+   *
+   * With the current faces this changes nothing: only four glyphs across all
+   * four faces reach past their advance, each by a single blank column, and a
+   * stretched label has its width overwritten by arrange anyway. It is kept
+   * because a font may legitimately paint past the advance — italics and
+   * script faces routinely do — and sizing by advance alone would clip the
+   * last glyph on a line with no way to tell from the code that it would. */
   float widest = 0.0f;
   for (const TextLine &l : n.lines) widest = std::max(widest, l.ink);
 
