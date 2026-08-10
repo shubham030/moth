@@ -58,12 +58,12 @@ class WatchFace extends Component {
   bool hasGps = false;
 
   Widget build() {
+    // A Stack: the rings sit over the face rather than after it. An Arc lays
+    // out like any other widget now, so overlaying has to be asked for.
     return Box()
       ..color = black
       ..growFactor = 1
-      // Stretch, so the face below spans the display and its contents centre
-      // on the screen rather than on their own widest line.
-      ..crossAlign = alignStretch
+      ..direction = directionStack
       ..kids = [
         // The face itself, inset to the round panel's safe area.
         Box()
@@ -100,14 +100,10 @@ class WatchFace extends Component {
             Text('TAP FOR SECONDS', style: TextStyle(fontSize: 14, color: 0xFF44444E)),
           ],
 
-        // The track, then the minute hand over it, hugging the bezel.
-        Arc()
-          ..color = 0xFF1C1C21
-          ..thickness = 6
-          ..sweep = 360
-          ..size = uiWidth(),
+        // Track and minute hand, drawn in one pass over the face.
         Arc()
           ..color = palette
+          ..trackColor = 0xFF1C1C21
           ..thickness = 6
           ..sweep = clock.minuteSweep
           ..size = uiWidth(),
