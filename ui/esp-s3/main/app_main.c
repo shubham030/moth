@@ -54,7 +54,9 @@ static void on_frame(bool repainted, void *user) {
     static int base_commits;
     static int frames;
 
-    panel_present_argb(mr_framebuffer());
+    int dx, dy, dw, dh;
+    mr_damage(&dx, &dy, &dw, &dh);
+    panel_present_argb(mr_framebuffer(), dy, dh);
 
     if (++frames % 20 == 0) {
       const int n = g_moth_ui_commits - base_commits;
@@ -77,7 +79,11 @@ static void on_frame(bool repainted, void *user) {
       base_commits = g_moth_ui_commits;
     }
 #else
-    panel_present_argb(mr_framebuffer());
+    /* Only the rows the renderer says changed — conversion and transfer both
+     * scale with the band. */
+    int dx, dy, dw, dh;
+    mr_damage(&dx, &dy, &dw, &dh);
+    panel_present_argb(mr_framebuffer(), dy, dh);
 #endif
   }
 }

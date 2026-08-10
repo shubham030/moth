@@ -114,6 +114,13 @@ static void on_frame(bool repainted, void *user) {
    * replacement draws over a live screen rather than a blank one. */
   if (accept_push()) moth_request_halt(g_sim.vm);
 
+  if (repainted && getenv("MOTH_DEBUG_DAMAGE")) {
+    int dx, dy, dw, dh;
+    mr_damage(&dx, &dy, &dw, &dh);
+    printf("damage: y=%d h=%d of %d\n", dy, dh, g_sim.height);
+    fflush(stdout);
+  }
+
   g_sim.frame++;
   for (int i = 0; i < g_sim.ntaps; i++) {
     if (g_sim.frame == g_sim.taps[i].at_frame) {

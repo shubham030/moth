@@ -142,33 +142,38 @@ Desktop-first; no Dart dependency until the framework exists.
       wrapping (tools/fontgen generates the faces)
 - [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
       gradients, images
-- [ ] R3 — Damage tracking: repaint only what changed.
+- [x] R3 — Damage tracking: repaint only the rows that changed.
 
-      **Measured on an ESP32-S3 at 466x466**, with `MOTH_FRAME_PROFILE=1` in
-      `ui/esp-s3/main/app_main.c` and `examples/ui/frame_bench.dart`. Each
-      scene timed in its own run; the split adds up to the total, which is
-      how you know the buckets are not overlapping:
+      **Measured on an ESP32-S3 at 466x466**, `examples/ui/frame_bench.dart`
+      with `MOTH_FRAME_PROFILE=1`:
 
-      | phase | watch face | one 20x20 box |
+      | phase | full frame | damage-tracked |
       | --- | --- | --- |
-      | layout + paint | 339.4ms | 111.8ms |
-      | ARGB to RGB565 | 21.9ms | 21.9ms |
-      | QSPI transfer | 25.6ms | 25.7ms |
-      | **frame** | **391.8ms** | **162.1ms** |
+      | layout + paint | 339.4ms | 138.3ms |
+      | ARGB to RGB565 | 21.9ms | 8.3ms |
+      | QSPI transfer | 25.6ms | 10.2ms |
+      | **frame** | **391.8ms** | **160.9ms** |
 
-      Paint dominates, and most of the floor is full-screen fills into PSRAM:
-      111.8ms before anything is drawn. The watch face's own content is the
-      227ms above that.
+      2.44x, and all three phases fell together to about 38% — which is the
+      damaged band, 177 of 466 rows. That the three scale identically is the
+      evidence the band is doing the work rather than something else.
 
-      Conversion and transfer are 47.5ms together — 12% of the watch face's
-      frame but **29% of the floor's**, and both scale with the region
-      pushed, so partial-window writes are worth having. An earlier note here
-      said the opposite on the strength of a 2ms QSPI figure that came from
-      timing the enqueue rather than the transfer; the real cost is 25.6ms.
+      Bands are rows, not rectangles: a band spans the full width, so nothing
+      can be partly covered by a sibling and the hard cases — overlap,
+      translucency, z-order — cannot arise. Rectangles would tighten it
+      further and are the obvious next step, at the cost of those cases
+      becoming real.
 
-      So damage tracking pays three times over: paint less, convert less,
-      push less. On the watch face, where a second changes two digits in
-      roughly 90 of 466 rows, all three shrink together.
+      Two things had to be true before any of it worked. Properties are
+      compared before being stored, because a rebuild re-applies every
+      property of every widget and without that every node is "changed" every
+      frame. And the band is reset each commit — accumulating it pinned the
+      whole screen forever, since the first frame legitimately damages
+      everything.
+
+- [ ] R3b — Tighter damage. The band is wider than the changed text needs;
+      in the benchmark a label reports 176 rows where the same label alone
+      reports 88. Worth finding: it would roughly halve the band again.
 
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
