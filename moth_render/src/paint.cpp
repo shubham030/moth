@@ -187,7 +187,10 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   if (!arc_ring(n, r)) return;
 
   float sweep = n.f[MR_PROP_ARC_SWEEP];
-  if (sweep <= 0.0f) return;
+  const uint32_t fill_argb = n.u[MR_PROP_BG_COLOR];
+  const uint32_t track_argb = n.u[MR_PROP_ARC_TRACK_COLOR];
+  const bool has_track = ((track_argb >> 24) & 0xFF) != 0;
+  if (sweep <= 0.0f && !has_track) return;
   const bool closed = sweep >= 360.0f;
 
   const float kDeg = 3.14159265358979f / 180.0f;
@@ -195,11 +198,16 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   const float a1 = (n.f[MR_PROP_ARC_START] + sweep) * kDeg;
   const float cap0x = r.cx + r.mid * std::sin(a0), cap0y = r.cy - r.mid * std::cos(a0);
   const float cap1x = r.cx + r.mid * std::sin(a1), cap1y = r.cy - r.mid * std::cos(a1);
+  const bool round_caps = n.u[MR_PROP_STROKE_CAP] == MR_CAP_ROUND;
 
   /* Everything the stroke can touch lies in an annulus a pixel wider than the
    * stroke on each side. Rejecting against its squared radii costs a multiply
    * where taking the distance costs a square root, and nearly all of the box
-   * is rejected — on a 466px panel that is ~20k roots instead of ~217k. */
+   * is rejected — on a 466px panel that is ~20k roots instead of ~217k.
+   *
+   * Track and fill share this scan. Drawing them as two nodes walked the same
+   * ring twice, for the same square roots and the same angle, to decide the
+   * colour of the same pixel. */
   const float r_in = r.mid - r.half - 1.0f;
   const float r_out = r.mid + r.half + 1.0f;
   const float r_in2 = r_in > 0.0f ? r_in * r_in : 0.0f;
@@ -210,8 +218,6 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   const int y0 = std::max(0, (int)std::floor(r.cy - outer - 1.0f));
   const int x1 = std::min(s.cfg.width, (int)std::ceil(r.cx + outer + 1.0f));
   const int y1 = std::min(s.cfg.height, (int)std::ceil(r.cy + outer + 1.0f));
-
-  const uint32_t argb = n.u[MR_PROP_BG_COLOR];
 
   for (int y = y0; y < y1; y++) {
     const float dy = (float)y + 0.5f - r.cy;
@@ -224,18 +230,32 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
       const float d2 = dx * dx + dy2;
       if (d2 > r_out2 || d2 < r_in2) continue;
 
-      float cov = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
-      if (!closed) {
-        if (cov > 0.0f && !arc_within_sweep(n, dx, dy, sweep)) cov = 0.0f;
-        if (cov < 1.0f && n.u[MR_PROP_STROKE_CAP] == MR_CAP_ROUND) {
+      /* How much of this pixel the ring covers at all — the same for track
+       * and fill, since they share a centre line and a width. */
+      const float ring = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
+      if (ring <= 0.0f) continue;
+
+      /* And how much of it the swept part covers. */
+      float filled = 0.0f;
+      if (sweep > 0.0f) {
+        if (closed || arc_within_sweep(n, dx, dy, sweep)) {
+          filled = ring;
+        }
+        if (!closed && round_caps && filled < 1.0f) {
           const float px = (float)x + 0.5f, py = (float)y + 0.5f;
-          cov = std::max(cov, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
-          cov = std::max(cov, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
+          filled = std::max(filled, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
+          filled = std::max(filled, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
         }
       }
 
-      if (cov <= 0.0f) continue;
-      row[x] = blend(row[x], argb, opacity * cov);
+      /* Track first, then the fill over it — but only where the fill does not
+       * already cover the pixel completely. */
+      if (has_track && filled < 0.999f) {
+        row[x] = blend(row[x], track_argb, opacity * ring);
+      }
+      if (filled > 0.0f) {
+        row[x] = blend(row[x], fill_argb, opacity * filled);
+      }
     }
   }
 }
@@ -310,10 +330,6 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
   }
 }
 
-/* Whether a point lies on the stroke — the same geometry draw_arc uses, so
- * what you can touch is exactly what you can see. Without this an arc laid
- * over content takes every tap in its bounding box, which for a ring around
- * a display is the entire display. */
 bool arc_hit(const Node &n, float px, float py) {
   ArcRing r;
   if (!arc_ring(n, r)) return false;

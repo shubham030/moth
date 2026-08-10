@@ -63,6 +63,9 @@ typedef enum {
    * strokeAlign: -1 inside, 0 centred, 1 outside. */
   MR_PROP_STROKE_ALIGN,
   MR_PROP_STROKE_CAP, /* u32: mr_stroke_cap */
+  /* The unswept remainder of the ring, drawn in the same pass. Zero alpha
+   * leaves it undrawn, which is a plain arc. */
+  MR_PROP_ARC_TRACK_COLOR,
   MR_PROP_COUNT
 } mr_prop;
 

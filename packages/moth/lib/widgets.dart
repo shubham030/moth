@@ -36,6 +36,7 @@ final propArcSweep = 24;
 final propThickness = 25;
 final propStrokeAlign = 26;
 final propStrokeCap = 27;
+final propArcTrackColor = 28;
 
 /// Flutter's StrokeCap, for the ends of an arc.
 final strokeCapButt = 0;
@@ -171,8 +172,8 @@ class Box extends Widget {
 ///
 /// Angles are degrees clockwise from twelve o'clock, which is how you would
 /// describe a progress ring out loud. A [sweep] of 360 or more closes it.
-/// The arc is inscribed in its own box, so it is normally placed absolutely
-/// over the whole display rather than laid out in the flow.
+/// The arc is inscribed in its own box and lays out like any other widget;
+/// wrap it in a [Stack] to draw it over something.
 class Arc extends Widget {
   int color;
   int thickness;
@@ -183,6 +184,11 @@ class Arc extends Widget {
   /// How the ends are finished.
   int strokeCap;
 
+  /// The unswept remainder of the ring. Zero leaves it undrawn — a plain arc.
+  /// Drawn in the same scan as the sweep, so a ring with a track costs what a
+  /// ring without one does.
+  int trackColor;
+
   /// Where the stroke begins, and how far round it goes.
   int start;
   int sweep;
@@ -190,30 +196,21 @@ class Arc extends Widget {
   /// Size of the box the ring is inscribed in.
   int size;
 
-  /// Offset from the parent's content box, since an arc is positioned rather
-  /// than laid out.
-  int left;
-  int top;
-
   Arc({
     this.color = 0xFFE0AF68,
     this.thickness = 6,
     this.start = 0,
     this.sweep = 360,
     this.size = 0,
-    this.left = 0,
-    this.top = 0,
     this.strokeAlign = -1.0, // inside, so an arc stays within its own box
     this.strokeCap = 1, // round
+    this.trackColor = 0,
   });
 
   String typeName() => 'Arc';
   int kind() => kArc;
 
   void apply(int node) {
-    uiSetInt(node, propPosition, positionAbsolute);
-    uiSetNum(node, propLeft, left);
-    uiSetNum(node, propTop, top);
     if (size > 0) {
       uiSetNum(node, propWidth, size);
       uiSetNum(node, propHeight, size);
@@ -224,6 +221,7 @@ class Arc extends Widget {
     uiSetNum(node, propArcSweep, sweep);
     uiSetNum(node, propStrokeAlign, strokeAlign);
     uiSetInt(node, propStrokeCap, strokeCap);
+    uiSetInt(node, propArcTrackColor, trackColor);
   }
 }
 
@@ -446,11 +444,8 @@ class Stack extends Widget {
 /// [Arc] directly only when you need an arbitrary start angle or sweep.
 ///
 /// Flutter's version takes its size from the constraints it is given; moth
-/// has no constraint system yet, so [size] is asked for. A null [value],
-/// which means "indeterminate" in Flutter, is not supported — there is no
-/// animation driver behind it here, and a spinner that does not spin would
-/// be worse than not offering one.
-class CircularProgressIndicator extends Component {
+/// has no constraint system yet, so [size] is asked for.
+class CircularProgressIndicator extends Widget {
   /// 0.0 to 1.0. Null is Flutter's "indeterminate", which draws the track
   /// alone here — an indeterminate indicator is an animation, and moth has
   /// no driver to spin it yet. Showing a still spinner would be worse.
@@ -484,8 +479,9 @@ class CircularProgressIndicator extends Component {
   });
 
   String typeName() => 'CircularProgressIndicator';
+  int kind() => kArc;
 
-  Widget build() {
+  void apply(int node) {
     var track = backgroundColor;
     if (track == null) track = 0xFF1C1C21;
     var fill = color;
@@ -495,44 +491,26 @@ class CircularProgressIndicator extends Component {
     if (thickness < 1) thickness = 1;
 
     var v = value;
-    if (v == null) {
-      // Indeterminate: the track alone, so it reads as "no answer yet"
-      // rather than as a stalled 0%. Wrapped like the determinate case —
-      // an Arc positions itself absolutely, so returning one bare would take
-      // it out of the flow and drop it on top of its siblings.
-      return Stack(width: size, height: size, children: [
-        Arc(
-            color: track,
-            thickness: thickness,
-            sweep: 360,
-            size: size,
-            strokeAlign: strokeAlign,
-            strokeCap: strokeCap),
-      ]);
+    // Null is indeterminate: no sweep, so only the track is drawn.
+    var sweep = 0;
+    if (v != null) {
+      if (v < 0.0) v = 0.0;
+      if (v > 1.0) v = 1.0;
+      // Rounded rather than truncated, so the last degree is not lost.
+      sweep = (v * 360.0 + 0.5) ~/ 1;
     }
 
-    if (v < 0.0) v = 0.0;
-    if (v > 1.0) v = 1.0;
-
-    // Sized, so a row of indicators does not have every stack growing to
-    // fill and colliding with its neighbours.
-    return Stack(width: size, height: size, children: [
-      Arc(
-          color: track,
-          thickness: thickness,
-          sweep: 360,
-          size: size,
-          strokeAlign: strokeAlign,
-          strokeCap: strokeCap),
-      Arc(
-          color: fill,
-          thickness: thickness,
-          // Rounded rather than truncated, so the last degree is not lost.
-          sweep: (v * 360.0 + 0.5) ~/ 1,
-          size: size,
-          strokeAlign: strokeAlign,
-          strokeCap: strokeCap),
-    ]);
+    if (size > 0) {
+      uiSetNum(node, propWidth, size);
+      uiSetNum(node, propHeight, size);
+    }
+    uiSetInt(node, propBgColor, fill);
+    uiSetInt(node, propArcTrackColor, track);
+    uiSetNum(node, propThickness, thickness);
+    uiSetNum(node, propArcStart, 0);
+    uiSetNum(node, propArcSweep, sweep);
+    uiSetNum(node, propStrokeAlign, strokeAlign);
+    uiSetInt(node, propStrokeCap, strokeCap);
   }
 }
 
