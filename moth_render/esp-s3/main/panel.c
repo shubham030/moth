@@ -142,10 +142,15 @@ esp_err_t panel_init(void)
  * the totals alone do not say which dominates. */
 int64_t panel_convert_us, panel_push_us;
 
-esp_err_t panel_present_argb(const uint32_t *argb)
+esp_err_t panel_present_argb(const uint32_t *argb, int band_y, int band_h)
 {
-    for (int y = 0; y < PANEL_H; y += CHUNK_LINES) {
-        int lines = PANEL_H - y < CHUNK_LINES ? PANEL_H - y : CHUNK_LINES;
+    if (band_y < 0) band_y = 0;
+    if (band_y + band_h > PANEL_H) band_h = PANEL_H - band_y;
+    if (band_h <= 0) return ESP_OK;
+
+    const int band_end = band_y + band_h;
+    for (int y = band_y; y < band_end; y += CHUNK_LINES) {
+        int lines = band_end - y < CHUNK_LINES ? band_end - y : CHUNK_LINES;
         const uint32_t *src = argb + (size_t)y * PANEL_W;
         int n = PANEL_W * lines;
         int64_t t0 = esp_timer_get_time();

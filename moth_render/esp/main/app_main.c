@@ -109,7 +109,7 @@ void app_main(void)
         prev_us = now_us;
 
         if (mr_commit()) {
-            panel_present_argb(mr_framebuffer());
+            { int dx, dy, dw, dh; mr_damage(&dx, &dy, &dw, &dh); panel_present_argb(mr_framebuffer(), dy, dh); }
             frames++;
         }
         if (now_us - fps_mark_us >= 1000000) {

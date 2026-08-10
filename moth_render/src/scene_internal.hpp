@@ -24,6 +24,15 @@ struct TextLine {
 struct Node {
   bool alive = false;
 
+  /* Damage tracking. A node that changed must be repainted where it is now
+   * and where it was, or it leaves a ghost behind. Bands are rows rather than
+   * rectangles: a band spans the full width, so nothing can be partially
+   * covered by a sibling and the awkward cases — overlap, translucency,
+   * z-order — cannot arise. */
+  bool touched = true;     /* a property changed since the last paint */
+  bool painted = false;    /* prev_y/prev_h describe a real previous frame */
+  float prev_y = 0.0f, prev_h = 0.0f;
+
   /* Wrapped lines, and the width they were wrapped at. Layout fills these and
    * paint reads them: two independent wraps of the same string is how a label
    * ends up reserving room for one line and drawing three. */
@@ -65,6 +74,13 @@ struct Scene {
   std::vector<Anim> anims;
   uint32_t next_anim_id = 1;
   bool dirty = true;
+
+  /* The rows that must be repainted this frame, as [damage_y0, damage_y1).
+   * Empty when nothing moved; the whole frame on the first paint. */
+  float damage_y0 = 0.0f, damage_y1 = 0.0f;
+
+  /* Painting is clamped to this band rather than to the framebuffer. */
+  int clip_y0 = 0, clip_y1 = 0;
 
   mr_event_cb sink = nullptr;
   void *sink_user = nullptr;

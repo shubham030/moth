@@ -48,9 +48,9 @@ static float sd_round_rect(float px, float py, float cx, float cy,
 static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
                       uint32_t argb, float opacity) {
   int x0 = std::max(0, (int)std::floor(fx));
-  int y0 = std::max(0, (int)std::floor(fy));
+  int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
-  int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+  int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
   if (x1 <= x0 || y1 <= y0) return;
 
   /* An opaque fill has nothing to blend with, and backgrounds are the biggest
@@ -82,9 +82,9 @@ static void fill_round_rect(Scene &s, float fx, float fy, float fw, float fh,
     return;
   }
   int x0 = std::max(0, (int)std::floor(fx));
-  int y0 = std::max(0, (int)std::floor(fy));
+  int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
-  int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+  int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
 
   const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
   const float hw = fw * 0.5f, hh = fh * 0.5f;
@@ -107,9 +107,9 @@ static void stroke_round_rect(Scene &s, float fx, float fy, float fw, float fh,
                               float opacity) {
   if (width <= 0.0f || fw <= 0.0f || fh <= 0.0f) return;
   int x0 = std::max(0, (int)std::floor(fx));
-  int y0 = std::max(0, (int)std::floor(fy));
+  int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
-  int y1 = std::min(s.cfg.height, (int)std::ceil(fy + fh));
+  int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
 
   const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
   const float hw = fw * 0.5f, hh = fh * 0.5f;
@@ -215,9 +215,9 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
 
   const float outer = (n.w < n.h ? n.w : n.h) * 0.5f;
   const int x0 = std::max(0, (int)std::floor(r.cx - outer - 1.0f));
-  const int y0 = std::max(0, (int)std::floor(r.cy - outer - 1.0f));
+  const int y0 = std::max(s.clip_y0, (int)std::floor(r.cy - outer - 1.0f));
   const int x1 = std::min(s.cfg.width, (int)std::ceil(r.cx + outer + 1.0f));
-  const int y1 = std::min(s.cfg.height, (int)std::ceil(r.cy + outer + 1.0f));
+  const int y1 = std::min(s.clip_y1, (int)std::ceil(r.cy + outer + 1.0f));
 
   for (int y = y0; y < y1; y++) {
     const float dy = (float)y + 0.5f - r.cy;
@@ -313,7 +313,7 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
 
         for (int row = r0; row < r1; row++) {
           const int y = (int)(gy + (float)row);
-          if (y < 0 || y >= s.cfg.height) continue;
+          if (y < s.clip_y0 || y >= s.clip_y1) continue;
           uint32_t *dst = s.framebuffer.data() + (size_t)y * s.cfg.width;
           for (int col = c0; col < c1; col++) {
             const int x = (int)(gx + (float)col);
@@ -348,6 +348,10 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
   if (!n) return;
   opacity *= n->f[MR_PROP_OPACITY];
   if (opacity <= 0.0f) return;
+
+  /* Nothing here can reach the damaged rows. Children are inside their parent
+   * in every layout moth produces, so the whole subtree goes with it. */
+  if (n->y >= (float)s.clip_y1 || n->y + n->h <= (float)s.clip_y0) return;
 
   if (n->kind == MR_NODE_ARC) {
     draw_arc(s, *n, opacity);
@@ -398,7 +402,12 @@ void paint_run(Scene &s) {
     }
   }
   if (!covered) {
-    std::fill(s.framebuffer.begin(), s.framebuffer.end(), 0xFF000000u);
+    /* Only the damaged rows — clearing the whole frame was 868KB of PSRAM
+     * writes for rows that are about to be left exactly as they were. */
+    for (int y = s.clip_y0; y < s.clip_y1; y++) {
+      uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+      std::fill(row, row + s.cfg.width, 0xFF000000u);
+    }
   }
   paint_node(s, (mr_node_id)1, 1.0f);
 }
