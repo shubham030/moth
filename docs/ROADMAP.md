@@ -144,31 +144,31 @@ Desktop-first; no Dart dependency until the framework exists.
       gradients, images
 - [ ] R3 — Damage tracking: repaint only what changed.
 
-      **The earlier numbers here were wrong and have been withdrawn.** They
-      said layout+paint 234ms, convert 22ms, QSPI 2ms, and concluded that
-      partial-window writes were not worth doing. Three faults, found in
-      review:
+      **Measured on an ESP32-S3 at 466x466**, with `MOTH_FRAME_PROFILE=1` in
+      `ui/esp-s3/main/app_main.c` and `examples/ui/frame_bench.dart`. Each
+      scene timed in its own run; the split adds up to the total, which is
+      how you know the buckets are not overlapping:
 
-      - the layout+paint figure was wall-clock between presents, which swept
-        up the program's own `delay()` and every pump that found nothing
-        dirty;
-      - the QSPI figure timed `esp_lcd_panel_draw_bitmap`, which queues the
-        transfer and returns. 2ms cannot move 434KB over QSPI; ~11ms is the
-        floor at 80MHz on four lines;
-      - the three numbers were not the same kind of average, so reproducing
-        the table and dividing through gave convert as 1.1ms.
+      | phase | watch face | one 20x20 box |
+      | --- | --- | --- |
+      | layout + paint | 339.4ms | 111.8ms |
+      | ARGB to RGB565 | 21.9ms | 21.9ms |
+      | QSPI transfer | 25.6ms | 25.7ms |
+      | **frame** | **391.8ms** | **162.1ms** |
 
-      The conclusion drawn from them was wrong too: it weighed partial-window
-      writes against the 2ms transfer alone, when conversion runs over
-      exactly the region pushed, so a partial write shrinks that cost as well.
+      Paint dominates, and most of the floor is full-screen fills into PSRAM:
+      111.8ms before anything is drawn. The watch face's own content is the
+      227ms above that.
 
-      `MOTH_FRAME_PROFILE` in `ui/esp-s3/main/app_main.c` is now corrected —
-      layout+paint is timed inside `uiCommit`, the push waits for the
-      transfer to land, and all three are per-repaint means over one window.
-      **Someone needs to run it on a board and put real numbers here before
-      R3's design is decided.** Until then the only safe statement is that
-      full-frame repaint is too slow to feel interactive, which is visible
-      without measuring.
+      Conversion and transfer are 47.5ms together — 12% of the watch face's
+      frame but **29% of the floor's**, and both scale with the region
+      pushed, so partial-window writes are worth having. An earlier note here
+      said the opposite on the strength of a 2ms QSPI figure that came from
+      timing the enqueue rather than the transfer; the real cost is 25.6ms.
+
+      So damage tracking pays three times over: paint less, convert less,
+      push less. On the watch face, where a second changes two digits in
+      roughly 90 of 466 rows, all three shrink together.
 
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
