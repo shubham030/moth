@@ -86,7 +86,10 @@ Dart program draws in a desktop window and on the board.
 - [x] Keys, so a reordered child keeps its element and node
 - [x] Multi-file imports, so the framework is a library programs import
 - [x] Publish it as `package:moth` rather than a file in examples/
-- [ ] More widgets: Row/Column helpers, Slider, Switch, Image
+- [x] Flutter-named widgets: Container, Column, Row, Stack, Center, Padding,
+      SizedBox, GestureDetector, Divider, Text/TextStyle,
+      CircularProgressIndicator
+- [ ] More widgets: Slider, Switch, Image
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
 ## Known limitations to close

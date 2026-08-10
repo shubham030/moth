@@ -28,8 +28,8 @@ class Clock {
   int get minutes => (secondsToday ~/ 60) % 60;
   int get seconds => secondsToday % 60;
 
-  /// How far through the current hour, in degrees of a full turn.
-  int get minuteSweep => ((minutes * 60 + seconds) * 360) ~/ 3600;
+  /// How far through the current hour, 0.0 to 1.0.
+  double get minuteFraction => (minutes * 60 + seconds) / 3600.0;
 
   String two(int n) => n < 10 ? '0$n' : '$n';
   String get display => '${two(hours)}:${two(minutes)}';
@@ -100,13 +100,15 @@ class WatchFace extends Component {
               ),
             ),
 
-            // The track, then the minute hand over it, hugging the bezel.
-            Arc(color: 0xFF1C1C21, thickness: 6, sweep: 360, size: uiWidth()),
-            Arc(
-                color: amber,
-                thickness: 6,
-                sweep: clock.minuteSweep,
-                size: uiWidth()),
+            // The minute hand is a fraction of an hour, which is what a
+            // progress indicator is for — track and fill in one widget.
+            CircularProgressIndicator(
+              value: clock.minuteFraction,
+              strokeWidth: 6,
+              color: amber,
+              backgroundColor: 0xFF1C1C21,
+              size: uiWidth(),
+            ),
           ],
         ),
       );
