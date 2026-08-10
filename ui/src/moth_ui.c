@@ -17,6 +17,23 @@ static struct {
   float last_value;
 } g_events;
 
+#if defined(ESP_PLATFORM)
+#include "esp_timer.h"
+static int64_t moth_ui_now_us(void) { return esp_timer_get_time(); }
+#else
+#include <time.h>
+static int64_t moth_ui_now_us(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+}
+#endif
+
+/* How long mr_commit has spent, and over how many repaints — read by the
+ * host's frame profiler. */
+int64_t g_moth_ui_commit_us;
+int g_moth_ui_commits;
+
 static moth_ui_frame_fn g_frame_hook;
 static void *g_frame_user;
 
@@ -177,7 +194,13 @@ static moth_value n_ui_tick(moth_vm *vm, int argc, const moth_value *argv, void 
 
 static moth_value n_ui_commit(moth_vm *vm, int c, const moth_value *v, void *u) {
   (void)vm; (void)c; (void)v; (void)u;
+  /* Timed here rather than by the host, because only this call is layout and
+   * paint. Measuring wall-clock between presents in the frame hook swept up
+   * the program's own delay() and every non-dirty pump. */
+  const int64_t commit_start = moth_ui_now_us();
   bool repainted = mr_commit();
+  g_moth_ui_commit_us += moth_ui_now_us() - commit_start;
+  if (repainted) g_moth_ui_commits++;
   if (g_frame_hook) g_frame_hook(repainted, g_frame_user);
   return moth_bool(repainted);
 }

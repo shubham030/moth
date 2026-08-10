@@ -53,10 +53,16 @@ def render_glyph(font, ch, bpp):
     """Returns (bitmap bytes, box_w, box_h, ofs_x, ofs_y, adv_w).
 
     The ink box is measured from the rendered pixels rather than taken from
-    getbbox. Those two disagree for some glyphs — getbbox reports a box the
-    rasterizer does not fill the same way — and cropping to the reported box
-    sliced ink off the right of every glyph. Scanning what was actually drawn
-    cannot drift from what will be drawn.
+    getbbox, which reports a box the rasterizer does not fill the same way.
+
+    The earlier claim here — that cropping to getbbox "sliced ink off the
+    right of every glyph" — was wrong, and review caught it: across all 244
+    entries the old box strictly contained the new one, so the surplus was
+    blank side bearings and nothing was ever lost. What it did do was make
+    box_w a number that did not describe the ink, which anything positioning
+    or packing glyphs would have believed. Measuring what was actually drawn
+    cannot drift from what will be drawn, and it dropped the four faces from
+    34,661 to 27,106 bytes by not storing those blank columns.
     """
     adv = int(round(font.getlength(ch)))
 

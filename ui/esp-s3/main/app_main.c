@@ -40,29 +40,41 @@ static void on_frame(bool repainted, void *user) {
 
   if (repainted) {
 #if MOTH_FRAME_PROFILE
-    /* Splits a frame three ways: everything mr_commit did before this hook
-     * ran (layout and paint), the ARGB->RGB565 conversion, and the QSPI
-     * transfer. Off by default — it is a tool for deciding where to optimise,
-     * not something a running device should be logging. */
+    /* Splits a frame three ways, all as per-repaint means over the same
+     * window so the three numbers can be compared and added.
+     *
+     * Layout and paint is timed inside uiCommit, not as wall-clock around
+     * this hook: the program's own delay() and every pump that found nothing
+     * dirty would otherwise land in that bucket and dominate it. */
     extern int64_t panel_convert_us, panel_push_us;
-    static int64_t last_hook_end;
+    extern int64_t g_moth_ui_commit_us;
+    extern int g_moth_ui_commits;
+
+    static int64_t base_convert, base_push, base_commit;
+    static int base_commits;
     static int frames;
-    static int64_t paint_us_total;
 
-    int64_t hook_start = esp_timer_get_time();
-    if (last_hook_end) paint_us_total += hook_start - last_hook_end;
-
-    int64_t c0 = panel_convert_us, p0 = panel_push_us;
     panel_present_argb(mr_framebuffer());
-    last_hook_end = esp_timer_get_time();
 
     if (++frames % 20 == 0) {
-      ESP_LOGI("moth",
-               "PHASES over 20 frames: paint+layout %lldms  convert %lldms  "
-               "qspi %lldms",
-               paint_us_total / 1000 / 20,
-               (panel_convert_us - c0) / 1000, (panel_push_us - p0) / 1000);
-      paint_us_total = 0;
+      const int n = g_moth_ui_commits - base_commits;
+      if (n > 0) {
+        ESP_LOGI("moth",
+                 "PHASES, mean per repaint over %d repaints: "
+                 "layout+paint %lld.%01lldms  convert %lld.%01lldms  "
+                 "qspi %lld.%01lldms",
+                 n,
+                 (g_moth_ui_commit_us - base_commit) / n / 1000,
+                 ((g_moth_ui_commit_us - base_commit) / n / 100) % 10,
+                 (panel_convert_us - base_convert) / n / 1000,
+                 ((panel_convert_us - base_convert) / n / 100) % 10,
+                 (panel_push_us - base_push) / n / 1000,
+                 ((panel_push_us - base_push) / n / 100) % 10);
+      }
+      base_convert = panel_convert_us;
+      base_push = panel_push_us;
+      base_commit = g_moth_ui_commit_us;
+      base_commits = g_moth_ui_commits;
     }
 #else
     panel_present_argb(mr_framebuffer());

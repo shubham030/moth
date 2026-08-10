@@ -143,22 +143,32 @@ Desktop-first; no Dart dependency until the framework exists.
 - [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
       gradients, images
 - [ ] R3 — Damage tracking: repaint only what changed.
-      **Measured on an ESP32-S3 at 466x466** (set MOTH_FRAME_PROFILE=1 in
-      ui/esp-s3/main/app_main.c to reproduce):
 
-      | phase | watch face | one 20x20 box |
-      | --- | --- | --- |
-      | layout + paint | 234ms | ~108ms |
-      | ARGB to RGB565 | 22ms | 22ms |
-      | QSPI transfer | 2ms | 2ms |
+      **The earlier numbers here were wrong and have been withdrawn.** They
+      said layout+paint 234ms, convert 22ms, QSPI 2ms, and concluded that
+      partial-window writes were not worth doing. Three faults, found in
+      review:
 
-      The transfer is free and the conversion is minor: **paint is ~90% of a
-      frame**, and most of that is full-screen opaque fills into PSRAM, which
-      is why a nearly empty scene still costs ~130ms. So the win is in
-      painting less, not pushing less — partial-window writes to the panel
-      would optimise the one phase that is already 2ms. Skipping the
-      redundant full-frame clear when the root covers it opaquely already
-      took 24ms off (paint.cpp), before any tracking exists.
+      - the layout+paint figure was wall-clock between presents, which swept
+        up the program's own `delay()` and every pump that found nothing
+        dirty;
+      - the QSPI figure timed `esp_lcd_panel_draw_bitmap`, which queues the
+        transfer and returns. 2ms cannot move 434KB over QSPI; ~11ms is the
+        floor at 80MHz on four lines;
+      - the three numbers were not the same kind of average, so reproducing
+        the table and dividing through gave convert as 1.1ms.
+
+      The conclusion drawn from them was wrong too: it weighed partial-window
+      writes against the 2ms transfer alone, when conversion runs over
+      exactly the region pushed, so a partial write shrinks that cost as well.
+
+      `MOTH_FRAME_PROFILE` in `ui/esp-s3/main/app_main.c` is now corrected —
+      layout+paint is timed inside `uiCommit`, the push waits for the
+      transfer to land, and all three are per-repaint means over one window.
+      **Someone needs to run it on a board and put real numbers here before
+      R3's design is decided.** Until then the only safe statement is that
+      full-frame repaint is too slow to feel interactive, which is visible
+      without measuring.
 
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL

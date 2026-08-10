@@ -9,6 +9,8 @@
 #include "esp_lcd_touch_cst9217.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/semphr.h"
+#include "freertos/FreeRTOS.h"
 
 /* Waveshare 1.75C pin map — the C variant differs from the non-C board:
  * LCD_RST 1, TOUCH_RST 2. */
@@ -27,6 +29,21 @@
 /* Internal-DMA bounce chunk. Even line count keeps the CO5300's even/odd
  * window alignment rule satisfied for every chunk. */
 #define CHUNK_LINES 30
+
+/* Signalled when a band has actually reached the panel, so the shared chunk
+ * buffer is not refilled while DMA is still reading it — and so timing the
+ * push measures the wire rather than the enqueue. */
+static SemaphoreHandle_t s_chunk_done;
+
+static bool IRAM_ATTR panel_trans_done(esp_lcd_panel_io_handle_t io,
+                                       esp_lcd_panel_io_event_data_t *data,
+                                       void *user)
+{
+    (void)io; (void)data; (void)user;
+    BaseType_t woken = pdFALSE;
+    xSemaphoreGiveFromISR(s_chunk_done, &woken);
+    return woken == pdTRUE;
+}
 
 static const char *TAG = "panel";
 static i2c_master_bus_handle_t s_i2c_bus;
@@ -69,7 +86,14 @@ esp_err_t panel_init(void)
         PANEL_W * CHUNK_LINES * 2);
     ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
 
-    esp_lcd_panel_io_spi_config_t io_config = CO5300_PANEL_IO_QSPI_CONFIG(PIN_LCD_CS, NULL, NULL);
+    /* One chunk buffer is reused for every band, so the next band must not be
+     * filled while DMA is still reading the last. The queue is ten deep, so
+     * without waiting the buffer is overwritten underneath in-flight
+     * transfers — and timing draw_bitmap alone measures enqueueing, not the
+     * wire. */
+    s_chunk_done = xSemaphoreCreateBinary();
+    esp_lcd_panel_io_spi_config_t io_config =
+        CO5300_PANEL_IO_QSPI_CONFIG(PIN_LCD_CS, panel_trans_done, NULL);
     ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST,
                                              &io_config, &s_panel_io));
 
@@ -134,6 +158,10 @@ esp_err_t panel_present_argb(const uint32_t *argb)
         }
         int64_t t1 = esp_timer_get_time();
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, y, PANEL_W, y + lines, s_chunk);
+        /* Wait for the band to land before refilling the buffer. This is what
+         * makes the timing the transfer rather than the enqueue, and it is
+         * required for correctness with a single shared chunk. */
+        if (err == ESP_OK) xSemaphoreTake(s_chunk_done, portMAX_DELAY);
         int64_t t2 = esp_timer_get_time();
         panel_convert_us += t1 - t0;
         panel_push_us += t2 - t1;
