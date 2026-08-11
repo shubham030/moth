@@ -17,6 +17,20 @@ target_compile_options(moth_render PRIVATE -Wall -Wextra)
 # TODO(R2): ThorVG via pkg-config (brew install thorvg) or vendored subdir.
 # find_package(PkgConfig); pkg_check_modules(THORVG thorvg)
 
+# Paint-cost regression suite: budgets on pixels visited per frame. Compiled
+# separately from the library so MR_PROFILE's counters exist here and cost
+# nothing everywhere else. See docs/PERF_REVIEW.md.
+add_executable(render_perf_test
+  test/perf_test.cpp
+  src/scene.cpp
+  src/layout.cpp
+  src/paint.cpp
+  src/text.cpp
+)
+target_include_directories(render_perf_test PRIVATE include src)
+target_compile_definitions(render_perf_test PRIVATE MR_PROFILE=1)
+target_compile_options(render_perf_test PRIVATE -Wall -Wextra)
+
 # Desktop harness — built only when SDL2 is available.
 find_package(SDL2 QUIET)
 if(SDL2_FOUND)

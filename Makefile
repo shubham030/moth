@@ -2,17 +2,19 @@
 MOTHC := dart run tools/mothc/bin/mothc.dart
 MOTHRUN := ./build/vm/mothrun
 
-.PHONY: help vm deps test blink sim ui docs docs-build render clean
+.PHONY: help vm deps test render-test fps blink sim ui docs docs-build render clean
 
 help:
-	@echo "make vm        build the VM and the mothrun simulator"
-	@echo "make test      run the golden test suite"
-	@echo "make blink     compile and run examples/blink.dart with no hardware"
-	@echo "make sim F=x   compile and run any .dart file in the simulator"
-	@echo "make docs      serve the documentation site (Docusaurus dev server)"
-	@echo "make ui F=x    compile a UI program and run it in a window"
-	@echo "make render    build moth_render and its SDL harness"
-	@echo "make clean     remove build outputs"
+	@echo "make vm           build the VM and the mothrun simulator"
+	@echo "make test         run the golden test suite (includes render-test)"
+	@echo "make render-test  paint-cost regression suite (pixel budgets)"
+	@echo "make fps PORT=x   measure real fps on a connected board"
+	@echo "make blink        compile and run examples/blink.dart with no hardware"
+	@echo "make sim F=x      compile and run any .dart file in the simulator"
+	@echo "make docs         serve the documentation site (Docusaurus dev server)"
+	@echo "make ui F=x       compile a UI program and run it in a window"
+	@echo "make render       build moth_render and its SDL harness"
+	@echo "make clean        remove build outputs"
 
 vm:
 	cmake -B build . && cmake --build build
@@ -26,8 +28,18 @@ ui: vm
 deps:
 	dart pub get --directory tools/mothc
 
-test: vm deps
+test: vm deps render-test
 	cd tools/mothc && dart test
+
+# Deterministic paint-cost budgets — pixels visited per frame, not wall time.
+# See docs/PERF_REVIEW.md for what a failure here means.
+render-test: vm
+	./build/moth_render/render_perf_test
+
+# End-to-end fps on real hardware; the only measurement fps claims come from.
+# make fps PORT=/dev/cu.usbmodemXXXX  (auto-detects if one board is attached)
+fps:
+	python3 tools/fpsbench/fpsbench.py $(if $(PORT),--port $(PORT),)
 
 blink: vm
 	$(MOTHC) examples/blink.dart

@@ -20,10 +20,13 @@
 
 static const char *TAG = "moth";
 
-/* Set to 1 to log where each frame's time goes. See docs/ROADMAP.md R3.
- * Build moth_render with MR_PROFILE=1 as well (main/CMakeLists.txt) to get
- * the per-primitive split; this file provides its clock. */
+/* When 1, logs where each frame's time goes. See docs/ROADMAP.md R3.
+ * `make fps` (tools/fpsbench) turns it on from the build with
+ * -DMOTH_FPSBENCH=1, which also gives moth_render's MR_PROFILE the clock and
+ * counters the split needs; a normal build measures nothing. */
+#ifndef MOTH_FRAME_PROFILE
 #define MOTH_FRAME_PROFILE 0
+#endif
 
 extern const uint8_t program_start[] asm("_binary_program_mothb_start");
 extern const uint8_t program_end[] asm("_binary_program_mothb_end");
