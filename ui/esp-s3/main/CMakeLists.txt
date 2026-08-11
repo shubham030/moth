@@ -6,6 +6,7 @@ idf_component_register(
   SRCS
     app_main.c
     hotpush.c
+    pushstore.c
     "${ROOT}/moth_render/esp-s3/main/panel.c"
     "${ROOT}/vm/src/vm.c"
     "${ROOT}/vm/src/object.c"
@@ -28,7 +29,7 @@ idf_component_register(
     "${ROOT}/moth_render/src"
     "${ROOT}/moth_render/esp-s3/main"
   PRIV_REQUIRES esp_lcd esp_driver_gpio esp_driver_spi esp_driver_i2c esp_timer
-                esp_wifi esp_netif esp_event nvs_flash lwip
+                esp_wifi esp_netif esp_event nvs_flash lwip esp_partition
   EMBED_FILES program.mothb
 )
 
