@@ -46,6 +46,10 @@ void pushstore_release(void) {
 bool pushstore_save(const uint8_t *blob, size_t len) {
   const esp_partition_t *p = part();
   if (!p) return false;
+  /* The boot-time mapping may still be live; erasing under it violates the
+   * same invariant invalidate maintains. The callers have already torn down
+   * anything executing from it. */
+  pushstore_release();
   /* Any failure from here on must leave the store INVALID, not stale: the
    * caller is switching to the new program now, and "save failed" with the
    * old blob still valid means a reboot resurrects a program the user
@@ -145,6 +149,26 @@ void pushstore_clear_strikes(void) {
   nvs_handle_t h;
   if (!strikes_open(&h)) return;
   nvs_set_i32(h, "strikes", 0);
+  nvs_commit(h);
+  nvs_close(h);
+}
+
+/* Whether the previous boot was running a pushed program — written before
+ * the program runs, read with esp_reset_reason() on the next boot so a
+ * panic can be attributed to the right program. */
+bool pushstore_boot_was_store(void) {
+  nvs_handle_t h;
+  if (!strikes_open(&h)) return false;
+  int32_t v = 0;
+  nvs_get_i32(h, "ran_store", &v);
+  nvs_close(h);
+  return v != 0;
+}
+
+void pushstore_set_boot_source(bool store) {
+  nvs_handle_t h;
+  if (!strikes_open(&h)) return;
+  nvs_set_i32(h, "ran_store", store ? 1 : 0);
   nvs_commit(h);
   nvs_close(h);
 }

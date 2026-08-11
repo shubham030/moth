@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:analyzer/source/line_info.dart';
@@ -86,7 +87,12 @@ Future<void> main(List<String> args) async {
   }
 }
 
-Uint8List _frame(Uint8List blob) {
+/// "MPSH", u32 length, u32 nonce, then the blob — vm/host/push_proto.h is
+/// the format's home. The nonce comes back in the receiver's verdict reply,
+/// which is what makes the reply unforgeable: no log line, no program's own
+/// print(), and no stale reply from an earlier push can contain a random
+/// number invented after all of them.
+Uint8List _frame(Uint8List blob, int nonce) {
   final b = BytesBuilder()
     ..add(ascii.encode('MPSH'))
     ..add([
@@ -94,18 +100,41 @@ Uint8List _frame(Uint8List blob) {
       (blob.length >> 8) & 0xFF,
       (blob.length >> 16) & 0xFF,
       (blob.length >> 24) & 0xFF,
+      nonce & 0xFF,
+      (nonce >> 8) & 0xFF,
+      (nonce >> 16) & 0xFF,
+      (nonce >> 24) & 0xFF,
     ])
     ..add(blob);
   return b.toBytes();
 }
 
-/// The board's own log lines, read back as the protocol's ack. Matching on
-/// a bare 'push: ' once matched the *tags* of the very subsystems this
-/// feature added — "serialpush: cable push ready" and "hotpush: wifi
-/// disconnected" both contain it — so a board that was still booting acked
-/// a push it never received. The full "moth: " tag prefix is unambiguous.
-const _ackMark = 'moth: push: ';
-const _rejectMark = 'moth: push rejected';
+Uint8List _reply(String cc, int nonce) => Uint8List.fromList([
+      ...ascii.encode(cc),
+      nonce & 0xFF,
+      (nonce >> 8) & 0xFF,
+      (nonce >> 16) & 0xFF,
+      (nonce >> 24) & 0xFF,
+    ]);
+
+/// Scans [seen] for either verdict carrying [nonce]. Returns true for MPOK,
+/// false for MPRJ, null for neither yet.
+bool? _verdictIn(List<int> seen, int nonce) {
+  bool contains(Uint8List needle) {
+    outer:
+    for (var i = 0; i + needle.length <= seen.length; i++) {
+      for (var j = 0; j < needle.length; j++) {
+        if (seen[i + j] != needle[j]) continue outer;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  if (contains(_reply('MPOK', nonce))) return true;
+  if (contains(_reply('MPRJ', nonce))) return false;
+  return null;
+}
 
 /// Pushes over a serial device — the board's USB console doubles as a push
 /// transport, so a cable is enough and no WiFi setup is needed.
@@ -114,9 +143,13 @@ const _rejectMark = 'moth: push rejected';
 /// open and raw mode via FFI, because Dart's File API can block forever on a
 /// modem-class device and stty had the same flaw one subprocess removed.
 ///
-/// No ack can mean the board was resetting when the port opened — some
+/// The verdict is a framed binary reply carrying this push's nonce, so no
+/// draining, no log-line grepping, and no ambiguity about which push a
+/// reply answers — text acks lost that game three review rounds running.
+/// No reply can mean the board was resetting when the port opened — some
 /// adapters toggle the reset lines on open — so the frame is sent again
-/// after a boot's worth of waiting before giving up.
+/// after a boot's worth of waiting before giving up; the nonce makes the
+/// retry safe, since a late reply to attempt one still names this push.
 Future<void> _pushSerial(String device, Uint8List blob) async {
   final SerialPort port;
   try {
@@ -126,37 +159,27 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
     exit(74);
   }
 
-  // Drain whatever the board printed before we arrived: a stale ack from a
-  // previous push must not be readable as this push's ack. 300ms of silence
-  // means the backlog is done — and a hard cap means a board that logs
-  // every frame (profiling on, say) delays the push instead of hanging it.
-  final drainDeadline = DateTime.now().add(const Duration(seconds: 3));
-  var quiet = DateTime.now();
-  while (DateTime.now().difference(quiet).inMilliseconds < 300 &&
-      DateTime.now().isBefore(drainDeadline)) {
-    if (port.readAvailable().isNotEmpty) quiet = DateTime.now();
-    sleep(const Duration(milliseconds: 20));
-  }
-
   final started = DateTime.now();
-  final frame = _frame(blob);
+  final nonce = Random.secure().nextInt(0x100000000);
+  final frame = _frame(blob, nonce);
+  final seen = <int>[];
   for (var attempt = 1; attempt <= 3; attempt++) {
     port.writeAll(frame);
     final deadline = DateTime.now().add(const Duration(seconds: 4));
-    var seen = '';
     while (DateTime.now().isBefore(deadline)) {
       final chunk = port.readAvailable();
       if (chunk.isEmpty) {
         sleep(const Duration(milliseconds: 20));
         continue;
       }
-      seen += String.fromCharCodes(chunk);
-      if (seen.contains(_ackMark)) {
+      seen.addAll(chunk);
+      final verdict = _verdictIn(seen, nonce);
+      if (verdict == true) {
         final ms = DateTime.now().difference(started).inMilliseconds;
         stdout.writeln('pushed over $device in ${ms}ms');
         exit(0);
       }
-      if (seen.contains(_rejectMark)) {
+      if (verdict == false) {
         stderr.writeln('mothc: the board rejected the program — see its log');
         exit(70);
       }
@@ -172,32 +195,37 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
 
 Future<void> _pushTcp(String host, int port, Uint8List blob) async {
   final started = DateTime.now();
+  final nonce = Random.secure().nextInt(0x100000000);
   final socket =
       await Socket.connect(host, port, timeout: const Duration(seconds: 5));
-  socket.add(_frame(blob));
+  socket.add(_frame(blob, nonce));
   await socket.flush();
 
-  // The receiver writes "ok" once the whole frame has landed. Without
-  // reading it, connecting to anything listening on the port — an HTTP
-  // server, a stale mothsim — printed "pushed" while the bytes went nowhere.
-  var acked = false;
+  // The framed verdict arrives AFTER the host verified the blob — so
+  // "pushed" here means "verified and about to run", not merely
+  // "delivered". Anything else listening on the port fails this check.
+  final seen = <int>[];
+  bool? verdict;
   try {
     await for (final chunk
-        in socket.timeout(const Duration(seconds: 3), onTimeout: (sink) {
+        in socket.timeout(const Duration(seconds: 5), onTimeout: (sink) {
       sink.close();
     })) {
-      if (String.fromCharCodes(chunk).contains('ok')) {
-        acked = true;
-        break;
-      }
+      seen.addAll(chunk);
+      verdict = _verdictIn(seen, nonce);
+      if (verdict != null) break;
     }
   } on SocketException {
-    // A peer that closes without acking is handled below.
+    // A peer that closes without a verdict is handled below.
   }
   socket.destroy();
-  if (!acked) {
-    stderr.writeln('mothc: no receipt from $host:$port — is that a moth '
+  if (verdict == null) {
+    stderr.writeln('mothc: no verdict from $host:$port — is that a moth '
         'host? (the frame was sent, but nothing confirmed it)');
+    exit(70);
+  }
+  if (verdict == false) {
+    stderr.writeln('mothc: the host rejected the program — see its log');
     exit(70);
   }
   final ms = DateTime.now().difference(started).inMilliseconds;

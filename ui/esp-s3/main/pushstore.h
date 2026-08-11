@@ -42,3 +42,8 @@ void pushstore_invalidate(void);
 int pushstore_strikes(void);
 void pushstore_add_strike(void);
 void pushstore_clear_strikes(void);
+
+/* True when the previous boot was running a pushed program — so a crash
+ * reset can be charged to it rather than to the embedded one. */
+bool pushstore_boot_was_store(void);
+void pushstore_set_boot_source(bool store);

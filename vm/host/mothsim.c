@@ -95,10 +95,12 @@ static bool accept_push(void) {
   if (!blob_is_loadable(blob, len, err, sizeof err)) {
     fprintf(stderr, "push: rejected (%zu bytes): %s\n", len, err);
     fflush(stderr);
+    moth_push_respond(g_sim.push, false);
     free(blob);
     return false; /* the running program never noticed */
   }
 
+  moth_push_respond(g_sim.push, true);
   g_sim.pending = blob;
   g_sim.pending_len = len;
   printf("push: %zu bytes received, restarting\n", len);

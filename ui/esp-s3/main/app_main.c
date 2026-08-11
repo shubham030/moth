@@ -21,6 +21,7 @@
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -162,18 +163,41 @@ static blob_verdict verify_blob(const uint8_t *b, size_t len, char *why,
   moth_status st = moth_load(probe, b, len);
   if (st != MOTH_OK) snprintf(why, why_len, "%s", moth_error(probe));
   moth_free(probe);
-  return st == MOTH_OK ? BLOB_OK : BLOB_BAD;
+  if (st == MOTH_OK) return BLOB_OK;
+  /* Out of memory DURING the load is as transient as failing to create the
+   * probe — it says nothing about the blob. Only a verdict about the blob
+   * itself may erase a stored program. */
+  return st == MOTH_ERR_OOM ? BLOB_UNVERIFIABLE : BLOB_BAD;
 }
 
 /* Takes a pushed blob if one has arrived and it survives verification.
  * Rejecting here rather than after the swap is the whole point: a bad blob
  * must not be able to take the running program down with it. */
+typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
+
+/* Routes the framed verdict back over whichever transport delivered the
+ * frame. The reply carries the sender's nonce (push_proto.h), so the log
+ * lines here are for the human watching the console — mothc no longer
+ * reads them. */
+static void respond_push(push_src src, uint32_t nonce, bool ok) {
+  if (src == PUSH_SRC_TCP) moth_push_respond(s_push, ok);
+  else serialpush_respond(nonce, ok);
+}
+
 static bool accept_push(void) {
   if (s_push == NULL && hotpush_net_connected()) {
-    s_push = moth_push_listen(HOTPUSH_PORT);
-    if (s_push) {
-      ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
-               hotpush_net_ip(), HOTPUSH_PORT);
+    /* Throttled: this runs on the frame hook, and a bind that keeps failing
+     * (port held after a soft restart, say) must not add a socket syscall
+     * burst to every frame forever. */
+    static int64_t next_listen_us;
+    if (esp_timer_get_time() >= next_listen_us) {
+      s_push = moth_push_listen(HOTPUSH_PORT);
+      if (s_push) {
+        ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
+                 hotpush_net_ip(), HOTPUSH_PORT);
+      } else {
+        next_listen_us = esp_timer_get_time() + 2 * 1000 * 1000;
+      }
     }
   }
   if (s_pending != NULL) return false;
@@ -181,20 +205,24 @@ static bool accept_push(void) {
   /* Two transports, one path from here on: WiFi when it is up, and the USB
    * console always. */
   size_t len = 0;
+  uint32_t nonce = 0;
+  push_src src = PUSH_SRC_TCP;
   uint8_t *blob = s_push ? moth_push_poll(s_push, &len) : NULL;
-  if (!blob) blob = serialpush_poll(&len);
+  if (!blob) {
+    blob = serialpush_poll(&len, &nonce);
+    src = PUSH_SRC_SERIAL;
+  }
   if (!blob) return false;
   char why[128] = {0};
   if (verify_blob(blob, len, why, sizeof why) != BLOB_OK) {
-    /* "push rejected" is the exact prefix mothc greps for as its failure
-     * ack — keep it whether the blob was bad or the verifier could not run;
-     * either way this push did not take and the sender should know. */
     ESP_LOGE(TAG, "push rejected: %s", why);
+    respond_push(src, nonce, false);
     free(blob); /* the running program never noticed */
     return false;
   }
   s_pending = blob;
   s_pending_len = len;
+  respond_push(src, nonce, true);
   ESP_LOGI(TAG, "push: %u bytes received, restarting", (unsigned)len);
   return true;
 }
@@ -339,35 +367,46 @@ static void teardown_vm(moth_vm *vm) {
   moth_free(vm);
 }
 
-/* Clears the strike counter once a stored program has stayed up long enough
- * to count as working. The handle is kept: one-shot timers are not
- * auto-deleted, and the swap path stops it — a program pushed at t=9s must
- * not have the outgoing program's timer vouch for it at t=10s. */
-static esp_timer_handle_t s_stable_timer;
-
-static void on_stable(void *arg) {
-  (void)arg;
-  pushstore_clear_strikes();
-  ESP_LOGI(TAG, "stored program stable; strike counter cleared");
+/* Crash accounting by ground truth rather than by timer. The previous
+ * design refunded a strike after ten stable seconds, which a program that
+ * panics at t=30s defeated forever — it earned its refund every boot and
+ * the guard never fired. esp_reset_reason() says what actually ended the
+ * last boot: a panic or watchdog while the stored program ran is a strike,
+ * and any clean reset clears the record. */
+static bool crash_reset(void) {
+  switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+    case ESP_RST_BROWNOUT:
+      return true;
+    default:
+      return false;
+  }
 }
 
 /* Picks what to run at boot: the last pushed program if one is stored, still
- * verifies, and has not used up its boot attempts — the embedded program
- * otherwise.
- *
- * The counter records completed failed boots: each store-boot adds a strike
- * that ten stable seconds refund, so a blob that panics the chip gets
- * exactly PUSHSTORE_MAX_STRIKES crashing boots and the boot after the last
- * one runs the embedded program instead. */
+ * verifies, and has not crashed the chip PUSHSTORE_MAX_STRIKES boots in a
+ * row — the embedded program otherwise. */
 static program_src choose_boot_blob(void) {
+  /* Account for how the LAST boot ended before deciding this one. */
+  if (crash_reset() && pushstore_boot_was_store()) {
+    pushstore_add_strike();
+    ESP_LOGW(TAG, "last boot crashed while running the pushed program "
+                  "(strike %d of %d)", pushstore_strikes(),
+             PUSHSTORE_MAX_STRIKES);
+  } else if (!crash_reset()) {
+    pushstore_clear_strikes();
+  }
+
   size_t stored_len = 0;
   const uint8_t *stored = pushstore_load(&stored_len);
   if (!stored) return embedded_program();
 
-  const int failed_boots = pushstore_strikes();
-  if (failed_boots >= PUSHSTORE_MAX_STRIKES) {
-    ESP_LOGW(TAG, "stored program crashed %d boots running; falling back to "
-                  "the embedded one", failed_boots);
+  if (pushstore_strikes() >= PUSHSTORE_MAX_STRIKES) {
+    ESP_LOGW(TAG, "stored program crashed %d boots in a row; falling back "
+                  "to the embedded one", pushstore_strikes());
     pushstore_invalidate();
     pushstore_clear_strikes();
     return embedded_program();
@@ -389,11 +428,6 @@ static program_src choose_boot_blob(void) {
     return embedded_program();
   }
 
-  pushstore_add_strike(); /* provisional — on_stable refunds it */
-  const esp_timer_create_args_t args = {.callback = on_stable, .name = "stable"};
-  if (s_stable_timer || esp_timer_create(&args, &s_stable_timer) == ESP_OK) {
-    esp_timer_start_once(s_stable_timer, 10 * 1000 * 1000);
-  }
   ESP_LOGI(TAG, "booting the last pushed program (%u bytes)",
            (unsigned)stored_len);
   program_src p = {stored, stored_len, false, true};
@@ -455,14 +489,15 @@ static void storage_init(void) {
  * already torn down: the outgoing program may have been executing from the
  * very flash pushstore_save erases. */
 static program_src take_pending(void) {
-  if (s_stable_timer) esp_timer_stop(s_stable_timer);
   if (!pushstore_save(s_pending, s_pending_len)) {
     ESP_LOGW(TAG, "push not persisted — it runs now, and a reboot returns "
                   "to the embedded program");
   }
   pushstore_clear_strikes(); /* a new program starts with a clean record */
 
-  /* Runs from the RAM copy until the next boot picks it up from flash. */
+  /* Runs from the RAM copy until the next boot picks it up from flash —
+   * but a crash while it runs is still the pushed program's crash. */
+  pushstore_set_boot_source(true);
   program_src p = {s_pending, s_pending_len, true, false};
   s_pending = NULL;
   return p;
@@ -490,13 +525,20 @@ void app_main(void) {
   serialpush_start();
 
   program_src cur = choose_boot_blob();
+  pushstore_set_boot_source(cur.from_store);
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
            (unsigned)cur.len, PANEL_W, PANEL_H);
 
   for (;;) {
     moth_vm *vm = NULL;
     moth_status st = run_program(&cur, &vm);
-    if (!vm) return;
+    if (!vm) {
+      /* Returning here would leave a live-looking board that can never be
+       * pushed again — the one state hot push exists to prevent. Heap may
+       * recover (the failed program's allocations are gone); keep trying. */
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
 
     if (st == MOTH_HALTED) {
       ESP_LOGI(TAG, "program stopped for a push");
@@ -513,6 +555,7 @@ void app_main(void) {
         pushstore_invalidate();
         pushstore_clear_strikes();
         cur = embedded_program();
+        pushstore_set_boot_source(false);
         continue;
       }
     } else {

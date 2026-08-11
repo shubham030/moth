@@ -39,6 +39,9 @@ final _write = _libc.lookupFunction<_RwC, _RwD>('write');
 final _close = _libc.lookupFunction<_CloseC, _CloseD>('close');
 final _tcgetattr = _libc.lookupFunction<_TcC, _TcD>('tcgetattr');
 final _tcsetattr = _libc.lookupFunction<_TcSetC, _TcSetD>('tcsetattr');
+typedef _CfSpeedC = Int32 Function(Pointer<Uint8> t, IntPtr speed);
+typedef _CfSpeedD = int Function(Pointer<Uint8> t, int speed);
+final _cfsetspeed = _libc.lookupFunction<_CfSpeedC, _CfSpeedD>('cfsetspeed');
 final _errnoLoc = _libc.lookupFunction<_ErrnoC, _ErrnoD>(
     Platform.isMacOS ? '__error' : '__errno_location');
 
@@ -127,6 +130,10 @@ class SerialPort {
       t.cast<Uint32>()[2] = (t.cast<Uint32>()[2] & ~clear) | set;
       t.cast<Uint32>()[3] = 0;
     }
+    // Baud is normalized too, by the same argument as parity: inherited
+    // speed is fine on USB CDC (which ignores it) and wrong on a real UART
+    // bridge. cfsetspeed handles each libc's own encoding of the rate.
+    _cfsetspeed(t, Platform.isMacOS ? 115200 : 0x1002 /* B115200 */);
     final rc = _tcsetattr(fd, 0 /* TCSANOW */, t);
     _free(t);
     if (rc != 0) {
@@ -146,10 +153,18 @@ class SerialPort {
   }
 
   /// Writes all of [data], riding out partial writes and EAGAIN — a 4KB USB
-  /// CDC buffer fills fast at frame sizes.
+  /// CDC buffer fills fast at frame sizes. Bounded: a receiver that stops
+  /// draining (board wedged, cable half-dead) becomes an error in ten
+  /// seconds, not a silent forever-hang.
   void writeAll(Uint8List data) {
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
     var off = 0;
     while (off < data.length) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw SerialException(
+            'write stalled with ${data.length - off} bytes left — '
+            'is the board draining its console?');
+      }
       final chunk = data.length - off > _bufSize ? _bufSize : data.length - off;
       _buf.asTypedList(chunk).setAll(0, data.sublist(off, off + chunk));
       final n = _write(_fd, _buf, chunk);
