@@ -338,7 +338,9 @@ static void record_painted(Scene &s, mr_node_id id) {
 bool mr_commit(void) {
   Scene &s = scene();
   if (!s.dirty) return false;
+  MR_PROF_START(t_layout);
   layout_run(s);
+  MR_PROF_ADD(t_layout, mr_prof_layout_us);
 
   /* Start empty. Without this the band only ever grows, so the first frame —
    * where every node is unpainted and the whole screen is damaged — pins it
