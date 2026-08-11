@@ -104,8 +104,11 @@ def main():
         nvs_offset, nvs_size = nvs_geometry()
         subprocess.run([sys.executable, gen, "generate", creds_csv, image,
                         nvs_size], check=True, cwd=tmp)
-        subprocess.run(["esptool.py", "--port", port, "write_flash",
-                        nvs_offset, image], check=True)
+        # Through the IDF env's python, like nvs_partition_gen above —
+        # esptool v5 renamed the standalone entry point, and `-m esptool`
+        # survives both spellings.
+        subprocess.run([sys.executable, "-m", "esptool", "--port", port,
+                        "write_flash", nvs_offset, image], check=True)
 
     print(f"\nprovision: credentials for '{args.ssid}' written. "
           "Reset the board; it prints its push address once connected.")

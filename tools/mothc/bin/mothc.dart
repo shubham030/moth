@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,6 +5,7 @@ import 'dart:typed_data';
 import 'package:analyzer/source/line_info.dart';
 import 'package:mothc/src/compiler.dart';
 import 'package:mothc/src/errors.dart';
+import 'package:mothc/src/push_wire.dart';
 import 'package:mothc/src/serial.dart';
 
 const _usage = '''
@@ -87,55 +87,6 @@ Future<void> main(List<String> args) async {
   }
 }
 
-/// "MPSH", u32 length, u32 nonce, then the blob — vm/host/push_proto.h is
-/// the format's home. The nonce comes back in the receiver's verdict reply,
-/// which is what makes the reply unforgeable: no log line, no program's own
-/// print(), and no stale reply from an earlier push can contain a random
-/// number invented after all of them.
-Uint8List _frame(Uint8List blob, int nonce) {
-  final b = BytesBuilder()
-    ..add(ascii.encode('MPSH'))
-    ..add([
-      blob.length & 0xFF,
-      (blob.length >> 8) & 0xFF,
-      (blob.length >> 16) & 0xFF,
-      (blob.length >> 24) & 0xFF,
-      nonce & 0xFF,
-      (nonce >> 8) & 0xFF,
-      (nonce >> 16) & 0xFF,
-      (nonce >> 24) & 0xFF,
-    ])
-    ..add(blob);
-  return b.toBytes();
-}
-
-Uint8List _reply(String cc, int nonce) => Uint8List.fromList([
-      ...ascii.encode(cc),
-      nonce & 0xFF,
-      (nonce >> 8) & 0xFF,
-      (nonce >> 16) & 0xFF,
-      (nonce >> 24) & 0xFF,
-    ]);
-
-/// Scans [seen] for either verdict carrying [nonce]. Returns true for MPOK,
-/// false for MPRJ, null for neither yet.
-bool? _verdictIn(List<int> seen, int nonce) {
-  bool contains(Uint8List needle) {
-    outer:
-    for (var i = 0; i + needle.length <= seen.length; i++) {
-      for (var j = 0; j < needle.length; j++) {
-        if (seen[i + j] != needle[j]) continue outer;
-      }
-      return true;
-    }
-    return false;
-  }
-
-  if (contains(_reply('MPOK', nonce))) return true;
-  if (contains(_reply('MPRJ', nonce))) return false;
-  return null;
-}
-
 /// Pushes over a serial device — the board's USB console doubles as a push
 /// transport, so a cable is enough and no WiFi setup is needed.
 ///
@@ -161,8 +112,8 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
 
   final started = DateTime.now();
   final nonce = Random.secure().nextInt(0x100000000);
-  final frame = _frame(blob, nonce);
-  final seen = <int>[];
+  final frame = pushFrame(blob, nonce);
+  final scanner = VerdictScanner(nonce);
   for (var attempt = 1; attempt <= 3; attempt++) {
     port.writeAll(frame);
     final deadline = DateTime.now().add(const Duration(seconds: 4));
@@ -172,15 +123,16 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
         sleep(const Duration(milliseconds: 20));
         continue;
       }
-      seen.addAll(chunk);
-      final verdict = _verdictIn(seen, nonce);
+      final verdict = scanner.feed(chunk);
       if (verdict == true) {
         final ms = DateTime.now().difference(started).inMilliseconds;
         stdout.writeln('pushed over $device in ${ms}ms');
+        await stdout.flush(); // exit() does not drain stdout into a pipe
         exit(0);
       }
       if (verdict == false) {
         stderr.writeln('mothc: the board rejected the program — see its log');
+        await stderr.flush();
         exit(70);
       }
     }
@@ -190,6 +142,7 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
     }
   }
   stderr.writeln('mothc: no reply from $device after 3 attempts');
+  await stderr.flush();
   exit(70);
 }
 
@@ -198,21 +151,20 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
   final nonce = Random.secure().nextInt(0x100000000);
   final socket =
       await Socket.connect(host, port, timeout: const Duration(seconds: 5));
-  socket.add(_frame(blob, nonce));
+  socket.add(pushFrame(blob, nonce));
   await socket.flush();
 
   // The framed verdict arrives AFTER the host verified the blob — so
   // "pushed" here means "verified and about to run", not merely
   // "delivered". Anything else listening on the port fails this check.
-  final seen = <int>[];
+  final scanner = VerdictScanner(nonce);
   bool? verdict;
   try {
     await for (final chunk
         in socket.timeout(const Duration(seconds: 5), onTimeout: (sink) {
       sink.close();
     })) {
-      seen.addAll(chunk);
-      verdict = _verdictIn(seen, nonce);
+      verdict = scanner.feed(chunk);
       if (verdict != null) break;
     }
   } on SocketException {
@@ -222,14 +174,17 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
   if (verdict == null) {
     stderr.writeln('mothc: no verdict from $host:$port — is that a moth '
         'host? (the frame was sent, but nothing confirmed it)');
+    await stderr.flush();
     exit(70);
   }
   if (verdict == false) {
     stderr.writeln('mothc: the host rejected the program — see its log');
+    await stderr.flush();
     exit(70);
   }
   final ms = DateTime.now().difference(started).inMilliseconds;
   stdout.writeln('pushed to $host:$port in ${ms}ms');
+  await stdout.flush();
   exit(0);
 }
 

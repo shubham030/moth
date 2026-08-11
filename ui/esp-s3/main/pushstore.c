@@ -25,7 +25,16 @@ static const esp_partition_t *part(void) {
   static const esp_partition_t *p;
   if (!p) {
     p = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, 0x40, "mothb");
-    if (!p) ESP_LOGW(TAG, "no mothb partition — pushes will not persist");
+    if (!p) {
+      /* The usual cause is a checkout from before the custom partition
+       * table: .gitignore keeps the old generated sdkconfig, and it beats
+       * sdkconfig.defaults, so the build silently keeps the single-app
+       * layout. Loud, with the remedy, because "pushes don't survive
+       * reboot" is otherwise a mystery. */
+      ESP_LOGE(TAG, "no mothb partition — pushes will NOT persist. Stale "
+                    "sdkconfig? run: rm ui/esp-s3/sdkconfig && idf.py "
+                    "reconfigure, then flash");
+    }
   }
   return p;
 }

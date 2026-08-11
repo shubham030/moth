@@ -14,6 +14,7 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "nvs.h"
 
@@ -35,6 +36,7 @@ static void log_visible_networks(void) {
   esp_wifi_scan_get_ap_num(&n);
   if (n == 0) {
     ESP_LOGW(TAG, "scan: no 2.4GHz networks visible at all");
+    esp_wifi_clear_ap_list();
     return;
   }
   if (n > 12) n = 12;
@@ -42,7 +44,13 @@ static void log_visible_networks(void) {
    * and this runs on it. Single-threaded by construction — events arrive one
    * at a time. */
   static wifi_ap_record_t recs[12];
-  if (esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK) return;
+  if (esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK) {
+    /* Fetching is also what frees the driver's copy; on failure, free it
+     * explicitly or it is stranded for the life of the process. */
+    esp_wifi_clear_ap_list();
+    ESP_LOGW(TAG, "scan results unavailable");
+    return;
+  }
   ESP_LOGW(TAG, "scan: %d networks visible on 2.4GHz:", n);
   for (int i = 0; i < n; i++) {
     ESP_LOGW(TAG, "  '%s' (rssi %d, channel %d)", (const char *)recs[i].ssid,
@@ -79,13 +87,17 @@ static void on_net_event(void *arg, esp_event_base_t base, int32_t id,
       ESP_LOGW(TAG, "wifi disconnected (reason %d), retrying (attempt %d)",
                d->reason, s_misses);
     }
-    /* The AP was never seen: scan once and say what is visible, then go
-     * back to retrying. The scan's completion re-triggers the connect — but
-     * only if the scan actually started. Returning on a failed start would
-     * leave nobody to call connect again, and "retry forever" would quietly
-     * become "retried once". */
-    if (d->reason == WIFI_REASON_NO_AP_FOUND && s_misses == 1 &&
+    /* The AP was never seen: scan and say what is visible, then go back to
+     * retrying. Throttled by time, not by "first miss of the boot" — the
+     * first disconnect is usually an auth failure (reason 15 or 2), so a
+     * miss-count gate meant the diagnostic almost never ran. The scan's
+     * completion re-triggers the connect; a failed start falls through so
+     * "retry forever" stays true. */
+    static int64_t next_scan_us;
+    if (d->reason == WIFI_REASON_NO_AP_FOUND &&
+        esp_timer_get_time() >= next_scan_us &&
         esp_wifi_scan_start(NULL, false) == ESP_OK) {
+      next_scan_us = esp_timer_get_time() + 60 * 1000 * 1000;
       return;
     }
     esp_wifi_connect();

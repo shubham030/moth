@@ -133,10 +133,19 @@ static void membench(void) {
 
 /* ---- hot push: a new program arriving over WiFi ------------------------ */
 
-static moth_push *s_push;      /* listener; NULL until WiFi is up */
-static uint8_t *s_pending;     /* verified blob waiting to be swapped in */
+static moth_push *s_push;  /* listener; NULL until WiFi is up */
+static moth_vm *s_vm;      /* the running VM, so a push can halt it */
+
+/* A pushed blob waiting to be swapped in. `verified` may be false: when the
+ * verifier cannot run beside the live program (its heap is still allocated),
+ * verification is deferred to the swap path, where the old VM is gone and
+ * memory is as free as it gets. The transport and nonce are kept so the
+ * verdict can be sent when it finally exists. */
+static uint8_t *s_pending;
 static size_t s_pending_len;
-static moth_vm *s_vm;          /* the running VM, so a push can halt it */
+static bool s_pending_verified;
+static uint32_t s_pending_nonce;
+static int s_pending_src; /* push_src, declared below */
 
 static void register_host_natives(moth_vm *vm);
 
@@ -170,9 +179,10 @@ static blob_verdict verify_blob(const uint8_t *b, size_t len, char *why,
   return st == MOTH_ERR_OOM ? BLOB_UNVERIFIABLE : BLOB_BAD;
 }
 
-/* Takes a pushed blob if one has arrived and it survives verification.
- * Rejecting here rather than after the swap is the whole point: a bad blob
- * must not be able to take the running program down with it. */
+/* Takes a pushed blob if one has arrived and it survives verification —
+ * immediately when the verifier can run beside the live program, deferred to
+ * the swap path when it cannot. A bad blob still never takes the running
+ * program down: the deferred case verifies before anything replaces it. */
 typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
 
 /* Routes the framed verdict back over whichever transport delivered the
@@ -214,15 +224,28 @@ static bool accept_push(void) {
   }
   if (!blob) return false;
   char why[128] = {0};
-  if (verify_blob(blob, len, why, sizeof why) != BLOB_OK) {
+  const blob_verdict verdict = verify_blob(blob, len, why, sizeof why);
+  if (verdict == BLOB_BAD) {
+    /* Only a verdict about the BLOB earns a rejection. */
     ESP_LOGE(TAG, "push rejected: %s", why);
     respond_push(src, nonce, false);
     free(blob); /* the running program never noticed */
     return false;
   }
+  if (verdict == BLOB_UNVERIFIABLE) {
+    /* The verifier could not run beside the live program — which says
+     * nothing about the push. Rejecting here reported good programs as bad
+     * whenever memory was tight. Take the blob, stop the program, and
+     * verify in the swap path once its heap is gone; the verdict goes out
+     * then. */
+    ESP_LOGW(TAG, "deferring push verification (%s)", why);
+  }
   s_pending = blob;
   s_pending_len = len;
-  respond_push(src, nonce, true);
+  s_pending_verified = verdict == BLOB_OK;
+  s_pending_nonce = nonce;
+  s_pending_src = (int)src;
+  if (s_pending_verified) respond_push(src, nonce, true);
   ESP_LOGI(TAG, "push: %u bytes received, restarting", (unsigned)len);
   return true;
 }
@@ -349,11 +372,18 @@ typedef struct {
   size_t len;
   bool heap;       /* free(blob) when swapped out */
   bool from_store; /* executing from the mothb partition's mapped flash */
+  bool in_store;   /* the store holds this blob — booted from it, or a push
+                      take_pending just saved. The runtime-failure fallback
+                      gates on this: a just-pushed program is NOT
+                      from_store, but its copy is in flash and would come
+                      back on the next boot if only from_store were checked. */
 } program_src;
+
+static program_src embedded_program(void);
 
 static program_src embedded_program(void) {
   program_src p = {program_start, (size_t)(program_end - program_start),
-                   false, false};
+                   false, false, false};
   return p;
 }
 
@@ -379,8 +409,9 @@ static bool crash_reset(void) {
     case ESP_RST_INT_WDT:
     case ESP_RST_TASK_WDT:
     case ESP_RST_WDT:
-    case ESP_RST_BROWNOUT:
       return true;
+    /* Not brownout: that is a power fault, and three of them on a weak hub
+     * would erase a good program that never did anything wrong. */
     default:
       return false;
   }
@@ -430,7 +461,7 @@ static program_src choose_boot_blob(void) {
 
   ESP_LOGI(TAG, "booting the last pushed program (%u bytes)",
            (unsigned)stored_len);
-  program_src p = {stored, stored_len, false, true};
+  program_src p = {stored, stored_len, false, true, true};
   return p;
 }
 
@@ -485,11 +516,31 @@ static void storage_init(void) {
   }
 }
 
-/* Claims the pending push as the program to run. Called with the old VM
- * already torn down: the outgoing program may have been executing from the
- * very flash pushstore_save erases. */
-static program_src take_pending(void) {
-  if (!pushstore_save(s_pending, s_pending_len)) {
+/* Tries to claim the pending push as the program to run. Called with the
+ * old VM already torn down — both because the outgoing program may execute
+ * from the very flash pushstore_save erases, and because a deferred
+ * verification finally has the memory to run here. False means the push was
+ * rejected (verdict sent, blob freed) and the caller keeps its current
+ * program. */
+static bool take_pending(program_src *out) {
+  if (!s_pending_verified) {
+    char why[128] = {0};
+    const blob_verdict verdict =
+        verify_blob(s_pending, s_pending_len, why, sizeof why);
+    if (verdict != BLOB_OK) {
+      /* With the old program's heap gone, an OOM here is real scarcity, not
+       * contention — the honest verdict either way is rejection. */
+      ESP_LOGE(TAG, "push rejected: %s", why);
+      respond_push((push_src)s_pending_src, s_pending_nonce, false);
+      free(s_pending);
+      s_pending = NULL;
+      return false;
+    }
+    respond_push((push_src)s_pending_src, s_pending_nonce, true);
+  }
+
+  const bool saved = pushstore_save(s_pending, s_pending_len);
+  if (!saved) {
     ESP_LOGW(TAG, "push not persisted — it runs now, and a reboot returns "
                   "to the embedded program");
   }
@@ -498,9 +549,10 @@ static program_src take_pending(void) {
   /* Runs from the RAM copy until the next boot picks it up from flash —
    * but a crash while it runs is still the pushed program's crash. */
   pushstore_set_boot_source(true);
-  program_src p = {s_pending, s_pending_len, true, false};
+  program_src p = {s_pending, s_pending_len, true, false, saved};
   s_pending = NULL;
-  return p;
+  *out = p;
+  return true;
 }
 
 void app_main(void) {
@@ -534,8 +586,18 @@ void app_main(void) {
     moth_status st = run_program(&cur, &vm);
     if (!vm) {
       /* Returning here would leave a live-looking board that can never be
-       * pushed again — the one state hot push exists to prevent. Heap may
-       * recover (the failed program's allocations are gone); keep trying. */
+       * pushed again — the one state hot push exists to prevent. Keep
+       * polling the transports while waiting: a smaller pushed program may
+       * be exactly the thing that fits the memory this one cannot. */
+      accept_push();
+      if (s_pending != NULL) {
+        program_src next;
+        if (take_pending(&next)) {
+          if (cur.heap) free((void *)cur.blob);
+          cur = next;
+          continue; /* try the replacement immediately */
+        }
+      }
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
@@ -544,16 +606,20 @@ void app_main(void) {
       ESP_LOGI(TAG, "program stopped for a push");
     } else if (st != MOTH_OK) {
       ESP_LOGE(TAG, "program failed (%d): %s", st, moth_error(vm));
-      /* A stored program that fails at runtime is not worth keeping: fall
-       * back to the embedded one now rather than showing a dead screen and
-       * failing the same way on every boot. Teardown strictly before
-       * invalidate — the erase must not pull flash out from under a VM that
-       * still points into it. */
-      if (cur.from_store && s_pending == NULL) {
+      /* A failing program the STORE holds is not worth keeping — fall back
+       * to the embedded one now rather than showing a dead screen and
+       * failing the same way on every boot. Gated on in_store, not
+       * from_store: a just-pushed program runs from RAM but its copy is in
+       * flash, and checking only how it was loaded left the bad copy to
+       * come back on the next boot. Teardown strictly before invalidate —
+       * the erase must not pull flash out from under a VM that still points
+       * into it. */
+      if (cur.in_store && s_pending == NULL) {
         ESP_LOGW(TAG, "dropping the stored program");
         teardown_vm(vm);
         pushstore_invalidate();
         pushstore_clear_strikes();
+        if (cur.heap) free((void *)cur.blob);
         cur = embedded_program();
         pushstore_set_boot_source(false);
         continue;
@@ -564,7 +630,12 @@ void app_main(void) {
 
     wait_for_pending();
     teardown_vm(vm);
-    if (cur.heap) free((void *)cur.blob);
-    cur = take_pending();
+    program_src next;
+    if (take_pending(&next)) {
+      if (cur.heap) free((void *)cur.blob);
+      cur = next;
+    }
+    /* A rejected deferred push keeps `cur`: the loop re-runs the program
+     * that was already on screen. */
   }
 }
