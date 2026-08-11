@@ -17,12 +17,20 @@ extern "C" {
 int64_t mr_prof_now_us(void);
 extern int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us,
     mr_prof_arc_us, mr_prof_text_us;
+/* Pixels *visited* per primitive — every framebuffer slot a loop touched,
+ * whether or not it changed. Time varies by machine; these do not, which is
+ * what makes them assertable in a test. The transparent-wrapper bug that cost
+ * 95ms a frame was invisible in any image diff but is a 10x jump here. */
+extern int64_t mr_prof_clear_px, mr_prof_rect_px, mr_prof_arc_px,
+    mr_prof_text_px;
 }
 #define MR_PROF_START(t) const int64_t t = mr_prof_now_us()
 #define MR_PROF_ADD(t, acc) ((acc) += mr_prof_now_us() - (t))
+#define MR_PROF_PX(acc, n) ((acc) += (n))
 #else
 #define MR_PROF_START(t) (void)0
 #define MR_PROF_ADD(t, acc) (void)0
+#define MR_PROF_PX(acc, n) (void)0
 #endif
 
 namespace mr {

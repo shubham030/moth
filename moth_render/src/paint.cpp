@@ -16,6 +16,7 @@
 extern "C" {
 int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us, mr_prof_arc_us,
     mr_prof_text_us;
+int64_t mr_prof_clear_px, mr_prof_rect_px, mr_prof_arc_px, mr_prof_text_px;
 }
 #endif
 
@@ -77,6 +78,7 @@ static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
   int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
   if (x1 <= x0 || y1 <= y0) return;
+  MR_PROF_PX(mr_prof_rect_px, (int64_t)(x1 - x0) * (y1 - y0));
 
   /* An opaque fill has nothing to blend with, and backgrounds are the biggest
    * rectangles on screen — a full-screen panel is a fifth of a million pixels,
@@ -111,6 +113,8 @@ static void fill_round_rect(Scene &s, float fx, float fy, float fw, float fh,
   int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
   int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
+  if (x1 <= x0 || y1 <= y0) return;
+  MR_PROF_PX(mr_prof_rect_px, (int64_t)(x1 - x0) * (y1 - y0));
 
   const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
   const float hw = fw * 0.5f, hh = fh * 0.5f;
@@ -137,6 +141,8 @@ static void stroke_round_rect(Scene &s, float fx, float fy, float fw, float fh,
   int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
   int y1 = std::min(s.clip_y1, (int)std::ceil(fy + fh));
+  if (x1 <= x0 || y1 <= y0) return;
+  MR_PROF_PX(mr_prof_rect_px, (int64_t)(x1 - x0) * (y1 - y0));
 
   const float cx = fx + fw * 0.5f, cy = fy + fh * 0.5f;
   const float hw = fw * 0.5f, hh = fh * 0.5f;
@@ -275,6 +281,7 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
       const int sx0 = std::max(next_x, (int)std::floor(spans[si][0]) - 1);
       const int sx1 = std::min(x1, (int)std::ceil(spans[si][1]) + 1);
       next_x = sx1;
+      MR_PROF_PX(mr_prof_arc_px, sx1 > sx0 ? sx1 - sx0 : 0);
       for (int x = sx0; x < sx1; x++) {
         const float dx = (float)x + 0.5f - r.cx;
         const float d2 = dx * dx + dy2;
@@ -366,6 +373,7 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
         for (int row = r0; row < r1; row++) {
           const int y = (int)(gy + (float)row);
           if (y < s.clip_y0 || y >= s.clip_y1) continue;
+          MR_PROF_PX(mr_prof_text_px, c1 > c0 ? c1 - c0 : 0);
           uint32_t *dst = s.framebuffer.data() + (size_t)y * s.cfg.width;
           for (int col = c0; col < c1; col++) {
             const int x = (int)(gx + (float)col);
@@ -474,6 +482,8 @@ void paint_run(Scene &s) {
      * background. Only the damaged rows — clearing the whole frame was 868KB
      * of PSRAM writes for rows about to be left exactly as they were. */
     MR_PROF_START(t_clear);
+    MR_PROF_PX(mr_prof_clear_px,
+               (int64_t)(s.clip_y1 - s.clip_y0) * s.cfg.width);
     for (int y = s.clip_y0; y < s.clip_y1; y++) {
       uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
       std::fill(row, row + s.cfg.width, 0xFF000000u);

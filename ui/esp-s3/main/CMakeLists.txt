@@ -26,6 +26,11 @@ idf_component_register(
   EMBED_FILES program.mothb
 )
 
-# Per-primitive frame timing. Enable together with MOTH_FRAME_PROFILE in
-# app_main.c, which provides the clock this instrumentation calls.
-# target_compile_definitions(${COMPONENT_LIB} PRIVATE MR_PROFILE=1)
+# Frame profiling, off in a normal build. `make fps` (tools/fpsbench) passes
+# -DMOTH_FPSBENCH=1: MOTH_FRAME_PROFILE turns on the phase logging in
+# app_main.c, MR_PROFILE the per-primitive counters in moth_render, and
+# app_main provides the clock both need.
+if(MOTH_FPSBENCH)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    MOTH_FRAME_PROFILE=1 MR_PROFILE=1)
+endif()
