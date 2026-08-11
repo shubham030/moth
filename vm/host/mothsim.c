@@ -66,12 +66,14 @@ static void register_host_natives(moth_vm *vm);
 
 /* Loads a blob into a throwaway VM to find out whether it would run, without
  * touching the one that is running. The natives have to match what the real
- * VM offers, or a valid program would look unresolvable here. */
+ * VM offers by NAME only — moth_ui_register_natives, not the full register,
+ * which would reset the live program's event queue and eat any click queued
+ * while the probe ran. */
 static bool blob_is_loadable(const uint8_t *b, size_t len, char *err, size_t err_len) {
   moth_vm *probe = moth_new();
   if (!probe) return false;
   register_host_natives(probe);
-  moth_ui_register(probe);
+  moth_ui_register_natives(probe);
 
   moth_status st = moth_load(probe, b, len);
   if (st != MOTH_OK) snprintf(err, err_len, "%s", moth_error(probe));

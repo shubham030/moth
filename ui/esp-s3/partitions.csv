@@ -1,8 +1,8 @@
 # moth's flash layout (16MB part). nvs holds WiFi credentials
-# (tools/provision/provision.py) and the crash-loop strike counter; mothb
-# holds the last pushed program so it survives a reboot. Keep nvs at the
-# default 0x9000 — provision.py flashes that offset, and moving it would
-# orphan every provisioned board.
+# (tools/provision/provision.py — which reads this file for the offset, so
+# the geometry lives only here) and the crash-loop strike counter; mothb
+# holds the last pushed program so it survives a reboot. Moving nvs still
+# orphans already-provisioned boards until they re-provision.
 # Name,   Type, SubType, Offset,   Size
 nvs,      data, nvs,     0x9000,   0x6000,
 phy_init, data, phy,     0xf000,   0x1000,

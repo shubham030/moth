@@ -135,15 +135,18 @@ static uint8_t *s_pending;     /* verified blob waiting to be swapped in */
 static size_t s_pending_len;
 static moth_vm *s_vm;          /* the running VM, so a push can halt it */
 
-static void register_natives(moth_vm *vm);
+static void register_host_natives(moth_vm *vm);
 
 /* Loads a blob into a throwaway VM to find out whether it would run, without
  * touching the one that is running. The natives must match what the real VM
- * offers, or a valid program would look unresolvable here. */
+ * offers by NAME only — moth_ui_register_natives, not the full register,
+ * which would reset the live program's event queue and eat any tap queued
+ * while the probe ran. */
 static bool blob_is_loadable(const uint8_t *b, size_t len) {
   moth_vm *probe = moth_new();
   if (!probe) return false;
-  register_natives(probe);
+  register_host_natives(probe);
+  moth_ui_register_natives(probe);
   moth_status st = moth_load(probe, b, len);
   if (st != MOTH_OK) ESP_LOGE(TAG, "push rejected: %s", moth_error(probe));
   moth_free(probe);
@@ -287,15 +290,44 @@ static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
   return moth_int(esp_timer_get_time() / 1000);
 }
 
-static void register_natives(moth_vm *vm) {
+static void register_host_natives(moth_vm *vm) {
   moth_register(vm, "print", n_print, NULL);
   moth_register(vm, "delay", n_delay, NULL);
   moth_register(vm, "millis", n_millis, NULL);
-  moth_ui_register(vm);
+}
+
+/* What the VM is currently executing, and how to let go of it. Both flash
+ * sources — the embedded blob and the mapped store — are freed by doing
+ * nothing; only a fresh push lives on the heap until the next boot. */
+typedef struct {
+  const uint8_t *blob;
+  size_t len;
+  bool heap;       /* free(blob) when swapped out */
+  bool from_store; /* executing from the mothb partition's mapped flash */
+} program_src;
+
+static program_src embedded_program(void) {
+  program_src p = {program_start, (size_t)(program_end - program_start),
+                   false, false};
+  return p;
+}
+
+/* The one teardown ordering, used by every path that stops a program. The
+ * failure path and the swap path each having their own copy is how the
+ * failure path came to erase the store while the VM still held pointers
+ * into its mapped flash. */
+static void teardown_vm(moth_vm *vm) {
+  s_vm = NULL;
+  mr_reset(); /* the program's nodes go with it */
+  moth_free(vm);
 }
 
 /* Clears the strike counter once a stored program has stayed up long enough
- * to count as working. Armed only when booting from the store. */
+ * to count as working. The handle is kept: one-shot timers are not
+ * auto-deleted, and the swap path stops it — a program pushed at t=9s must
+ * not have the outgoing program's timer vouch for it at t=10s. */
+static esp_timer_handle_t s_stable_timer;
+
 static void on_stable(void *arg) {
   (void)arg;
   pushstore_clear_strikes();
@@ -303,41 +335,88 @@ static void on_stable(void *arg) {
 }
 
 /* Picks what to run at boot: the last pushed program if one is stored, still
- * verifies, and has not been striking out — the embedded program otherwise.
- * Booting from the store costs a strike up front; on_stable refunds it. */
-static const uint8_t *choose_boot_blob(size_t *len, bool *from_store) {
-  *from_store = false;
+ * verifies, and has not used up its boot attempts — the embedded program
+ * otherwise.
+ *
+ * The counter records completed failed boots: each store-boot adds a strike
+ * that ten stable seconds refund, so a blob that panics the chip gets
+ * exactly PUSHSTORE_MAX_STRIKES crashing boots and the boot after the last
+ * one runs the embedded program instead. */
+static program_src choose_boot_blob(void) {
   size_t stored_len = 0;
   const uint8_t *stored = pushstore_load(&stored_len);
-  if (!stored) goto embedded;
+  if (!stored) return embedded_program();
 
-  if (pushstore_strikes() >= PUSHSTORE_MAX_STRIKES) {
+  const int failed_boots = pushstore_strikes();
+  if (failed_boots >= PUSHSTORE_MAX_STRIKES) {
     ESP_LOGW(TAG, "stored program crashed %d boots running; falling back to "
-                  "the embedded one", PUSHSTORE_MAX_STRIKES);
+                  "the embedded one", failed_boots);
     pushstore_invalidate();
     pushstore_clear_strikes();
-    goto embedded;
+    return embedded_program();
   }
   if (!blob_is_loadable(stored, stored_len)) {
     pushstore_invalidate();
-    goto embedded;
+    return embedded_program();
   }
 
-  pushstore_add_strike();
+  pushstore_add_strike(); /* provisional — on_stable refunds it */
   const esp_timer_create_args_t args = {.callback = on_stable, .name = "stable"};
-  esp_timer_handle_t t;
-  if (esp_timer_create(&args, &t) == ESP_OK) {
-    esp_timer_start_once(t, 10 * 1000 * 1000); /* 10s of uptime = working */
+  if (s_stable_timer || esp_timer_create(&args, &s_stable_timer) == ESP_OK) {
+    esp_timer_start_once(s_stable_timer, 10 * 1000 * 1000);
   }
-  *len = stored_len;
-  *from_store = true;
   ESP_LOGI(TAG, "booting the last pushed program (%u bytes)",
            (unsigned)stored_len);
-  return stored;
+  program_src p = {stored, stored_len, false, true};
+  return p;
+}
 
-embedded:
-  *len = (size_t)(program_end - program_start);
-  return program_start;
+/* Creates a VM for `p` and runs it to completion, halt, or failure. */
+static moth_status run_program(const program_src *p, moth_vm **vm_out) {
+  moth_vm *vm = moth_new();
+  *vm_out = vm;
+  if (!vm) {
+    ESP_LOGE(TAG, "out of memory");
+    return MOTH_ERR_OOM;
+  }
+  register_host_natives(vm);
+  moth_ui_register(vm);
+  moth_ui_set_frame_hook(on_frame, NULL);
+  s_vm = vm;
+
+  moth_status st = moth_load(vm, p->blob, p->len);
+  if (st != MOTH_OK) {
+    ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
+    return st;
+  }
+  ESP_LOGI(TAG, "running Dart UI");
+  return moth_run(vm);
+}
+
+/* Blocks until a verified push is waiting. The panel keeps its last frame:
+ * a push aimed at a finished program should still take, exactly as mothsim
+ * behaves on the desktop. */
+static void wait_for_pending(void) {
+  while (s_pending == NULL) {
+    accept_push();
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+/* Claims the pending push as the program to run. Called with the old VM
+ * already torn down: the outgoing program may have been executing from the
+ * very flash pushstore_save erases. */
+static program_src take_pending(void) {
+  if (s_stable_timer) esp_timer_stop(s_stable_timer);
+  if (!pushstore_save(s_pending, s_pending_len)) {
+    ESP_LOGW(TAG, "push not persisted — it runs now but a reboot loses it");
+  }
+  pushstore_clear_strikes(); /* a new program starts with a clean record */
+
+  /* Runs from the RAM copy until the next boot picks it up from flash. */
+  program_src p = {s_pending, s_pending_len, true, false};
+  s_pending = NULL;
+  return p;
 }
 
 void app_main(void) {
@@ -355,85 +434,44 @@ void app_main(void) {
   }
 
   /* WiFi comes up in the background; the UI never waits for it. This also
-   * initializes NVS, which the pushstore strike counter needs. */
+   * initializes NVS, which the pushstore strike counter needs. Neither
+   * transport failing may stop the UI. */
   hotpush_net_start();
-
-  /* The USB cable is a push transport too — no provisioning required. */
   serialpush_start();
 
-  bool from_store = false;
-  size_t current_len = 0;
-  const uint8_t *current = choose_boot_blob(&current_len, &from_store);
-  bool current_is_heap = false; /* embedded and stored blobs live in flash */
-
+  program_src cur = choose_boot_blob();
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
-           (unsigned)current_len, PANEL_W, PANEL_H);
+           (unsigned)cur.len, PANEL_W, PANEL_H);
 
   for (;;) {
-    moth_vm *vm = moth_new();
-    if (!vm) {
-      ESP_LOGE(TAG, "out of memory");
-      return;
-    }
-    register_natives(vm);
-    moth_ui_set_frame_hook(on_frame, NULL);
-    s_vm = vm;
+    moth_vm *vm = NULL;
+    moth_status st = run_program(&cur, &vm);
+    if (!vm) return;
 
-    moth_status st = moth_load(vm, current, current_len);
-    if (st == MOTH_OK) {
-      ESP_LOGI(TAG, "running Dart UI");
-      st = moth_run(vm);
-    }
     if (st == MOTH_HALTED) {
       ESP_LOGI(TAG, "program stopped for a push");
     } else if (st != MOTH_OK) {
       ESP_LOGE(TAG, "program failed (%d): %s", st, moth_error(vm));
       /* A stored program that fails at runtime is not worth keeping: fall
        * back to the embedded one now rather than showing a dead screen and
-       * failing the same way on every boot. */
-      if (from_store && s_pending == NULL) {
+       * failing the same way on every boot. Teardown strictly before
+       * invalidate — the erase must not pull flash out from under a VM that
+       * still points into it. */
+      if (cur.from_store && s_pending == NULL) {
         ESP_LOGW(TAG, "dropping the stored program");
+        teardown_vm(vm);
         pushstore_invalidate();
         pushstore_clear_strikes();
-        s_vm = NULL;
-        mr_reset();
-        moth_free(vm);
-        current = program_start;
-        current_len = (size_t)(program_end - program_start);
-        current_is_heap = false;
-        from_store = false;
+        cur = embedded_program();
         continue;
       }
     } else {
       ESP_LOGI(TAG, "program finished: ok");
     }
 
-    /* The program ended on its own. Keep the panel showing its last frame
-     * and keep listening — a push aimed at a finished program should still
-     * take, exactly as mothsim does on the desktop. */
-    while (s_pending == NULL) {
-      accept_push();
-      vTaskDelay(pdMS_TO_TICKS(50));
-    }
-
-    /* Swap in the pushed program. The old program's nodes go with it —
-     * otherwise the new UI draws on top of a tree it does not own. The old
-     * VM is torn down before the store is written: the outgoing program may
-     * be running from the very flash the save erases. */
-    s_vm = NULL;
-    mr_reset();
-    moth_free(vm);
-    if (current_is_heap) free((void *)current);
-
-    if (!pushstore_save(s_pending, s_pending_len)) {
-      ESP_LOGW(TAG, "push not persisted — it runs now but a reboot loses it");
-    }
-    pushstore_clear_strikes(); /* a new program starts with a clean record */
-
-    current = s_pending;
-    current_len = s_pending_len;
-    current_is_heap = true; /* runs from the RAM copy until the next boot */
-    from_store = false;
-    s_pending = NULL;
+    wait_for_pending();
+    teardown_vm(vm);
+    if (cur.heap) free((void *)cur.blob);
+    cur = take_pending();
   }
 }

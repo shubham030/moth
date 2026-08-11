@@ -32,17 +32,21 @@ static const esp_partition_t *part(void) {
 
 bool pushstore_save(const uint8_t *blob, size_t len) {
   const esp_partition_t *p = part();
-  if (!p || len == 0 || len + sizeof(store_header) > p->size) return false;
+  if (!p || len == 0 || len > p->size - sizeof(store_header)) return false;
 
   /* Erase must cover header + blob, rounded up to the 4KB sector. */
   const size_t total = sizeof(store_header) + len;
   const size_t sectors = (total + 4095) & ~(size_t)4095;
   if (esp_partition_erase_range(p, 0, sectors) != ESP_OK) return false;
 
+  /* Blob first, header last. The header's magic is what makes the store
+   * valid, so a power cut mid-save must leave it unwritten — a torn save
+   * that wrote the magic but not the length would read back as a "valid"
+   * blob of erased-flash garbage. */
   store_header h = {STORE_MAGIC, (uint32_t)len,
                     esp_rom_crc32_le(0, blob, len), 0};
-  if (esp_partition_write(p, 0, &h, sizeof h) != ESP_OK) return false;
   if (esp_partition_write(p, sizeof h, blob, len) != ESP_OK) return false;
+  if (esp_partition_write(p, 0, &h, sizeof h) != ESP_OK) return false;
   ESP_LOGI(TAG, "stored %u bytes; survives reboot", (unsigned)len);
   return true;
 }
@@ -53,8 +57,13 @@ const uint8_t *pushstore_load(size_t *len_out) {
 
   store_header h;
   if (esp_partition_read(p, 0, &h, sizeof h) != ESP_OK) return NULL;
+  /* Bound by subtraction: h.len is attacker-and-erased-flash-controlled, and
+   * `h.len + sizeof h` wraps for 0xFFFFFFFF — which is exactly what a torn
+   * header reads as. A wrapped bound once passed this check and the CRC then
+   * read 4GB off a 15-byte mapping; the crash sat before add_strike, so the
+   * crash-loop guard never engaged and the board looped until reflashed. */
   if (h.magic != STORE_MAGIC || h.len == 0 ||
-      h.len + sizeof h > p->size) return NULL;
+      h.len > p->size - sizeof h) return NULL;
 
   const void *mapped = NULL;
   esp_partition_mmap_handle_t handle; /* never unmapped: the VM runs from it */
