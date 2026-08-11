@@ -104,13 +104,17 @@ void _push(String target, Uint8List blob) {
     ]);
 
   final started = DateTime.now();
-  Socket.connect(host, port, timeout: const Duration(seconds: 5)).then((socket) async {
+  Socket.connect(host, port, timeout: const Duration(seconds: 5))
+      .then((socket) async {
     socket.add(header.toBytes());
     socket.add(blob);
     await socket.flush();
     await socket.close();
     final ms = DateTime.now().difference(started).inMilliseconds;
     stdout.writeln('pushed to $host:$port in ${ms}ms');
+    // Without this the process hangs: the socket's receive side is still
+    // open and keeps the event loop alive even after close().
+    exit(0);
   }).catchError((Object e) {
     stderr.writeln('mothc: could not push to $host:$port — $e');
     exit(70);
