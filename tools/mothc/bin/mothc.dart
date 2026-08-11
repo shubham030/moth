@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:analyzer/source/line_info.dart';
 import 'package:mothc/src/compiler.dart';
 import 'package:mothc/src/errors.dart';
+import 'package:mothc/src/serial.dart';
 
 const _usage = '''
 mothc — compile Dart to moth bytecode
@@ -17,7 +18,7 @@ usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
           (/dev/cu.usbmodemXXXX) pushes over the USB cable — no WiFi needed.
 ''';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   if (args.isEmpty || args.contains('-h') || args.contains('--help')) {
     stdout.write(_usage);
     exit(args.isEmpty ? 64 : 0);
@@ -35,7 +36,7 @@ void main(List<String> args) {
       output = args[++i];
     } else if (args[i] == '--push') {
       if (i + 1 >= args.length) {
-        stderr.writeln('mothc: --push needs HOST:PORT');
+        stderr.writeln('mothc: --push needs HOST:PORT or a serial device');
         exit(64);
       }
       push = args[++i];
@@ -66,7 +67,11 @@ void main(List<String> args) {
     File(outPath).writeAsBytesSync(result.blob);
     stdout.writeln('wrote $outPath (${result.blob.length} bytes)');
     if (push != null) {
-      _push(push, result.blob);
+      // Awaited, so a throw anywhere in the push surfaces as a message and
+      // an exit code — unawaited, a missing stty or a yanked cable printed
+      // a raw async stack trace, and main could not tell pushed from
+      // still-in-flight.
+      await _push(push, result.blob);
     }
   } on CompileError catch (e) {
     // The error may have come from an imported file, so report it against
@@ -94,102 +99,123 @@ Uint8List _frame(Uint8List blob) {
   return b.toBytes();
 }
 
+/// The board's own log lines, read back as the protocol's ack. Matching on
+/// a bare 'push: ' once matched the *tags* of the very subsystems this
+/// feature added — "serialpush: cable push ready" and "hotpush: wifi
+/// disconnected" both contain it — so a board that was still booting acked
+/// a push it never received. The full "moth: " tag prefix is unambiguous.
+const _ackMark = 'moth: push: ';
+const _rejectMark = 'moth: push rejected';
+
 /// Pushes over a serial device — the board's USB console doubles as a push
 /// transport, so a cable is enough and no WiFi setup is needed.
 ///
-/// Serial has no connection semantics, so the ack is the board's own log
-/// line ("push: N bytes received") read back off the same port. No ack can
-/// mean the board was resetting when the port opened — some adapters toggle
-/// the reset lines on open — so the frame is sent again after a boot's worth
-/// of waiting before giving up.
+/// The port handling lives in SerialPort (lib/src/serial.dart): nonblocking
+/// open and raw mode via FFI, because Dart's File API can block forever on a
+/// modem-class device and stty had the same flaw one subprocess removed.
+///
+/// No ack can mean the board was resetting when the port opened — some
+/// adapters toggle the reset lines on open — so the frame is sent again
+/// after a boot's worth of waiting before giving up.
 Future<void> _pushSerial(String device, Uint8List blob) async {
-  // Raw mode, or the tty layer cooks the blob's bytes (\n becomes \r\n and
-  // the program is corrupt). min 0 time 10 makes reads poll at 1s instead of
-  // blocking forever on a silent board.
-  final sttyFlag = Platform.isMacOS ? '-f' : '-F';
-  final stty = await Process.run(
-      'stty', [sttyFlag, device, 'raw', '-echo', 'min', '0', 'time', '10']);
-  if (stty.exitCode != 0) {
-    stderr.writeln('mothc: stty failed on $device — ${stty.stderr}');
+  final SerialPort port;
+  try {
+    port = SerialPort.open(device);
+  } on SerialException catch (e) {
+    stderr.writeln('mothc: $e');
     exit(74);
   }
 
-  // Two handles: a tty cannot seek, and every read/write FileMode that
-  // Dart offers on one handle wants to (append seeks to the end at open).
-  // writeOnly and read do not seek, so the frame goes out one and the
-  // board's ack comes back the other.
-  final RandomAccessFile tx;
-  final RandomAccessFile rx;
-  try {
-    tx = await File(device).open(mode: FileMode.writeOnly);
-    rx = await File(device).open(mode: FileMode.read);
-  } on FileSystemException catch (e) {
-    stderr.writeln('mothc: cannot open $device — ${e.osError?.message}. '
-        'Is a serial monitor holding it?');
-    exit(74);
+  // Drain whatever the board printed before we arrived: a stale ack from a
+  // previous push must not be readable as this push's ack. 300ms of silence
+  // means the backlog is done.
+  var quiet = DateTime.now();
+  while (DateTime.now().difference(quiet).inMilliseconds < 300) {
+    if (port.readAvailable().isNotEmpty) quiet = DateTime.now();
+    sleep(const Duration(milliseconds: 20));
   }
 
   final started = DateTime.now();
   final frame = _frame(blob);
   for (var attempt = 1; attempt <= 3; attempt++) {
-    await tx.writeFrom(frame);
+    port.writeAll(frame);
     final deadline = DateTime.now().add(const Duration(seconds: 4));
     var seen = '';
     while (DateTime.now().isBefore(deadline)) {
-      final chunk = await rx.read(256);
-      if (chunk.isEmpty) continue; // 1s poll timeout from stty time 10
+      final chunk = port.readAvailable();
+      if (chunk.isEmpty) {
+        sleep(const Duration(milliseconds: 20));
+        continue;
+      }
       seen += String.fromCharCodes(chunk);
-      if (seen.contains('push: ')) {
+      if (seen.contains(_ackMark)) {
         final ms = DateTime.now().difference(started).inMilliseconds;
         stdout.writeln('pushed over $device in ${ms}ms');
         exit(0);
       }
-      if (seen.contains('push rejected')) {
+      if (seen.contains(_rejectMark)) {
         stderr.writeln('mothc: the board rejected the program — see its log');
         exit(70);
       }
     }
     if (attempt < 3) {
       stderr.writeln('mothc: no reply — the board may be booting; retrying');
-      await Future<void>.delayed(const Duration(seconds: 5));
+      sleep(const Duration(seconds: 5));
     }
   }
   stderr.writeln('mothc: no reply from $device after 3 attempts');
   exit(70);
 }
 
+Future<void> _pushTcp(String host, int port, Uint8List blob) async {
+  final started = DateTime.now();
+  final socket =
+      await Socket.connect(host, port, timeout: const Duration(seconds: 5));
+  socket.add(_frame(blob));
+  await socket.flush();
+  await socket.close();
+  final ms = DateTime.now().difference(started).inMilliseconds;
+  stdout.writeln('pushed to $host:$port in ${ms}ms');
+  // Without this the process hangs: the socket's receive side is still
+  // open and keeps the event loop alive even after close().
+  exit(0);
+}
+
 /// Sends a compiled program to a listening host: "MPSH", a little-endian
 /// length, then the bytes. The host verifies before running it.
-void _push(String target, Uint8List blob) {
-  final colon = target.lastIndexOf(':');
-  if (colon < 0) {
-    if (target.startsWith('/') || target.startsWith('COM')) {
-      _pushSerial(target, blob);
-      return;
+///
+/// The transport is picked by what the target *is*, not by how it is
+/// spelled: a serial device exists on the filesystem, and testing the
+/// spelling routed `COM3:` (a common Windows form, colon included) to the
+/// network branch and rejected `./ttyUSB0` outright.
+Future<void> _push(String target, Uint8List blob) async {
+  if (Platform.isWindows && target.toUpperCase().startsWith('COM')) {
+    stderr.writeln('mothc: serial push is not implemented on Windows yet — '
+        'push over WiFi (HOST:PORT) instead');
+    exit(74);
+  }
+  if (File(target).existsSync()) {
+    try {
+      await _pushSerial(target, blob);
+    } on SerialException catch (e) {
+      stderr.writeln('mothc: serial push failed — $e');
+      exit(74);
     }
-    stderr.writeln('mothc: --push wants HOST:PORT or a serial device path');
+    return;
+  }
+
+  final colon = target.lastIndexOf(':');
+  final port = colon < 0 ? null : int.tryParse(target.substring(colon + 1));
+  if (port == null) {
+    stderr.writeln('mothc: --push wants HOST:PORT or an existing serial '
+        'device path (got "$target")');
     exit(64);
   }
   final host = target.substring(0, colon);
-  final port = int.tryParse(target.substring(colon + 1));
-  if (port == null) {
-    stderr.writeln('mothc: --push wants HOST:PORT');
-    exit(64);
-  }
-
-  final started = DateTime.now();
-  Socket.connect(host, port, timeout: const Duration(seconds: 5))
-      .then((socket) async {
-    socket.add(_frame(blob));
-    await socket.flush();
-    await socket.close();
-    final ms = DateTime.now().difference(started).inMilliseconds;
-    stdout.writeln('pushed to $host:$port in ${ms}ms');
-    // Without this the process hangs: the socket's receive side is still
-    // open and keeps the event loop alive even after close().
-    exit(0);
-  }).catchError((Object e) {
-    stderr.writeln('mothc: could not push to $host:$port — $e');
+  try {
+    await _pushTcp(host, port, blob);
+  } on SocketException catch (e) {
+    stderr.writeln('mothc: could not push to $host:$port — ${e.message}');
     exit(70);
-  });
+  }
 }

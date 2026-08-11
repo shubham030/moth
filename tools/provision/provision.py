@@ -24,9 +24,27 @@ import subprocess
 import sys
 import tempfile
 
-# The default ESP-IDF partition table, which ui/esp-s3 uses.
-NVS_OFFSET = "0x9000"
-NVS_SIZE = "0x6000"
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PARTITIONS = os.path.join(REPO, "ui", "esp-s3", "partitions.csv")
+
+
+def nvs_geometry():
+    """Reads the nvs partition's offset and size from the same file the
+    firmware's build uses. Hardcoding them here once meant a resized table
+    would have this script writing an image over whatever partition moved
+    into the old offset — silently."""
+    try:
+        with open(PARTITIONS) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = [p.strip() for p in line.split(",")]
+                if parts and parts[0] == "nvs":
+                    return parts[3], parts[4]
+    except OSError as e:
+        sys.exit(f"provision: cannot read {PARTITIONS} — {e}")
+    sys.exit(f"provision: no nvs row in {PARTITIONS}")
 
 
 def find_port(explicit):
@@ -77,10 +95,11 @@ def main():
             w.writerow(["wifi_ssid", "data", "string", args.ssid])
             w.writerow(["wifi_pass", "data", "string", password])
 
+        nvs_offset, nvs_size = nvs_geometry()
         subprocess.run([sys.executable, gen, "generate", creds_csv, image,
-                        NVS_SIZE], check=True, cwd=tmp)
+                        nvs_size], check=True, cwd=tmp)
         subprocess.run(["esptool.py", "--port", port, "write_flash",
-                        NVS_OFFSET, image], check=True)
+                        nvs_offset, image], check=True)
 
     print(f"\nprovision: credentials for '{args.ssid}' written. "
           "Reset the board; it prints its push address once connected.")

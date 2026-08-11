@@ -121,9 +121,22 @@ void serialpush_start(void) {
     ESP_LOGW(TAG, "USB serial driver install failed — cable push disabled");
     return;
   }
+  /* Boot-time heap pressure is real here — the panel's DMA buffers and the
+   * framebuffer are already allocated — and the task would write to a NULL
+   * queue on its first completed frame, mid-push. */
   s_frames = xQueueCreate(1, sizeof(frame));
+  if (!s_frames) {
+    ESP_LOGW(TAG, "out of memory for the push queue — cable push disabled");
+    return;
+  }
   /* Modest stack: the task moves bytes and calls malloc, nothing deep. */
-  xTaskCreate(serialpush_task, "serialpush", 3072, NULL, 5, NULL);
+  if (xTaskCreate(serialpush_task, "serialpush", 3072, NULL, 5, NULL) !=
+      pdPASS) {
+    ESP_LOGW(TAG, "out of memory for the push task — cable push disabled");
+    vQueueDelete(s_frames);
+    s_frames = NULL;
+    return;
+  }
   ESP_LOGI(TAG, "cable push ready: mothc app.dart --push <this serial port>");
 }
 
