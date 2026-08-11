@@ -40,7 +40,7 @@ def nvs_geometry():
                 if not line or line.startswith("#"):
                     continue
                 parts = [p.strip() for p in line.split(",")]
-                if parts and parts[0] == "nvs":
+                if len(parts) >= 5 and parts[0] == "nvs":
                     return parts[3], parts[4]
     except OSError as e:
         sys.exit(f"provision: cannot read {PARTITIONS} — {e}")
@@ -50,10 +50,12 @@ def nvs_geometry():
 def find_port(explicit):
     if explicit:
         return explicit
-    candidates = glob.glob("/dev/cu.usbmodem*")
+    candidates = (glob.glob("/dev/cu.usbmodem*")      # macOS
+                  + glob.glob("/dev/ttyUSB*")          # Linux, USB-serial
+                  + glob.glob("/dev/ttyACM*"))         # Linux, CDC
     if len(candidates) == 1:
         return candidates[0]
-    sys.exit(f"provision: pass --port; found {candidates or 'no usbmodem ports'}")
+    sys.exit(f"provision: pass --port; found {candidates or 'no serial ports'}")
 
 
 def idf_tool(relpath):

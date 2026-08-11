@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "nvs_flash.h"
+
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -137,20 +139,30 @@ static moth_vm *s_vm;          /* the running VM, so a push can halt it */
 
 static void register_host_natives(moth_vm *vm);
 
+/* What verification concluded — and "could not run the verifier" is not
+ * "the blob is bad". Treating them alike let a transient out-of-memory at
+ * boot erase a perfectly good stored program. */
+typedef enum { BLOB_OK, BLOB_BAD, BLOB_UNVERIFIABLE } blob_verdict;
+
 /* Loads a blob into a throwaway VM to find out whether it would run, without
  * touching the one that is running. The natives must match what the real VM
  * offers by NAME only — moth_ui_register_natives, not the full register,
  * which would reset the live program's event queue and eat any tap queued
- * while the probe ran. */
-static bool blob_is_loadable(const uint8_t *b, size_t len) {
+ * while the probe ran. Logging is the caller's: a bad boot-time store and a
+ * bad live push are different messages (and mothc greps for the latter). */
+static blob_verdict verify_blob(const uint8_t *b, size_t len, char *why,
+                                size_t why_len) {
   moth_vm *probe = moth_new();
-  if (!probe) return false;
+  if (!probe) {
+    snprintf(why, why_len, "out of memory for the verifier");
+    return BLOB_UNVERIFIABLE;
+  }
   register_host_natives(probe);
   moth_ui_register_natives(probe);
   moth_status st = moth_load(probe, b, len);
-  if (st != MOTH_OK) ESP_LOGE(TAG, "push rejected: %s", moth_error(probe));
+  if (st != MOTH_OK) snprintf(why, why_len, "%s", moth_error(probe));
   moth_free(probe);
-  return st == MOTH_OK;
+  return st == MOTH_OK ? BLOB_OK : BLOB_BAD;
 }
 
 /* Takes a pushed blob if one has arrived and it survives verification.
@@ -172,7 +184,12 @@ static bool accept_push(void) {
   uint8_t *blob = s_push ? moth_push_poll(s_push, &len) : NULL;
   if (!blob) blob = serialpush_poll(&len);
   if (!blob) return false;
-  if (!blob_is_loadable(blob, len)) {
+  char why[128] = {0};
+  if (verify_blob(blob, len, why, sizeof why) != BLOB_OK) {
+    /* "push rejected" is the exact prefix mothc greps for as its failure
+     * ack — keep it whether the blob was bad or the verifier could not run;
+     * either way this push did not take and the sender should know. */
+    ESP_LOGE(TAG, "push rejected: %s", why);
     free(blob); /* the running program never noticed */
     return false;
   }
@@ -355,8 +372,20 @@ static program_src choose_boot_blob(void) {
     pushstore_clear_strikes();
     return embedded_program();
   }
-  if (!blob_is_loadable(stored, stored_len)) {
+  char why[128] = {0};
+  const blob_verdict verdict = verify_blob(stored, stored_len, why, sizeof why);
+  if (verdict == BLOB_BAD) {
+    ESP_LOGW(TAG, "stored program rejected: %s — dropping it", why);
     pushstore_invalidate();
+    return embedded_program();
+  }
+  if (verdict == BLOB_UNVERIFIABLE) {
+    /* Could not check — which says nothing about the blob. Run the embedded
+     * program this boot and leave the store intact for the next; erasing on
+     * a transient out-of-memory would destroy a good program forever. */
+    ESP_LOGW(TAG, "cannot verify the stored program (%s) — "
+                  "running the embedded one this boot", why);
+    pushstore_release();
     return embedded_program();
   }
 
@@ -403,13 +432,33 @@ static void wait_for_pending(void) {
   }
 }
 
+/* Shared persistent storage, initialized before anything that needs it.
+ * This was owned by the WiFi bring-up once — which meant a wifi failure took
+ * the crash-loop strike counter down with it, in the code whose whole job is
+ * surviving failures. Failure here degrades (no credentials, no strikes)
+ * but never stops the UI. */
+static void storage_init(void) {
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    /* A layout upgrade wipes NVS — and the wifi credentials with it. Say
+     * so, or the board silently stops connecting after an IDF bump. */
+    ESP_LOGW(TAG, "NVS layout changed; erasing — wifi needs re-provisioning");
+    if (nvs_flash_erase() == ESP_OK) err = nvs_flash_init();
+  }
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "NVS unavailable (%s) — no wifi credentials and no "
+                  "crash-loop strike counter this boot", esp_err_to_name(err));
+  }
+}
+
 /* Claims the pending push as the program to run. Called with the old VM
  * already torn down: the outgoing program may have been executing from the
  * very flash pushstore_save erases. */
 static program_src take_pending(void) {
   if (s_stable_timer) esp_timer_stop(s_stable_timer);
   if (!pushstore_save(s_pending, s_pending_len)) {
-    ESP_LOGW(TAG, "push not persisted — it runs now but a reboot loses it");
+    ESP_LOGW(TAG, "push not persisted — it runs now, and a reboot returns "
+                  "to the embedded program");
   }
   pushstore_clear_strikes(); /* a new program starts with a clean record */
 
@@ -433,9 +482,10 @@ void app_main(void) {
     return;
   }
 
-  /* WiFi comes up in the background; the UI never waits for it. This also
-   * initializes NVS, which the pushstore strike counter needs. Neither
-   * transport failing may stop the UI. */
+  /* NVS first — the strike counter and the wifi credentials both live
+   * there. Then the transports, in the background; the UI never waits for
+   * them and neither one failing may stop it. */
+  storage_init();
   hotpush_net_start();
   serialpush_start();
 

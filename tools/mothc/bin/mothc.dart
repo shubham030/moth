@@ -128,9 +128,12 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
 
   // Drain whatever the board printed before we arrived: a stale ack from a
   // previous push must not be readable as this push's ack. 300ms of silence
-  // means the backlog is done.
+  // means the backlog is done — and a hard cap means a board that logs
+  // every frame (profiling on, say) delays the push instead of hanging it.
+  final drainDeadline = DateTime.now().add(const Duration(seconds: 3));
   var quiet = DateTime.now();
-  while (DateTime.now().difference(quiet).inMilliseconds < 300) {
+  while (DateTime.now().difference(quiet).inMilliseconds < 300 &&
+      DateTime.now().isBefore(drainDeadline)) {
     if (port.readAvailable().isNotEmpty) quiet = DateTime.now();
     sleep(const Duration(milliseconds: 20));
   }
@@ -173,11 +176,32 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
       await Socket.connect(host, port, timeout: const Duration(seconds: 5));
   socket.add(_frame(blob));
   await socket.flush();
-  await socket.close();
+
+  // The receiver writes "ok" once the whole frame has landed. Without
+  // reading it, connecting to anything listening on the port — an HTTP
+  // server, a stale mothsim — printed "pushed" while the bytes went nowhere.
+  var acked = false;
+  try {
+    await for (final chunk
+        in socket.timeout(const Duration(seconds: 3), onTimeout: (sink) {
+      sink.close();
+    })) {
+      if (String.fromCharCodes(chunk).contains('ok')) {
+        acked = true;
+        break;
+      }
+    }
+  } on SocketException {
+    // A peer that closes without acking is handled below.
+  }
+  socket.destroy();
+  if (!acked) {
+    stderr.writeln('mothc: no receipt from $host:$port — is that a moth '
+        'host? (the frame was sent, but nothing confirmed it)');
+    exit(70);
+  }
   final ms = DateTime.now().difference(started).inMilliseconds;
   stdout.writeln('pushed to $host:$port in ${ms}ms');
-  // Without this the process hangs: the socket's receive side is still
-  // open and keeps the event loop alive even after close().
   exit(0);
 }
 
@@ -189,7 +213,10 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
 /// spelling routed `COM3:` (a common Windows form, colon included) to the
 /// network branch and rejected `./ttyUSB0` outright.
 Future<void> _push(String target, Uint8List blob) async {
-  if (Platform.isWindows && target.toUpperCase().startsWith('COM')) {
+  // A COM port is exactly COM + digits — a bare prefix test swallowed
+  // hostnames like com.example.local:7621.
+  if (Platform.isWindows &&
+      RegExp(r'^COM\d+$', caseSensitive: false).hasMatch(target)) {
     stderr.writeln('mothc: serial push is not implemented on Windows yet — '
         'push over WiFi (HOST:PORT) instead');
     exit(74);

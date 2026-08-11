@@ -20,15 +20,23 @@
 #define PUSHSTORE_MAX_STRIKES 3
 
 /* Writes a blob to the partition. False when there is no partition or the
- * blob does not fit. Must not be called while a pushstore_load'd blob is
- * still running — the erase pulls the flash out from under it. */
+ * save could not complete — and in the latter case the store is left
+ * INVALID, never stale: a reboot after a failed save runs the embedded
+ * program, not a program the user already replaced. Must not be called
+ * while a pushstore_load'd blob is still running — the erase pulls the
+ * flash out from under it. */
 bool pushstore_save(const uint8_t *blob, size_t len);
 
-/* Maps the stored blob and returns it, or NULL when nothing valid is stored.
- * The mapping stays alive for the life of the process. */
+/* Maps the stored blob and returns it, or NULL when nothing valid is
+ * stored. The mapping lives until pushstore_release or _invalidate. */
 const uint8_t *pushstore_load(size_t *len_out);
 
-/* Marks the stored blob invalid, so the next boot runs the embedded one. */
+/* Unmaps a loaded blob without touching the stored bytes. For the path that
+ * decides not to run the store this boot but wants it intact for the next. */
+void pushstore_release(void);
+
+/* Marks the stored blob invalid (releasing any mapping first), so the next
+ * boot runs the embedded one. */
 void pushstore_invalidate(void);
 
 int pushstore_strikes(void);
