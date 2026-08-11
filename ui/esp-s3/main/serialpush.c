@@ -18,10 +18,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
+#include "push_proto.h"
 
 static const char *TAG = "serialpush";
 
-#define MAX_BLOB (1u << 20) /* matches the TCP receiver's limit */
 #define STALL_US (5 * 1000 * 1000)
 
 typedef struct {
@@ -31,10 +31,12 @@ typedef struct {
 
 static QueueHandle_t s_frames; /* depth 1: at most one push in flight */
 
-/* Scanner state, owned by the task. */
+/* Scanner state, owned by the task. The wire format constants and header
+ * decode come from push_proto.h, shared with the TCP receiver; only the
+ * resync behavior is this transport's own (see the note there). */
 static struct {
-  size_t header_got; /* 0..8: magic + little-endian length */
-  uint8_t header[8];
+  size_t header_got; /* 0..MPSH_HEADER_LEN: magic + little-endian length */
+  uint8_t header[MPSH_HEADER_LEN];
   uint8_t *blob;
   size_t blob_len, blob_got;
   int64_t last_progress_us;
@@ -47,22 +49,21 @@ static void reset_scanner(void) {
 
 /* Feeds one byte; returns a completed frame's blob or NULL. */
 static uint8_t *feed(uint8_t b, size_t *len_out) {
-  static const char magic[4] = {'M', 'P', 'S', 'H'};
+  static const char magic[MPSH_MAGIC_LEN + 1] = MPSH_MAGIC;
   s.last_progress_us = esp_timer_get_time();
 
-  if (s.header_got < 8) {
-    if (s.header_got < 4 && b != (uint8_t)magic[s.header_got]) {
+  if (s.header_got < MPSH_HEADER_LEN) {
+    if (s.header_got < MPSH_MAGIC_LEN && b != (uint8_t)magic[s.header_got]) {
       /* Not the frame we hoped for. This byte could still start a new one. */
       s.header_got = 0;
       if (b == (uint8_t)magic[0]) s.header[s.header_got++] = b;
       return NULL;
     }
     s.header[s.header_got++] = b;
-    if (s.header_got < 8) return NULL;
+    if (s.header_got < MPSH_HEADER_LEN) return NULL;
 
-    s.blob_len = (size_t)s.header[4] | ((size_t)s.header[5] << 8) |
-                 ((size_t)s.header[6] << 16) | ((size_t)s.header[7] << 24);
-    if (s.blob_len == 0 || s.blob_len > MAX_BLOB) {
+    s.blob_len = mpsh_header_len(s.header);
+    if (!mpsh_len_ok(s.blob_len)) {
       reset_scanner();
       return NULL;
     }

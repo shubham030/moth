@@ -16,12 +16,16 @@
 #include "esp_netif.h"
 #include "esp_wifi.h"
 #include "nvs.h"
-#include "nvs_flash.h"
 
 static const char *TAG = "hotpush";
 
 static volatile bool s_connected;
 static char s_ip[16] = "0.0.0.0";
+
+/* Consecutive connect failures since the last success. File-scope so GOT_IP
+ * can reset it — a function-static made the visible-networks scan a
+ * once-per-boot event instead of once-per-outage. */
+static int s_misses;
 
 /* What the radio can actually see, for when the configured SSID cannot be
  * found: the usual cause is a 5GHz-only network — this chip is 2.4GHz — or a
@@ -71,17 +75,16 @@ static void on_net_event(void *arg, esp_event_base_t base, int32_t id,
      * of range, or a 5GHz-only network — this chip is 2.4GHz), 15 means the
      * handshake timed out, which is almost always a wrong password. */
     const wifi_event_sta_disconnected_t *d = data;
-    static int misses;
-    if (++misses % 10 == 1) {
+    if (++s_misses % 10 == 1) {
       ESP_LOGW(TAG, "wifi disconnected (reason %d), retrying (attempt %d)",
-               d->reason, misses);
+               d->reason, s_misses);
     }
     /* The AP was never seen: scan once and say what is visible, then go
      * back to retrying. The scan's completion re-triggers the connect — but
      * only if the scan actually started. Returning on a failed start would
      * leave nobody to call connect again, and "retry forever" would quietly
      * become "retried once". */
-    if (d->reason == WIFI_REASON_NO_AP_FOUND && misses == 1 &&
+    if (d->reason == WIFI_REASON_NO_AP_FOUND && s_misses == 1 &&
         esp_wifi_scan_start(NULL, false) == ESP_OK) {
       return;
     }
@@ -93,6 +96,7 @@ static void on_net_event(void *arg, esp_event_base_t base, int32_t id,
     const ip_event_got_ip_t *e = data;
     snprintf(s_ip, sizeof s_ip, IPSTR, IP2STR(&e->ip_info.ip));
     s_connected = true;
+    s_misses = 0; /* the next outage is a new outage, scan included */
     ESP_LOGI(TAG, "connected — push with: mothc app.dart --push %s:%d", s_ip,
              HOTPUSH_PORT);
   }
@@ -113,16 +117,9 @@ static bool net_step(esp_err_t err, const char *what) {
 }
 
 void hotpush_net_start(void) {
-  esp_err_t err = nvs_flash_init();
-  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-    /* A layout upgrade wipes NVS — and the credentials with it. Say so, or
-     * the board silently stops connecting after an IDF bump. */
-    ESP_LOGW(TAG, "NVS layout changed; erasing — wifi needs re-provisioning");
-    if (!net_step(nvs_flash_erase(), "nvs erase")) return;
-    err = nvs_flash_init();
-  }
-  if (!net_step(err, "nvs init")) return;
-
+  /* NVS is initialized by app_main before this runs — the crash-loop strike
+   * counter lives there too, and it must not depend on an optional feature's
+   * bring-up having gotten far enough to initialize shared storage. */
   char ssid[33] = {0}, pass[65] = {0};
   if (!load_creds(ssid, sizeof ssid, pass, sizeof pass)) {
     ESP_LOGW(TAG, "no wifi credentials in NVS — hot push disabled. "
@@ -131,7 +128,7 @@ void hotpush_net_start(void) {
   }
 
   if (!net_step(esp_netif_init(), "netif init")) return;
-  err = esp_event_loop_create_default();
+  esp_err_t err = esp_event_loop_create_default();
   /* INVALID_STATE means a loop already exists, which is fine — some other
    * subsystem got there first. */
   if (err != ESP_ERR_INVALID_STATE && !net_step(err, "event loop")) return;

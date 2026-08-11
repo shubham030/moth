@@ -30,14 +30,38 @@ static const esp_partition_t *part(void) {
   return p;
 }
 
+/* The live mapping, if any — kept so invalidate can unmap it. Three paths
+ * invalidate after loading, and each used to leak the mapping of a region
+ * that had just been erased underneath it. */
+static esp_partition_mmap_handle_t s_map;
+static bool s_mapped;
+
+void pushstore_release(void) {
+  if (s_mapped) {
+    esp_partition_munmap(s_map);
+    s_mapped = false;
+  }
+}
+
 bool pushstore_save(const uint8_t *blob, size_t len) {
   const esp_partition_t *p = part();
-  if (!p || len == 0 || len > p->size - sizeof(store_header)) return false;
+  if (!p) return false;
+  /* Any failure from here on must leave the store INVALID, not stale: the
+   * caller is switching to the new program now, and "save failed" with the
+   * old blob still valid means a reboot resurrects a program the user
+   * already replaced — worse than losing the push. */
+  if (len == 0 || len > p->size - sizeof(store_header)) {
+    pushstore_invalidate();
+    return false;
+  }
 
   /* Erase must cover header + blob, rounded up to the 4KB sector. */
   const size_t total = sizeof(store_header) + len;
   const size_t sectors = (total + 4095) & ~(size_t)4095;
-  if (esp_partition_erase_range(p, 0, sectors) != ESP_OK) return false;
+  if (esp_partition_erase_range(p, 0, sectors) != ESP_OK) {
+    pushstore_invalidate(); /* the old header may have survived */
+    return false;
+  }
 
   /* Blob first, header last. The header's magic is what makes the store
    * valid, so a power cut mid-save must leave it unwritten — a torn save
@@ -66,15 +90,15 @@ const uint8_t *pushstore_load(size_t *len_out) {
       h.len > p->size - sizeof h) return NULL;
 
   const void *mapped = NULL;
-  esp_partition_mmap_handle_t handle; /* never unmapped: the VM runs from it */
   if (esp_partition_mmap(p, 0, sizeof h + h.len, ESP_PARTITION_MMAP_DATA,
-                         &mapped, &handle) != ESP_OK) {
+                         &mapped, &s_map) != ESP_OK) {
     return NULL;
   }
+  s_mapped = true;
   const uint8_t *blob = (const uint8_t *)mapped + sizeof h;
   if (esp_rom_crc32_le(0, blob, h.len) != h.crc) {
     ESP_LOGW(TAG, "stored blob fails its CRC — ignoring it");
-    esp_partition_munmap(handle);
+    pushstore_release();
     return NULL;
   }
   *len_out = h.len;
@@ -82,6 +106,10 @@ const uint8_t *pushstore_load(size_t *len_out) {
 }
 
 void pushstore_invalidate(void) {
+  /* Unmap before erasing — nothing may still be executing from the mapping
+   * (the callers tear the VM down first), and erasing under a live handle
+   * leaks it. */
+  pushstore_release();
   const esp_partition_t *p = part();
   /* One erased sector kills the header; the stale blob bytes behind it are
    * unreachable without it. */

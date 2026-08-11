@@ -48,14 +48,24 @@ int get _errno => _errnoLoc().value;
 final int _oNonblock = Platform.isMacOS ? 0x0004 : 0x800;
 final int _oNoctty = Platform.isMacOS ? 0x20000 : 0x100;
 
-// c_cflag bits: keep receiving, ignore modem control lines.
+// c_cflag bits: keep receiving, ignore modem control lines, and force
+// 8-bit-no-parity. Inheriting the character size and parity from whatever
+// the last program left — 7E1, say — silently corrupts every byte of the
+// frame, so they are normalized rather than trusted.
 final int _cread = Platform.isMacOS ? 0x800 : 0x80;
 final int _clocal = Platform.isMacOS ? 0x8000 : 0x800;
+final int _csize = Platform.isMacOS ? 0x300 : 0x30;
+final int _cs8 = Platform.isMacOS ? 0x300 : 0x30;
+final int _parenb = Platform.isMacOS ? 0x1000 : 0x100;
+final int _cstopb = Platform.isMacOS ? 0x400 : 0x40;
+final int _crtscts = Platform.isMacOS ? 0x30000 : 0x80000000;
 
 const _eagain = 35; // macOS; Linux EAGAIN is 11
 const _eagainLinux = 11;
+const _eintr = 4; // both
 
-bool _wouldBlock(int err) => err == (Platform.isMacOS ? _eagain : _eagainLinux);
+bool _wouldBlock(int err) =>
+    err == (Platform.isMacOS ? _eagain : _eagainLinux) || err == _eintr;
 
 class SerialException implements Exception {
   final String message;
@@ -80,9 +90,11 @@ class SerialPort {
       ..setAll(0, bytes)
       ..[bytes.length] = 0;
     final fd = _open(cPath, 2 /* O_RDWR */ | _oNonblock | _oNoctty);
+    // errno before free() — free is a libc call and may clobber it.
+    final openErr = fd < 0 ? _errno : 0;
     _free(cPath);
     if (fd < 0) {
-      throw SerialException('cannot open $path (errno $_errno) — '
+      throw SerialException('cannot open $path (errno $openErr) — '
           'is a serial monitor holding it?');
     }
     _makeRaw(fd, path);
@@ -100,17 +112,19 @@ class SerialPort {
       _close(fd);
       throw SerialException('$path is not a terminal (tcgetattr failed)');
     }
+    final clear = _csize | _parenb | _cstopb | _crtscts;
+    final set = _cs8 | _cread | _clocal;
     if (Platform.isMacOS) {
       // 64-bit fields: iflag@0 oflag@8 cflag@16 lflag@24.
       t.cast<Uint64>()[0] = 0;
       t.cast<Uint64>()[1] = 0;
-      t.cast<Uint64>()[2] = (t.cast<Uint64>()[2] | _cread | _clocal);
+      t.cast<Uint64>()[2] = (t.cast<Uint64>()[2] & ~clear) | set;
       t.cast<Uint64>()[3] = 0;
     } else {
       // 32-bit fields: iflag@0 oflag@4 cflag@8 lflag@12.
       t.cast<Uint32>()[0] = 0;
       t.cast<Uint32>()[1] = 0;
-      t.cast<Uint32>()[2] = (t.cast<Uint32>()[2] | _cread | _clocal);
+      t.cast<Uint32>()[2] = (t.cast<Uint32>()[2] & ~clear) | set;
       t.cast<Uint32>()[3] = 0;
     }
     final rc = _tcsetattr(fd, 0 /* TCSANOW */, t);

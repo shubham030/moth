@@ -1,4 +1,5 @@
 #include "push.h"
+#include "push_proto.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -11,9 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define PUSH_MAGIC "MPSH"
-#define HEADER_LEN 8
-#define MAX_BLOB (1u << 20) /* a megabyte is far beyond any real program */
+#define HEADER_LEN MPSH_HEADER_LEN
 
 /* A peer that disappears without a FIN or an RST — a board losing power, a
  * laptop closing its lid mid-push — leaves a socket that never reports an
@@ -112,10 +111,12 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
     p->last_progress_ms = now_ms();
     if (p->header_got < HEADER_LEN) return NULL;
 
-    if (memcmp(p->header, PUSH_MAGIC, 4) != 0) { drop_client(p); return NULL; }
-    p->blob_len = (size_t)p->header[4] | ((size_t)p->header[5] << 8) |
-                  ((size_t)p->header[6] << 16) | ((size_t)p->header[7] << 24);
-    if (p->blob_len == 0 || p->blob_len > MAX_BLOB) { drop_client(p); return NULL; }
+    if (memcmp(p->header, MPSH_MAGIC, MPSH_MAGIC_LEN) != 0) {
+      drop_client(p);
+      return NULL;
+    }
+    p->blob_len = mpsh_header_len(p->header);
+    if (!mpsh_len_ok(p->blob_len)) { drop_client(p); return NULL; }
     p->blob = malloc(p->blob_len);
     if (!p->blob) { drop_client(p); return NULL; }
     p->blob_got = 0;
@@ -137,6 +138,11 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
   uint8_t *complete = p->blob;
   *len_out = p->blob_len;
   p->blob = NULL; /* ownership passes to the caller */
+  /* Best-effort receipt, so the sender can tell "delivered intact" from
+   * "connected to something that swallowed the bytes". Verification happens
+   * after this returns; a rejected blob is still reported on the host's log,
+   * which the serial transport reads back as its ack. */
+  (void)write(p->client, "ok\n", 3);
   drop_client(p);
   return complete;
 }
