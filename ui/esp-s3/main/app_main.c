@@ -10,6 +10,7 @@
 #include "moth_vm.h"
 #include "panel.h"
 #include "push.h"
+#include "pushstore.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -289,6 +290,52 @@ static void register_natives(moth_vm *vm) {
   moth_ui_register(vm);
 }
 
+/* Clears the strike counter once a stored program has stayed up long enough
+ * to count as working. Armed only when booting from the store. */
+static void on_stable(void *arg) {
+  (void)arg;
+  pushstore_clear_strikes();
+  ESP_LOGI(TAG, "stored program stable; strike counter cleared");
+}
+
+/* Picks what to run at boot: the last pushed program if one is stored, still
+ * verifies, and has not been striking out — the embedded program otherwise.
+ * Booting from the store costs a strike up front; on_stable refunds it. */
+static const uint8_t *choose_boot_blob(size_t *len, bool *from_store) {
+  *from_store = false;
+  size_t stored_len = 0;
+  const uint8_t *stored = pushstore_load(&stored_len);
+  if (!stored) goto embedded;
+
+  if (pushstore_strikes() >= PUSHSTORE_MAX_STRIKES) {
+    ESP_LOGW(TAG, "stored program crashed %d boots running; falling back to "
+                  "the embedded one", PUSHSTORE_MAX_STRIKES);
+    pushstore_invalidate();
+    pushstore_clear_strikes();
+    goto embedded;
+  }
+  if (!blob_is_loadable(stored, stored_len)) {
+    pushstore_invalidate();
+    goto embedded;
+  }
+
+  pushstore_add_strike();
+  const esp_timer_create_args_t args = {.callback = on_stable, .name = "stable"};
+  esp_timer_handle_t t;
+  if (esp_timer_create(&args, &t) == ESP_OK) {
+    esp_timer_start_once(t, 10 * 1000 * 1000); /* 10s of uptime = working */
+  }
+  *len = stored_len;
+  *from_store = true;
+  ESP_LOGI(TAG, "booting the last pushed program (%u bytes)",
+           (unsigned)stored_len);
+  return stored;
+
+embedded:
+  *len = (size_t)(program_end - program_start);
+  return program_start;
+}
+
 void app_main(void) {
   ESP_ERROR_CHECK(panel_init());
 
@@ -303,12 +350,14 @@ void app_main(void) {
     return;
   }
 
-  /* WiFi comes up in the background; the UI never waits for it. */
+  /* WiFi comes up in the background; the UI never waits for it. This also
+   * initializes NVS, which the pushstore strike counter needs. */
   hotpush_net_start();
 
-  const uint8_t *current = program_start;
-  size_t current_len = (size_t)(program_end - program_start);
-  bool current_is_heap = false; /* the embedded blob lives in flash */
+  bool from_store = false;
+  size_t current_len = 0;
+  const uint8_t *current = choose_boot_blob(&current_len, &from_store);
+  bool current_is_heap = false; /* embedded and stored blobs live in flash */
 
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
            (unsigned)current_len, PANEL_W, PANEL_H);
@@ -324,19 +373,32 @@ void app_main(void) {
     s_vm = vm;
 
     moth_status st = moth_load(vm, current, current_len);
-    if (st != MOTH_OK) {
-      /* Verification happens before a push is accepted, so this is either
-       * the embedded program (a build problem) or a heap fault. */
-      ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
-    } else {
+    if (st == MOTH_OK) {
       ESP_LOGI(TAG, "running Dart UI");
       st = moth_run(vm);
-      if (st == MOTH_HALTED) {
-        ESP_LOGI(TAG, "program stopped for a push");
-      } else {
-        ESP_LOGI(TAG, "program finished (%d): %s", st,
-                 st == MOTH_OK ? "ok" : moth_error(vm));
+    }
+    if (st == MOTH_HALTED) {
+      ESP_LOGI(TAG, "program stopped for a push");
+    } else if (st != MOTH_OK) {
+      ESP_LOGE(TAG, "program failed (%d): %s", st, moth_error(vm));
+      /* A stored program that fails at runtime is not worth keeping: fall
+       * back to the embedded one now rather than showing a dead screen and
+       * failing the same way on every boot. */
+      if (from_store && s_pending == NULL) {
+        ESP_LOGW(TAG, "dropping the stored program");
+        pushstore_invalidate();
+        pushstore_clear_strikes();
+        s_vm = NULL;
+        mr_reset();
+        moth_free(vm);
+        current = program_start;
+        current_len = (size_t)(program_end - program_start);
+        current_is_heap = false;
+        from_store = false;
+        continue;
       }
+    } else {
+      ESP_LOGI(TAG, "program finished: ok");
     }
 
     /* The program ended on its own. Keep the panel showing its last frame
@@ -348,14 +410,23 @@ void app_main(void) {
     }
 
     /* Swap in the pushed program. The old program's nodes go with it —
-     * otherwise the new UI draws on top of a tree it does not own. */
+     * otherwise the new UI draws on top of a tree it does not own. The old
+     * VM is torn down before the store is written: the outgoing program may
+     * be running from the very flash the save erases. */
     s_vm = NULL;
     mr_reset();
     moth_free(vm);
     if (current_is_heap) free((void *)current);
+
+    if (!pushstore_save(s_pending, s_pending_len)) {
+      ESP_LOGW(TAG, "push not persisted — it runs now but a reboot loses it");
+    }
+    pushstore_clear_strikes(); /* a new program starts with a clean record */
+
     current = s_pending;
     current_len = s_pending_len;
-    current_is_heap = true;
+    current_is_heap = true; /* runs from the RAM copy until the next boot */
+    from_store = false;
     s_pending = NULL;
   }
 }
