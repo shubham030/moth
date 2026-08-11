@@ -5,6 +5,27 @@ Docs live in `docs/` (BACKEND.md is the render contract, BYTECODE.md the VM
 contract, ROADMAP.md the state of the world). ADRs bind: never read or write
 LVGL XML (license, ADR-002).
 
+## Docs are part of every feature
+
+The Docusaurus site (`website/`) serves `docs/` directly, and the landing
+page (`website/src/pages/index.tsx`) carries an "Honest status" section whose
+whole value is being true. Both go stale silently — hot push shipped while
+the landing page still listed it under "Not yet", and language.md carried a
+"(ternary: not yet)" against a feature that compiled fine.
+
+Before a feature branch is done, sweep and update:
+- `docs/ROADMAP.md` — the milestone checkboxes and measured numbers
+- `docs/getting-started.md` — if the feature changes what a new user does
+- `docs/how-it-works.md`, `docs/language.md`, `docs/hardware.md` — any page
+  that describes the touched area
+- `website/src/pages/index.tsx` — the status columns and feature cards
+
+The sweep that finds the stale claims: grep docs/ and website/src for
+`not yet|planned|next step|coming|will be|not built` and check every hit
+against what is now true. A claim of "not yet" for something that works is
+as wrong as the reverse — this project's credibility rests on the honest
+status actually being honest.
+
 ## Performance: what to track and how
 
 The performance record lives in `docs/ROADMAP.md` (R3/R3a/R3b tables). The

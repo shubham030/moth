@@ -26,7 +26,7 @@ int step = 2;
 than identity. Garbage collected.
 
 ```dart
-print('temp $tempC C, fan ${running ? "on" : "off"}');   // (ternary: not yet)
+print('temp $tempC C, fan ${running ? "on" : "off"}');
 print('device at address $addr');
 ```
 

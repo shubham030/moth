@@ -130,7 +130,36 @@ If flashing fails with "serial data stream stopped", drop the baud rate
 (`-b 115200`). If the port is missing, check `ls /dev/cu.*` — it changes when
 the board re-enumerates.
 
-## 5. Scan a real I2C bus
+## 5. The fast loop: push, don't reflash
+
+Flashing is for the first install. After that, the UI firmware
+(`ui/esp-s3`) accepts a new program over the same USB cable in well under a
+second — your app is bytecode, not a firmware image, so there is nothing to
+reflash:
+
+```console
+$ dart run tools/mothc/bin/mothc.dart examples/ui/counter.dart \
+    --push /dev/cu.usbmodem2101
+wrote examples/ui/counter.mothb (2209 bytes)
+pushed over /dev/cu.usbmodem2101 in 43ms
+```
+
+The display never blanks — the running program stops, the new one draws over
+it. The pushed program is verified before the running one is disturbed, it
+survives reboots, and a program that crashes the board three boots in a row
+falls back to the one baked into the firmware.
+
+To drop the cable entirely, give the board your WiFi once:
+
+```console
+$ python3 tools/provision/provision.py --ssid your-network
+```
+
+(the password is prompted, stored only on the board, and never compiled in).
+After a reset the board prints its address — then `--push 192.168.x.x:7621`
+works from anywhere on your network.
+
+## 6. Scan a real I2C bus
 
 `examples/i2c_scan.dart` walks every address and prints the ones that answer —
 a good first test that your wiring works:

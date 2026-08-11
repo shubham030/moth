@@ -113,7 +113,7 @@ const FEATURES = [
   {
     icon: '📦',
     title: 'Programs are 130 bytes',
-    body: 'Your app is bytecode, not a firmware image. That is what makes updating it over WiFi — instead of reflashing — a realistic next step.',
+    body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable or WiFi and it is on the screen in well under a second — no reflashing.',
   },
 ];
 
@@ -153,20 +153,22 @@ function Status() {
           <div className="statusCol">
             <h3>Working today</h3>
             <ul className="statusList">
-              <li className="tick">Functions, recursion, loops, arithmetic</li>
-              <li className="tick">Digital and analog I/O, PWM, tone</li>
-              <li className="tick">I2C and UART, verified on hardware</li>
-              <li className="tick">Desktop simulator and golden tests</li>
+              <li className="tick">Strings, lists, classes, closures, garbage collection</li>
+              <li className="tick">Flutter-named widgets and setState, 38fps on a round AMOLED</li>
+              <li className="tick">Hot push over the USB cable or WiFi — no reflashing</li>
+              <li className="tick">Digital and analog I/O, PWM, tone, I2C, UART</li>
+              <li className="tick">Desktop simulator, golden tests, paint-cost budgets</li>
               <li className="tick">ESP32-S3 and ESP32-P4</li>
             </ul>
           </div>
           <div className="statusCol">
             <h3>Not yet</h3>
             <ul className="statusList">
-              <li className="pending">Strings, lists, classes, garbage collection</li>
               <li className="pending">Interrupts and async</li>
-              <li className="pending">Widgets and setState</li>
-              <li className="pending">Push over WiFi instead of reflashing</li>
+              <li className="pending">Enums, local captures, method tear-offs</li>
+              <li className="pending">Images, sliders, switches</li>
+              <li className="pending">Scalable text and gradients</li>
+              <li className="pending">State-preserving hot reload (push restarts the program)</li>
             </ul>
           </div>
         </div>
