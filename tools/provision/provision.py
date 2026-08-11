@@ -104,10 +104,13 @@ def main():
         nvs_offset, nvs_size = nvs_geometry()
         subprocess.run([sys.executable, gen, "generate", creds_csv, image,
                         nvs_size], check=True, cwd=tmp)
-        # Through the IDF env's python, like nvs_partition_gen above —
-        # esptool v5 renamed the standalone entry point, and `-m esptool`
-        # survives both spellings.
-        subprocess.run([sys.executable, "-m", "esptool", "--port", port,
+        # Through the IDF virtualenv's python, where esptool is guaranteed
+        # importable — `sys.executable -m esptool` fails when this script is
+        # launched with a system python, and the bare `esptool.py` name was
+        # renamed in esptool v5. IDF's export script sets the env path.
+        idf_env = os.environ.get("IDF_PYTHON_ENV_PATH")
+        py = os.path.join(idf_env, "bin", "python") if idf_env else sys.executable
+        subprocess.run([py, "-m", "esptool", "--port", port,
                         "write_flash", nvs_offset, image], check=True)
 
     print(f"\nprovision: credentials for '{args.ssid}' written. "
