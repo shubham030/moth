@@ -9,6 +9,7 @@
  */
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -17,5 +18,10 @@ void serialpush_start(void);
 
 /* A completed frame if one has arrived, malloc'd and owned by the caller;
  * NULL otherwise. Non-blocking; call it from the frame hook alongside the
- * TCP poll. */
-uint8_t *serialpush_poll(size_t *len_out);
+ * TCP poll. Every non-NULL return owes a serialpush_respond with the
+ * frame's nonce once the blob has been verified. */
+uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out);
+
+/* Sends the framed verdict (push_proto.h) over the USB console via the
+ * driver's reliable TX path. */
+void serialpush_respond(uint32_t nonce, bool ok);

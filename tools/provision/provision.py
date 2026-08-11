@@ -41,6 +41,10 @@ def nvs_geometry():
                     continue
                 parts = [p.strip() for p in line.split(",")]
                 if len(parts) >= 5 and parts[0] == "nvs":
+                    if not parts[3] or not parts[4]:
+                        sys.exit("provision: the nvs row in partitions.csv "
+                                 "uses blank offset/size — fill them in "
+                                 "explicitly so this script cannot guess")
                     return parts[3], parts[4]
     except OSError as e:
         sys.exit(f"provision: cannot read {PARTITIONS} — {e}")

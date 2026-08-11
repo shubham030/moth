@@ -123,7 +123,10 @@ Dart program draws in a desktop window and on the board.
 - [x] Push over the USB cable: the USB-Serial-JTAG console doubles as a
       push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
       the out-of-box loop needs no WiFi at all — provisioning is the
-      upgrade, not the prerequisite. Measured 21-43ms a transfer.
+      upgrade, not the prerequisite. "pushed" now means the framed,
+      nonce-carrying verdict came back after verification — earlier
+      21-43ms figures timed a weaker receipt ack and need re-measuring
+      on hardware under the verdict protocol.
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM

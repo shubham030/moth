@@ -27,6 +27,7 @@ static const char *TAG = "serialpush";
 typedef struct {
   uint8_t *blob;
   size_t len;
+  uint32_t nonce; /* echoed in the verdict reply */
 } frame;
 
 static QueueHandle_t s_frames; /* depth 1: at most one push in flight */
@@ -39,6 +40,7 @@ static struct {
   uint8_t header[MPSH_HEADER_LEN];
   uint8_t *blob;
   size_t blob_len, blob_got;
+  uint32_t nonce;
   int64_t last_progress_us;
 } s;
 
@@ -63,6 +65,7 @@ static uint8_t *feed(uint8_t b, size_t *len_out) {
     if (s.header_got < MPSH_HEADER_LEN) return NULL;
 
     s.blob_len = mpsh_header_len(s.header);
+    s.nonce = mpsh_header_nonce(s.header);
     if (!mpsh_len_ok(s.blob_len)) {
       reset_scanner();
       return NULL;
@@ -103,9 +106,10 @@ static void serialpush_task(void *arg) {
     }
     for (int i = 0; i < n; i++) {
       size_t len = 0;
+      uint32_t nonce = s.nonce;
       uint8_t *blob = feed(chunk[i], &len);
       if (!blob) continue;
-      frame f = {blob, len};
+      frame f = {blob, len, nonce};
       if (xQueueSend(s_frames, &f, 0) != pdTRUE) {
         free(blob); /* one already waiting; the sender can retry */
       }
@@ -141,9 +145,23 @@ void serialpush_start(void) {
   ESP_LOGI(TAG, "cable push ready: mothc app.dart --push <this serial port>");
 }
 
-uint8_t *serialpush_poll(size_t *len_out) {
+uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out) {
   frame f;
   if (!s_frames || xQueueReceive(s_frames, &f, 0) != pdTRUE) return NULL;
   *len_out = f.len;
+  *nonce_out = f.nonce;
   return f.blob;
+}
+
+void serialpush_respond(uint32_t nonce, bool ok) {
+  if (!s_frames) return; /* transport never came up */
+  /* Through the driver's interrupt-driven TX, not the console's polling
+   * path: the console's secondary writer drops output under back-pressure,
+   * and a dropped verdict makes the sender re-push a program that already
+   * landed. A binary reply carrying the sender's own nonce also cannot be
+   * forged by log lines or a program's print() — which text acks were,
+   * three separate times. */
+  uint8_t reply[MPSH_REPLY_LEN];
+  mpsh_make_reply(reply, ok, nonce);
+  usb_serial_jtag_write_bytes(reply, sizeof reply, pdMS_TO_TICKS(250));
 }
