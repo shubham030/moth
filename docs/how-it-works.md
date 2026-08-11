@@ -41,8 +41,9 @@ A small self-contained file: a constant pool, a table of the built-ins the
 program needs, and the bytecode for each function. Blink is 130 bytes.
 
 Because a program is *data*, not a firmware image, updating it later means
-sending a few hundred bytes rather than reflashing — that is what makes the
-planned WiFi hot-push practical. The full format is in
+sending a few hundred bytes rather than reflashing — that is what makes hot
+push practical: `mothc app.dart --push` replaces the running program over the
+USB cable or WiFi in well under a second. The full format is in
 [BYTECODE](/docs/bytecode).
 
 ## 3. The VM (`vm/`)

@@ -7,9 +7,10 @@ slug: /backend
 # The backend contract
 
 A **backend** turns moth's semantic node tree into pixels and input events.
-Two implementations are planned: `lvgl` (backend #1, wraps LVGL 9) and
-`moth_render` (track two, native ThorVG-based renderer). Dart code — the widget
-framework and apps — sees only this contract, never a backend's internals.
+Two implementations: `moth_render` (the native renderer — built, and what the
+ESP32-S3 firmware ships today) and `lvgl` (planned, wraps LVGL 9; see
+ADR-008). Dart code — the widget framework and apps — sees only this
+contract, never a backend's internals.
 
 The C header `moth_render/include/moth_render.h` is the normative API; this
 document is the normative *semantics*. A backend is correct iff it passes the
