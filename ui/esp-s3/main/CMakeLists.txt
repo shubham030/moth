@@ -25,3 +25,12 @@ idf_component_register(
   PRIV_REQUIRES esp_lcd esp_driver_gpio esp_driver_spi esp_driver_i2c esp_timer
   EMBED_FILES program.mothb
 )
+
+# Frame profiling, off in a normal build. `make fps` (tools/fpsbench) passes
+# -DMOTH_FPSBENCH=1: MOTH_FRAME_PROFILE turns on the phase logging in
+# app_main.c, MR_PROFILE the per-primitive counters in moth_render, and
+# app_main provides the clock both need.
+if(MOTH_FPSBENCH)
+  target_compile_definitions(${COMPONENT_LIB} PRIVATE
+    MOTH_FRAME_PROFILE=1 MR_PROFILE=1)
+endif()

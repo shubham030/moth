@@ -1184,19 +1184,107 @@ class FunctionCompiler {
     );
   }
 
+  /// Emits one value per declared parameter, in slot order.
+  ///
+  /// Named arguments are matched to parameters here rather than at run time,
+  /// which is what makes them free: the VM still sees a plain positional
+  /// call. Anything the caller left out contributes its default, or null.
+  /// Only works where the callee is known statically — a constructor or a
+  /// top-level function — which is exactly where a widget tree needs it.
+  void _emitArgsInSlotOrder(String what, List<FormalParameter> params,
+      List<Expression> args, int offset) {
+    final positional = <Expression>[];
+    final named = <String, Expression>{};
+    for (final a in args) {
+      if (a is NamedExpression) {
+        final label = a.name.label.name;
+        if (named.containsKey(label)) {
+          throw CompileError("'$label' is given twice", a.offset);
+        }
+        named[label] = a.expression;
+      } else {
+        if (named.isNotEmpty) {
+          throw CompileError(
+            'positional arguments must come before named ones',
+            a.offset,
+          );
+        }
+        positional.add(a);
+      }
+    }
+
+    var next = 0;
+    for (final p in params) {
+      final inner = p is DefaultFormalParameter ? p.parameter : p;
+      final name = inner is SimpleFormalParameter
+          ? inner.name?.lexeme
+          : (inner is FieldFormalParameter ? inner.name.lexeme : null);
+
+      if (p.isNamed) {
+        final supplied = name == null ? null : named.remove(name);
+        if (supplied != null) {
+          _expression(supplied);
+        } else if (p is DefaultFormalParameter && p.defaultValue != null) {
+          _expression(p.defaultValue!);
+        } else {
+          _emit(Op.pushNull);
+        }
+        continue;
+      }
+
+      if (next < positional.length) {
+        _expression(positional[next++]);
+      } else if (p is DefaultFormalParameter && p.defaultValue != null) {
+        _expression(p.defaultValue!);
+      } else {
+        throw CompileError(
+          "'$what' is missing a value for '${name ?? "a parameter"}'",
+          offset,
+        );
+      }
+    }
+
+    if (named.isNotEmpty) {
+      throw CompileError(
+        "'$what' has no parameter named '${named.keys.first}'",
+        offset,
+      );
+    }
+    if (next < positional.length) {
+      throw CompileError(
+        "'$what' takes ${params.length} arguments, but got more",
+        offset,
+      );
+    }
+  }
+
+  /// True when the callee declares any named or defaulted parameter, or the
+  /// caller passes a named argument — the cases slot matching exists for.
+  static bool _needsSlotMatching(
+          List<FormalParameter> params, List<Expression> args) =>
+      params.any((p) => p.isNamed || p is DefaultFormalParameter) ||
+      args.any((a) => a is NamedExpression);
+
   void _call(MethodInvocation call) {
     _rejectNullAware(call.operator, call.offset);
     final name = call.methodName.name;
     final args = call.argumentList.arguments;
 
-    for (final a in args) {
-      if (a is NamedExpression) {
-        throw CompileError('named arguments are not supported yet', a.offset);
-      }
-    }
-
-    // Method call: the receiver and its class are only known at run time.
+    // Method call: the receiver and its class are only known at run time, so
+    // there is no declaration to match names against. Constructors and
+    // top-level functions are resolved here and handle named arguments below.
     if (call.target != null) {
+      for (final a in args) {
+        if (a is NamedExpression) {
+          throw CompileError(
+            'named arguments only work where the callee is known: a '
+            'constructor or a top-level function',
+            a.offset,
+            hint: 'a method is dispatched on the receiver at run time, so its '
+                'parameter names are not known here',
+          );
+        }
+      }
       _expression(call.target!);
       for (final a in args) {
         _expression(a);
@@ -1254,29 +1342,43 @@ class FunctionCompiler {
       _emit(Op.newInstance);
       _emitU16(classIdx);
       final ctorIndex = unit.classCtorIndex[classIdx];
-      // Arity is checked here so a wrong count is a compile error with a
-      // location, not a runtime trap reported as "corrupt program".
-      _checkArgc(
-          name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
+      final ctorParams = unit.classCtorParams(classIdx);
+
       if (ctorIndex == null) {
+        if (args.isNotEmpty) {
+          _checkArgc(name, args.length, 0, call.offset);
+        }
         return; // default constructor: the fresh instance is the result
       }
-      for (final a in args) {
-        _expression(a);
+
+      if (_needsSlotMatching(ctorParams, args)) {
+        _emitArgsInSlotOrder(name, ctorParams, args, call.offset);
+      } else {
+        // Arity is checked here so a wrong count is a compile error with a
+        // location, not a runtime trap reported as "corrupt program".
+        _checkArgc(
+            name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
+        for (final a in args) {
+          _expression(a);
+        }
       }
       _emit(Op.call);
       _emitU16(ctorIndex);
-      _emit(args.length + 1); // slot 0 is the new instance
+      _emit(ctorParams.length + 1); // slot 0 is the new instance
       return;
     }
 
-    for (final a in args) {
-      if (a is NamedExpression) {
-        throw CompileError('named arguments are not supported yet', a.offset);
+    final nativeArgc = kNatives[name];
+    if (nativeArgc != null) {
+      for (final a in args) {
+        if (a is NamedExpression) {
+          throw CompileError(
+            "'$name' is a built-in and takes its arguments positionally",
+            a.offset,
+          );
+        }
       }
     }
-
-    final nativeArgc = kNatives[name];
     if (nativeArgc != null) {
       _checkArgc(name, args.length, nativeArgc, call.offset);
       for (final a in args) {
@@ -1296,14 +1398,18 @@ class FunctionCompiler {
         hint: 'built-ins available: ${kNatives.keys.join(', ')}',
       );
     }
-    final target = unit.functionArity(index);
-    _checkArgc(name, args.length, target, call.offset);
-    for (final a in args) {
-      _expression(a);
+    final params = unit.functionParams(index);
+    if (_needsSlotMatching(params, args)) {
+      _emitArgsInSlotOrder(name, params, args, call.offset);
+    } else {
+      _checkArgc(name, args.length, unit.functionArity(index), call.offset);
+      for (final a in args) {
+        _expression(a);
+      }
     }
     _emit(Op.call);
     _emitU16(index);
-    _emit(target);
+    _emit(params.length);
   }
 
   void _checkArgc(String name, int got, int want, int offset) {

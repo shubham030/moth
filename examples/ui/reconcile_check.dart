@@ -33,8 +33,7 @@ class Swapper extends Component {
   }
 
   Widget textChild() {
-    var t = Text();
-    t.value = 'text';
+    var t = Text('text');
     return t;
   }
 
@@ -54,8 +53,7 @@ class Inner extends Component {
   int bumps = 0;
 
   Widget build() {
-    var t = Text();
-    t.value = 'inner $bumps';
+    var t = Text('inner $bumps');
     return t;
   }
 }
@@ -67,8 +65,7 @@ class Outer extends Component {
   Widget build() {
     var rows = [];
     for (var i = 0; i < rowCount; i++) {
-      var r = Text();
-      r.value = 'row $i';
+      var r = Text('row $i');
       rows.add(r);
     }
     // A fresh Component each build — the case where the element binding has to
@@ -101,8 +98,7 @@ class Slots extends Component {
   }
 
   Widget label(String v) {
-    var t = Text();
-    t.value = v;
+    var t = Text(v);
     return t;
   }
 
@@ -126,12 +122,10 @@ class Slots extends Component {
 class Mixed extends Component {
   Widget build() {
     var kids = [];
-    var first = Text();
-    first.value = 'x';
+    var first = Text('x');
     first.key = 'x'; // one keyed child is enough to take the keyed path
     kids.add(first);
-    var plain = Text();
-    plain.value = 'plain'; // no key: must still match positionally
+    var plain = Text('plain'); // no key: must still match positionally
     kids.add(plain);
 
     var host = Box();
@@ -157,8 +151,7 @@ class Leaf extends Component {
       b.fixedHeight = 12;
       return b;
     }
-    var t = Text();
-    t.value = 'leaf';
+    var t = Text('leaf');
     return t;
   }
 

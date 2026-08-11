@@ -39,7 +39,8 @@ heap and no GC, so this milestone is the whole pipeline with the least runtime.
 - [x] Classes: fields with initializers, constructors (including `this.x`
       parameters), methods, implicit `this`
 - [x] Single inheritance with method overriding
-- [ ] Named parameters and enums
+- [x] Named parameters (constructors and top-level functions)
+- [ ] Enums
 - [x] **`package:moth` device API** — the idiomatic Dart layer over the native
       boundary (`DigitalPin`, `AnalogPin`, `PwmPin`, `I2c`, `Uart`), per
       ADR-009. Examples and docs get rewritten around it.
@@ -85,7 +86,10 @@ Dart program draws in a desktop window and on the board.
 - [x] Keys, so a reordered child keeps its element and node
 - [x] Multi-file imports, so the framework is a library programs import
 - [x] Publish it as `package:moth` rather than a file in examples/
-- [ ] More widgets: Row/Column helpers, Slider, Switch, Image
+- [x] Flutter-named widgets: Container, Column, Row, Stack, Center, Padding,
+      SizedBox, GestureDetector, Divider, Text/TextStyle,
+      CircularProgressIndicator
+- [ ] More widgets: Slider, Switch, Image
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
 ## Known limitations to close
@@ -138,12 +142,93 @@ Desktop-first; no Dart dependency until the framework exists.
       wrapping (tools/fontgen generates the faces)
 - [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
       gradients, images
-- [ ] R3 — Damage tracking: dirty-rect partial repaint (the hard one).
-      **Measured on the ESP32-S3, 466x466:** a full repaint costs 164ms even
-      for a single 20x20 box — that is clearing an 868KB framebuffer in PSRAM
-      and pushing it over QSPI, before anything is drawn. The watch face costs
-      298ms. No amount of drawing less gets below the floor; only repainting
-      what changed does.
+- [x] R3 — Damage tracking: repaint only the rows that changed.
+
+      **Measured on an ESP32-S3 at 466x466**, `examples/ui/frame_bench.dart`
+      with `MOTH_FRAME_PROFILE=1`:
+
+      | phase | full frame | damage-tracked |
+      | --- | --- | --- |
+      | layout + paint | 339.4ms | 138.3ms |
+      | ARGB to RGB565 | 21.9ms | 8.3ms |
+      | QSPI transfer | 25.6ms | 10.2ms |
+      | **frame** | **391.8ms** | **160.9ms** |
+
+      2.44x, and all three phases fell together to about 38% — which is the
+      damaged band, 177 of 466 rows. That the three scale identically is the
+      evidence the band is doing the work rather than something else.
+
+      Bands are rows, not rectangles: a band spans the full width, so nothing
+      can be partly covered by a sibling and the hard cases — overlap,
+      translucency, z-order — cannot arise. Rectangles would tighten it
+      further and are the obvious next step, at the cost of those cases
+      becoming real.
+
+      Two things had to be true before any of it worked. Properties are
+      compared before being stored, because a rebuild re-applies every
+      property of every widget and without that every node is "changed" every
+      frame. And the band is reset each commit — accumulating it pinned the
+      whole screen forever, since the first frame legitimately damages
+      everything.
+
+- [x] R3a — Paint what shows. Per-primitive profiling (`MR_PROFILE`) found
+      115ms of the 138ms paint was rectangle fills — and nearly all of that
+      was fully transparent wrapper boxes (every Stack, Column, Padding, and
+      label background) taking the blend path, which read and wrote every
+      pixel back unchanged: a ~9.5ms round trip through PSRAM per full-width
+      node, times a dozen nested wrappers.
+
+      Three fixes, same benchmark:
+      - skip fills whose color or opacity make them invisible (115ms → 18.5ms;
+        what remains is two real opaque background fills at PSRAM write speed)
+      - scan arcs by per-row annulus spans instead of rejecting the full band
+        width pixel by pixel (18.3ms → 7.4ms)
+      - integer blend, alpha widened 0..256 so opaque stays exact. Float cost
+        the same in internal RAM as in PSRAM — 34ms vs 13ms over a 177-row
+        band — so it was the conversions, not the memory. Renders differ from
+        the float path by at most 2/255 per channel, only on blended pixels.
+
+      | phase | R3 | R3a |
+      | --- | --- | --- |
+      | layout + paint | 138.3ms | 30.1ms |
+      | ARGB to RGB565 | 8.3ms | 8.3ms |
+      | QSPI transfer | 10.2ms | 10.2ms |
+      | **frame** | **160.9ms** | **53.1ms** |
+
+      6.2 → 18.8 fps. A boot microbench (`membench` in ui/esp-s3) records the
+      floors this was measured against: writing the whole 177-row band costs
+      9.5ms in PSRAM, so the remaining fill time is bandwidth, not waste.
+
+- [x] R3b — Tighter damage. The band was twice the changed text's height —
+      and the diagnosis found a real rendering bug, not padding: wrap_hint,
+      the width arrange last handed a label, was applied to the *next* text.
+      A clock that ticked past its first width wrapped against it, measured
+      narrower for wrapping, and shrank the hint to match — locked at two
+      lines from the second frame on, drawn that way on screen. The hint now
+      dies with the text it described (mr_set_str), the label re-measures
+      unconstrained, and the band is the 88 rows the label occupies.
+
+      Also here: painting starts at the last node in paint order that fills
+      every damaged row opaquely (find_band_cover, generalizing the old
+      whole-frame clear skip). Everything before it — the clear, the root's
+      background under a full-bleed panel — was being painted only to be
+      overwritten; that was a full extra band of PSRAM writes a frame.
+
+      | phase | R3a | R3b |
+      | --- | --- | --- |
+      | layout + paint | 30.1ms | 12.2ms |
+      | ARGB to RGB565 | 8.3ms | 4.2ms |
+      | QSPI transfer | 10.2ms | 5.3ms |
+      | **frame** | **53.1ms** | **26.2ms** |
+
+      18.8 → 38.2fps; 6.2fps at the start of R3a. The ~4.5ms the phases do
+      not account for is the VM rebuilding the widget tree each frame.
+
+- [ ] R3c — If more is ever needed: an RGB565 framebuffer deletes the
+      convert phase (4.2ms) and halves fill traffic, at the cost of the
+      mr_framebuffer() ARGB contract and some banding on antialiased edges.
+      Not worth it at 38fps on a watch face.
+
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
 

@@ -23,20 +23,10 @@ class Wrapped extends Component {
       ..pad = 10
       ..space = 10
       ..kids = [
-        Text()
-          ..value = 'one'
-          ..size = 20,
-        Text()
-          ..value = 'the quick brown fox jumps over the lazy dog'
-          ..size = 20
-          ..wrapWidth = 200,
-        Text()
-          ..value = 'supercalifragilisticexpialidocious'
-          ..size = 20
-          ..wrapWidth = 120,
-        Text()
-          ..value = 'first line\nsecond line'
-          ..size = 20,
+        Text('one', style: TextStyle(fontSize: 20)),
+        Text('the quick brown fox jumps over the lazy dog', style: TextStyle(fontSize: 20), maxWidth: 200),
+        Text('supercalifragilisticexpialidocious', style: TextStyle(fontSize: 20), maxWidth: 120),
+        Text('first line\nsecond line', style: TextStyle(fontSize: 20)),
       ];
   }
 }

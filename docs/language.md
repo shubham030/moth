@@ -150,6 +150,44 @@ for (var i = 0; i < 10; i++) {
 }
 ```
 
+## Named parameters
+
+```dart
+int area({int w = 1, int h = 1}) => w * h;
+
+area(h: 4, w: 3);   // order does not have to match the declaration
+area(w: 3);         // h takes its default
+```
+
+They work wherever the compiler can see the declaration — a **constructor**
+or a **top-level function**. Matching happens at compile time, so the VM
+still executes an ordinary positional call and named arguments cost nothing
+at run time.
+
+A method call cannot use them. A method is dispatched on its receiver, whose
+type is not known while compiling the call, so there is no parameter list to
+match against; moth says so rather than guessing.
+
+This is what lets a widget tree read as a tree:
+
+```dart
+Container(
+  color: 0xFF0E0E12,
+  padding: 20,
+  onTap: () => setState(() => count += 1),
+  child: Column(
+    mainAxisAlignment: mainAxisCenter,
+    spacing: 12,
+    children: [
+      Text('tapped $count times', style: TextStyle(fontSize: 20)),
+      Divider(thickness: 2, width: 180),
+    ],
+  ),
+)
+```
+
+Defaults must be constant, as in Dart — `const []` for an empty list.
+
 ## Cascades
 
 `..` configures an object without naming it repeatedly. The target is
@@ -206,7 +244,7 @@ This is what makes [package:moth's hardware API](hardware.md) worth using:
 | Feature | Milestone |
 | --- | --- |
 | Maps | M1b |
-| Static members, named constructors, named parameters | after M1b |
+| Static members, named constructors | after M1b |
 | `async` / `await`, `Future` | needs an event loop; see below |
 | Networking — WiFi, sockets, HTTP | not started |
 | Mixins, generics, extensions, records | not planned for v1 |

@@ -4,6 +4,7 @@ pubspec.lock
 build/
 
 # C / ESP-IDF
+build-fps/
 sdkconfig
 sdkconfig.old
 managed_components/

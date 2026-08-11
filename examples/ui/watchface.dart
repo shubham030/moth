@@ -58,12 +58,12 @@ class WatchFace extends Component {
   bool hasGps = false;
 
   Widget build() {
+    // A Stack: the rings sit over the face rather than after it. An Arc lays
+    // out like any other widget now, so overlaying has to be asked for.
     return Box()
       ..color = black
       ..growFactor = 1
-      // Stretch, so the face below spans the display and its contents centre
-      // on the screen rather than on their own widest line.
-      ..crossAlign = alignStretch
+      ..direction = directionStack
       ..kids = [
         // The face itself, inset to the round panel's safe area.
         Box()
@@ -79,16 +79,14 @@ class WatchFace extends Component {
             });
           }
           ..kids = [
-            Text()
-              ..value = showSeconds
+            Text(
+              showSeconds
                   ? '${clock.display}:${clock.two(clock.seconds)}'
-                  : clock.display
-              ..size = showSeconds ? 48 : 72
-              ..tint = bright,
-            Text()
-              ..value = clock.date
-              ..size = 20
-              ..tint = dim,
+                  : clock.display,
+              style: TextStyle(
+                  fontSize: showSeconds ? 48 : 72, color: bright),
+            ),
+            Text(clock.date, style: TextStyle(fontSize: 20, color: dim)),
             Box()
               ..color = 0xFF2A2A31
               ..fixedHeight = 2
@@ -99,30 +97,20 @@ class WatchFace extends Component {
               ..align = alignCenter
               ..crossAlign = alignCenter
               ..kids = [percent(), dot(), gpsLabel()],
-            Text()
-              ..value = 'TAP FOR SECONDS'
-              ..size = 14
-              ..tint = 0xFF44444E,
+            Text('TAP FOR SECONDS', style: TextStyle(fontSize: 14, color: 0xFF44444E)),
           ],
 
-        // The track, then the minute hand over it, hugging the bezel.
-        Arc()
-          ..color = 0xFF1C1C21
-          ..thickness = 6
-          ..sweep = 360
-          ..size = uiWidth(),
+        // Track and minute hand, drawn in one pass over the face.
         Arc()
           ..color = palette
+          ..trackColor = 0xFF1C1C21
           ..thickness = 6
           ..sweep = clock.minuteSweep
           ..size = uiWidth(),
       ];
   }
 
-  Widget percent() => Text()
-    ..value = '$battery%'
-    ..size = 18
-    ..tint = dim;
+  Widget percent() => Text('$battery%', style: TextStyle(fontSize: 18, color: dim));
 
   Widget dot() => Box()
     ..color = hasGps ? 0xFF7FD17F : 0xFFE05252
@@ -130,10 +118,7 @@ class WatchFace extends Component {
     ..fixedHeight = 10
     ..corner = 5; // a real circle now that radius is drawn
 
-  Widget gpsLabel() => Text()
-    ..value = hasGps ? 'GPS' : 'NO GPS'
-    ..size = 18
-    ..tint = dim;
+  Widget gpsLabel() => Text(hasGps ? 'GPS' : 'NO GPS', style: TextStyle(fontSize: 18, color: dim));
 }
 
 final face = WatchFace();
