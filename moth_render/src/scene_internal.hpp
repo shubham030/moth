@@ -5,17 +5,61 @@
 #include <string>
 #include <vector>
 
+/* Per-primitive frame timing, so optimization is aimed at where the
+ * milliseconds actually go. Off by default and free when off. When on, the
+ * embedder must provide mr_prof_now_us — a build that enables this without
+ * linking a clock fails loudly rather than quietly measuring nothing. */
+#ifndef MR_PROFILE
+#define MR_PROFILE 0
+#endif
+#if MR_PROFILE
+extern "C" {
+int64_t mr_prof_now_us(void);
+extern int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us,
+    mr_prof_arc_us, mr_prof_text_us;
+/* Pixels *visited* per primitive — every framebuffer slot a loop touched,
+ * whether or not it changed. Time varies by machine; these do not, which is
+ * what makes them assertable in a test. The transparent-wrapper bug that cost
+ * 95ms a frame was invisible in any image diff but is a 10x jump here. */
+extern int64_t mr_prof_clear_px, mr_prof_rect_px, mr_prof_arc_px,
+    mr_prof_text_px;
+}
+#define MR_PROF_START(t) const int64_t t = mr_prof_now_us()
+#define MR_PROF_ADD(t, acc) ((acc) += mr_prof_now_us() - (t))
+#define MR_PROF_PX(acc, n) ((acc) += (n))
+#else
+#define MR_PROF_START(t) (void)0
+#define MR_PROF_ADD(t, acc) (void)0
+#define MR_PROF_PX(acc, n) (void)0
+#endif
+
 namespace mr {
 
 /* One wrapped line, as a range into the original string. */
 struct TextLine {
   uint32_t start, len;
+
+  /* Where the pen ends up: what wrapping decisions are made against. */
   float width;
+
+  /* How far the ink actually reaches. A glyph may paint past its own advance
+   * — Inter's '2' at 72px does — so a box sized by advance alone clips the
+   * last character of a line down its right edge. */
+  float ink;
 };
 
 
 struct Node {
   bool alive = false;
+
+  /* Damage tracking. A node that changed must be repainted where it is now
+   * and where it was, or it leaves a ghost behind. Bands are rows rather than
+   * rectangles: a band spans the full width, so nothing can be partially
+   * covered by a sibling and the awkward cases — overlap, translucency,
+   * z-order — cannot arise. */
+  bool touched = true;     /* a property changed since the last paint */
+  bool painted = false;    /* prev_y/prev_h describe a real previous frame */
+  float prev_y = 0.0f, prev_h = 0.0f;
 
   /* Wrapped lines, and the width they were wrapped at. Layout fills these and
    * paint reads them: two independent wraps of the same string is how a label
@@ -58,6 +102,13 @@ struct Scene {
   std::vector<Anim> anims;
   uint32_t next_anim_id = 1;
   bool dirty = true;
+
+  /* The rows that must be repainted this frame, as [damage_y0, damage_y1).
+   * Empty when nothing moved; the whole frame on the first paint. */
+  float damage_y0 = 0.0f, damage_y1 = 0.0f;
+
+  /* Painting is clamped to this band rather than to the framebuffer. */
+  int clip_y0 = 0, clip_y1 = 0;
 
   mr_event_cb sink = nullptr;
   void *sink_user = nullptr;
@@ -117,8 +168,8 @@ bool arc_hit(const Node &n, float px, float py);
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);
 
-/* paint.cpp — rasterizes the tree into s.framebuffer.
- * v0: flat-color software fill. TODO(R2): ThorVG canvas. */
+/* paint.cpp — rasterizes the tree into s.framebuffer, clamped to the damage
+ * band in clip_y0/clip_y1. */
 void paint_run(Scene &s);
 
 } // namespace mr

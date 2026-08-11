@@ -703,6 +703,21 @@ class Compiler {
   }
 
   /// Parameter count of a declared function, for call-site checking.
+  /// The declared parameters of a top-level function, so a call site can
+  /// match named arguments to slots and fill in defaults.
+  List<FormalParameter> functionParams(int index) =>
+      _declarations[index].functionExpression.parameters?.parameters ??
+      const <FormalParameter>[];
+
+  /// The same for a class's constructor, which is what a widget call is.
+  List<FormalParameter> classCtorParams(int classIdx) {
+    final ctor = classDeclarations[classIdx]
+        .members
+        .whereType<ConstructorDeclaration>()
+        .firstOrNull;
+    return ctor?.parameters.parameters ?? const <FormalParameter>[];
+  }
+
   int functionArity(int index) =>
       _declarations[index].functionExpression.parameters?.parameters.length ??
       0;

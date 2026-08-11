@@ -2,6 +2,8 @@
 #include "scene_internal.hpp"
 
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cmath>
 #include <cstring>
 
@@ -121,10 +123,28 @@ mr_node_id mr_node_create(mr_node_kind kind) {
   return (mr_node_id)(s.nodes.size() - 1);
 }
 
+/* Rows a node last occupied, so what it leaves behind is repainted. */
+static void damage_previous(Scene &s, mr_node_id id) {
+  Node *n = s.get(id);
+  if (!n) return;
+  if (n->painted && n->prev_h > 0.0f) {
+    if (s.damage_y1 <= s.damage_y0) {
+      s.damage_y0 = n->prev_y;
+      s.damage_y1 = n->prev_y + n->prev_h;
+    } else {
+      s.damage_y0 = std::min(s.damage_y0, n->prev_y);
+      s.damage_y1 = std::max(s.damage_y1, n->prev_y + n->prev_h);
+    }
+  }
+  for (mr_node_id k : n->children) damage_previous(s, k);
+}
+
 void mr_detach(mr_node_id child) {
   Scene &s = scene();
   Node *c = s.get(child);
   if (!c || c->parent == MR_NODE_NONE) return;
+  /* Where it was has to be repainted, and after detaching nobody remembers. */
+  damage_previous(s, child);
   Node *p = s.get(c->parent);
   if (p) {
     auto &v = p->children;
@@ -139,6 +159,7 @@ void mr_node_destroy(mr_node_id node) {
   Scene &s = scene();
   Node *n = s.get(node);
   if (!n || node == mr_root()) return;
+  damage_previous(s, node);
   mr_detach(node);
   /* copy: children vector mutates during recursion */
   std::vector<mr_node_id> kids = n->children;
@@ -161,29 +182,60 @@ void mr_attach(mr_node_id parent, mr_node_id child, int index) {
   else
     p->children.insert(p->children.begin() + index, child);
   c->parent = parent;
+  c->touched = true;
   s.dirty = true;
 }
 
+/* A rebuild re-applies every property of every widget, so without comparing
+ * first, every node is "changed" every frame and the damage band is always
+ * the whole screen — which makes damage tracking do nothing at all. */
 void mr_set_f32(mr_node_id node, mr_prop prop, float v) {
   Node *n = scene().get(node);
   if (!n || prop >= MR_PROP_COUNT) return;
+  if (n->f[prop] == v) return;
   n->f[prop] = v;
+  n->touched = true;
   scene().dirty = true;
 }
 
 void mr_set_u32(mr_node_id node, mr_prop prop, uint32_t v) {
   Node *n = scene().get(node);
   if (!n || prop >= MR_PROP_COUNT) return;
+  if (n->u[prop] == v) return;
   n->u[prop] = v;
+  n->touched = true;
   scene().dirty = true;
 }
 
 void mr_set_str(mr_node_id node, mr_prop prop, const char *utf8) {
   Node *n = scene().get(node);
   if (!n || !utf8) return;
-  if (prop == MR_PROP_TEXT) n->text = utf8;
-  else if (prop == MR_PROP_IMAGE_SRC) n->image_src = utf8;
-  else return;
+  if (prop == MR_PROP_TEXT) {
+    /* The wrapped lines are ranges into this string. Reusing them against
+     * different text indexes past the end of a shorter one — 'NO GPS'
+     * becoming 'GPS' is enough — so the cache dies with the text it
+     * described. */
+    if (n->text == utf8) return;
+    {
+      n->text = utf8;
+      n->touched = true;
+      n->lines.clear();
+      n->lines_width = -1.0f;
+      n->lines_font = nullptr;
+      /* The hint is arrange's answer for the old text. Wrapping the new text
+       * against it ratchets: a wider text wraps at the old width, measures
+       * narrower for it, and the hint shrinks to match — a clock that ticked
+       * past its first width stayed two lines forever. */
+      n->wrap_hint = -1.0f;
+    }
+  }
+  else if (prop == MR_PROP_IMAGE_SRC) {
+    if (n->image_src == utf8) return;
+    n->image_src = utf8;
+  } else {
+    return;
+  }
+  n->touched = true;
   scene().dirty = true;
 }
 
@@ -253,24 +305,87 @@ void mr_tick(uint32_t dt_ms) {
       s.anims.end());
 }
 
+/* Widens the damage band to cover a node, both where it is and where it was.
+ * A node is repainted when something about it changed, or when layout moved
+ * it — the second case is why the previous bounds are kept. */
+static void collect_damage(Scene &s, mr_node_id id) {
+  Node *n = s.get(id);
+  if (!n) return;
+
+  const bool moved = !n->painted || n->prev_y != n->y || n->prev_h != n->h;
+  if (n->touched || moved) {
+    float y0 = n->y, y1 = n->y + n->h;
+    if (n->painted) {
+      y0 = std::min(y0, n->prev_y);
+      y1 = std::max(y1, n->prev_y + n->prev_h);
+    }
+    if (s.damage_y1 <= s.damage_y0) {
+      s.damage_y0 = y0;
+      s.damage_y1 = y1;
+    } else {
+      s.damage_y0 = std::min(s.damage_y0, y0);
+      s.damage_y1 = std::max(s.damage_y1, y1);
+    }
+  }
+  for (mr_node_id k : n->children) collect_damage(s, k);
+}
+
+static void record_painted(Scene &s, mr_node_id id) {
+  Node *n = s.get(id);
+  if (!n) return;
+  n->prev_y = n->y;
+  n->prev_h = n->h;
+  n->painted = true;
+  n->touched = false;
+  for (mr_node_id k : n->children) record_painted(s, k);
+}
+
 bool mr_commit(void) {
   Scene &s = scene();
   if (!s.dirty) return false;
+  MR_PROF_START(t_layout);
   layout_run(s);
-  paint_run(s);
+  MR_PROF_ADD(t_layout, mr_prof_layout_us);
+
+  /* Start empty. Without this the band only ever grows, so the first frame —
+   * where every node is unpainted and the whole screen is damaged — pins it
+   * at full frame forever and the tracking does nothing. Detach and destroy
+   * widen it before layout, so this resets only what this frame collects. */
+  const float carried_y0 = s.damage_y0, carried_y1 = s.damage_y1;
+  s.damage_y0 = 0.0f;
+  s.damage_y1 = 0.0f;
+  if (carried_y1 > carried_y0) {
+    s.damage_y0 = carried_y0;
+    s.damage_y1 = carried_y1;
+  }
+
+  collect_damage(s, mr_root());
+
+  /* Clamp to the frame. An empty band means the tree changed in a way that
+   * moved nothing — nothing to draw, and nothing to push. */
+  s.clip_y0 = std::max(0, (int)std::floor(s.damage_y0));
+  s.clip_y1 = std::min(s.cfg.height, (int)std::ceil(s.damage_y1));
+  const bool anything = s.clip_y1 > s.clip_y0;
+
+  if (anything) paint_run(s);
+
+  record_painted(s, mr_root());
+  s.damage_y0 = 0.0f;
+  s.damage_y1 = 0.0f;
   s.dirty = false;
-  return true;
+  return anything;
 }
 
 const uint32_t *mr_framebuffer(void) { return scene().framebuffer.data(); }
 
 void mr_damage(int *x, int *y, int *w, int *h) {
-  /* TODO(R3): real dirty-rect tracking; v0 reports full frame */
+  /* Full width by design: a band cannot be partially covered by a sibling,
+   * which is what keeps overlap and translucency from mattering. */
   Scene &s = scene();
   if (x) *x = 0;
-  if (y) *y = 0;
   if (w) *w = s.cfg.width;
-  if (h) *h = s.cfg.height;
+  if (y) *y = s.clip_y0;
+  if (h) *h = std::max(0, s.clip_y1 - s.clip_y0);
 }
 
 void mr_frame_of(mr_node_id node, float *x, float *y, float *w, float *h) {
