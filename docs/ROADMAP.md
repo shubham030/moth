@@ -120,6 +120,10 @@ Dart program draws in a desktop window and on the board.
       credentials live in NVS, written from the host by
       tools/provision/provision.py — never compiled in. The board prints
       its push target when it connects; port 7621.
+- [x] Push over the USB cable: the USB-Serial-JTAG console doubles as a
+      push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
+      the out-of-box loop needs no WiFi at all — provisioning is the
+      upgrade, not the prerequisite. Measured 21-43ms a transfer.
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM

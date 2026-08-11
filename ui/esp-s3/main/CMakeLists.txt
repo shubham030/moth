@@ -7,6 +7,7 @@ idf_component_register(
     app_main.c
     hotpush.c
     pushstore.c
+    serialpush.c
     "${ROOT}/moth_render/esp-s3/main/panel.c"
     "${ROOT}/vm/src/vm.c"
     "${ROOT}/vm/src/object.c"
@@ -30,6 +31,7 @@ idf_component_register(
     "${ROOT}/moth_render/esp-s3/main"
   PRIV_REQUIRES esp_lcd esp_driver_gpio esp_driver_spi esp_driver_i2c esp_timer
                 esp_wifi esp_netif esp_event nvs_flash lwip esp_partition
+                esp_driver_usb_serial_jtag
   EMBED_FILES program.mothb
 )
 

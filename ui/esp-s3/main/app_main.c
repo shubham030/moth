@@ -11,6 +11,7 @@
 #include "panel.h"
 #include "push.h"
 #include "pushstore.h"
+#include "serialpush.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -160,10 +161,13 @@ static bool accept_push(void) {
                hotpush_net_ip(), HOTPUSH_PORT);
     }
   }
-  if (s_push == NULL || s_pending != NULL) return false;
+  if (s_pending != NULL) return false;
 
+  /* Two transports, one path from here on: WiFi when it is up, and the USB
+   * console always. */
   size_t len = 0;
-  uint8_t *blob = moth_push_poll(s_push, &len);
+  uint8_t *blob = s_push ? moth_push_poll(s_push, &len) : NULL;
+  if (!blob) blob = serialpush_poll(&len);
   if (!blob) return false;
   if (!blob_is_loadable(blob, len)) {
     free(blob); /* the running program never noticed */
@@ -353,6 +357,9 @@ void app_main(void) {
   /* WiFi comes up in the background; the UI never waits for it. This also
    * initializes NVS, which the pushstore strike counter needs. */
   hotpush_net_start();
+
+  /* The USB cable is a push transport too — no provisioning required. */
+  serialpush_start();
 
   bool from_store = false;
   size_t current_len = 0;
