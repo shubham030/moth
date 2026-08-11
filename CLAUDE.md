@@ -5,6 +5,34 @@ Docs live in `docs/` (BACKEND.md is the render contract, BYTECODE.md the VM
 contract, ROADMAP.md the state of the world). ADRs bind: never read or write
 LVGL XML (license, ADR-002).
 
+## Reviews get judgment, not obedience
+
+A review finding is a claim, and claims get verified before they change
+code. For each finding, one of three dispositions, stated explicitly in the
+commit or reply:
+
+- **Fixed** — after reproducing the failure or constructing it (the torn
+  flash header was written to the real partition to prove both the bug and
+  the fix). If the reviewer's fix is inferior to a better architecture,
+  implement the better one and say why: "stty can't do raw mode reliably"
+  became an FFI serial layer, not a patched stty invocation; "NVS init can
+  fail in WiFi bring-up" became storage ownership moving to app_main, not a
+  retry.
+- **Rejected** — with evidence. The strike-counter "off by one" contradicted
+  the documented and intended semantics; the fix would have made the docs
+  wrong. The "duplicated scanner" was semantic divergence (connections drop,
+  serial resyncs), so the constants were shared and the difference documented
+  instead of falsely unified.
+- **Deferred** — scoped consciously, with the reasoning recorded (the LAN
+  pairing token before v0.1).
+
+Never loosen a guarantee, a budget, or a documented behavior just to make a
+finding go away — and never accept a finding's framing without checking it
+against the code and the measurements. Reviews also miss things: sweep the
+area a finding touches for the deeper version of the same problem (the
+"stale doc line" finding was sitting on a normative format doc a whole
+version behind the code).
+
 ## Docs are part of every feature
 
 The Docusaurus site (`website/`) serves `docs/` directly, and the landing
