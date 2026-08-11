@@ -23,6 +23,29 @@ static const char *TAG = "hotpush";
 static volatile bool s_connected;
 static char s_ip[16] = "0.0.0.0";
 
+/* What the radio can actually see, for when the configured SSID cannot be
+ * found: the usual cause is a 5GHz-only network — this chip is 2.4GHz — or a
+ * typo, and one look at this list settles which. */
+static void log_visible_networks(void) {
+  uint16_t n = 0;
+  esp_wifi_scan_get_ap_num(&n);
+  if (n == 0) {
+    ESP_LOGW(TAG, "scan: no 2.4GHz networks visible at all");
+    return;
+  }
+  if (n > 12) n = 12;
+  /* Static: a kilobyte of records does not fit the WiFi event task's stack,
+   * and this runs on it. Single-threaded by construction — events arrive one
+   * at a time. */
+  static wifi_ap_record_t recs[12];
+  if (esp_wifi_scan_get_ap_records(&n, recs) != ESP_OK) return;
+  ESP_LOGW(TAG, "scan: %d networks visible on 2.4GHz:", n);
+  for (int i = 0; i < n; i++) {
+    ESP_LOGW(TAG, "  '%s' (rssi %d, channel %d)", (const char *)recs[i].ssid,
+             recs[i].rssi, recs[i].primary);
+  }
+}
+
 static bool load_creds(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap) {
   nvs_handle_t h;
   if (nvs_open("moth", NVS_READONLY, &h) != ESP_OK) return false;
@@ -43,11 +66,25 @@ static void on_net_event(void *arg, esp_event_base_t base, int32_t id,
     strcpy(s_ip, "0.0.0.0");
     /* Retry forever; each attempt takes a scan's worth of time, so this does
      * not spin. Log occasionally rather than on every miss — a board left
-     * overnight out of range should not fill the console. */
+     * overnight out of range should not fill the console. The reason code is
+     * the diagnosis: 201 means the AP was not seen at all (wrong SSID, out
+     * of range, or a 5GHz-only network — this chip is 2.4GHz), 15 means the
+     * handshake timed out, which is almost always a wrong password. */
+    const wifi_event_sta_disconnected_t *d = data;
     static int misses;
     if (++misses % 10 == 1) {
-      ESP_LOGW(TAG, "wifi disconnected, retrying (attempt %d)", misses);
+      ESP_LOGW(TAG, "wifi disconnected (reason %d), retrying (attempt %d)",
+               d->reason, misses);
     }
+    /* The AP was never seen: scan once and say what is visible, then go
+     * back to retrying. The scan's completion re-triggers the connect. */
+    if (d->reason == WIFI_REASON_NO_AP_FOUND && misses == 1) {
+      esp_wifi_scan_start(NULL, false);
+      return;
+    }
+    esp_wifi_connect();
+  } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+    log_visible_networks();
     esp_wifi_connect();
   } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
     const ip_event_got_ip_t *e = data;
