@@ -222,6 +222,11 @@ void mr_set_str(mr_node_id node, mr_prop prop, const char *utf8) {
       n->lines.clear();
       n->lines_width = -1.0f;
       n->lines_font = nullptr;
+      /* The hint is arrange's answer for the old text. Wrapping the new text
+       * against it ratchets: a wider text wraps at the old width, measures
+       * narrower for it, and the hint shrinks to match — a clock that ticked
+       * past its first width stayed two lines forever. */
+      n->wrap_hint = -1.0f;
     }
   }
   else if (prop == MR_PROP_IMAGE_SRC) {

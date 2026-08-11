@@ -395,7 +395,13 @@ bool arc_hit(const Node &n, float px, float py) {
   return arc_within_sweep(n, dx, dy, sweep);
 }
 
-static void paint_node(Scene &s, mr_node_id id, float opacity) {
+/* Paints the subtree at `id`. While `wait_for` names a node, nothing is drawn
+ * — that node opaquely covers every damaged row, so everything painted before
+ * it lands underneath and would be overwritten. Drawing resumes at the node
+ * itself; the traversal still has to walk there, because the covering node
+ * can sit anywhere in the tree. */
+static void paint_node(Scene &s, mr_node_id id, float opacity,
+                       mr_node_id &wait_for) {
   Node *n = s.get(id);
   if (!n) return;
   opacity *= n->f[MR_PROP_OPACITY];
@@ -404,6 +410,12 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
   /* Nothing here can reach the damaged rows. Children are inside their parent
    * in every layout moth produces, so the whole subtree goes with it. */
   if (n->y >= (float)s.clip_y1 || n->y + n->h <= (float)s.clip_y0) return;
+
+  if (id == wait_for) wait_for = MR_NODE_NONE;
+  if (wait_for != MR_NODE_NONE) {
+    for (mr_node_id c : n->children) paint_node(s, c, opacity, wait_for);
+    return;
+  }
 
   if (n->kind == MR_NODE_ARC) {
     MR_PROF_START(t_arc);
@@ -426,42 +438,41 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
     }
   }
 
-  for (mr_node_id c : n->children) paint_node(s, c, opacity);
+  for (mr_node_id c : n->children) paint_node(s, c, opacity, wait_for);
 }
 
-/* True when this node will cover the whole frame with opaque pixels, so
- * clearing first would be writing the same memory twice. On a 466x466 panel
- * that is 868KB of PSRAM per pass, and both passes were happening every
- * frame. */
-static bool covers_frame_opaque(Scene &s, mr_node_id id, float inherited) {
+/* Finds the last node in paint order that fills every damaged row with opaque
+ * pixels: full width, the whole band, alpha FF, no corner radius, and no
+ * translucent ancestor (opacity multiplies down the tree, so a child's own
+ * 1.0 says nothing). Everything painted before that node — the clear, the
+ * root's background, any backdrop under a full-bleed card — is overwritten by
+ * it, so painting starts there instead. Skipping the clear alone was 24ms a
+ * frame on an ESP32-S3 at 466x466; each skipped full-band fill is ~9.5ms of
+ * PSRAM writes per 177-row band. */
+static void find_band_cover(Scene &s, mr_node_id id, float inherited,
+                            mr_node_id &best) {
   Node *n = s.get(id);
-  if (!n || n->kind != MR_NODE_BOX) return false;
-  /* Opacity multiplies down the tree, so a child's own being 1.0 says
-   * nothing — a translucent ancestor makes it blend, and blending against a
-   * buffer that was never cleared shows the previous frame underneath. */
-  if (inherited * n->f[MR_PROP_OPACITY] < 1.0f) return false;
-  if (((n->u[MR_PROP_BG_COLOR] >> 24) & 0xFF) != 0xFF) return false;
-  if (n->f[MR_PROP_RADIUS] > 0.5f) return false; /* corners would show through */
-  return n->x <= 0.0f && n->y <= 0.0f &&
-         n->x + n->w >= (float)s.cfg.width &&
-         n->y + n->h >= (float)s.cfg.height;
+  if (!n) return;
+  const float op = inherited * n->f[MR_PROP_OPACITY];
+  if (op <= 0.0f) return; /* invisible, and so is everything below it */
+  if (n->kind == MR_NODE_BOX && op >= 1.0f &&
+      ((n->u[MR_PROP_BG_COLOR] >> 24) & 0xFF) == 0xFF &&
+      n->f[MR_PROP_RADIUS] <= 0.5f && /* corners would show through */
+      n->x <= 0.0f && n->x + n->w >= (float)s.cfg.width &&
+      n->y <= (float)s.clip_y0 && n->y + n->h >= (float)s.clip_y1) {
+    best = id;
+  }
+  for (mr_node_id c : n->children) find_band_cover(s, c, op, best);
 }
 
 void paint_run(Scene &s) {
-  /* The root's own background usually fills the frame, in which case the
-   * clear is writing 868KB of PSRAM that the very next fill overwrites.
-   * Measured on an ESP32-S3 at 466x466: 24ms a frame. */
-  Node *root = s.get((mr_node_id)1);
-  bool covered = covers_frame_opaque(s, (mr_node_id)1, 1.0f);
-  if (!covered && root) {
-    const float under_root = root->f[MR_PROP_OPACITY];
-    for (mr_node_id c : root->children) {
-      if (covers_frame_opaque(s, c, under_root)) { covered = true; break; }
-    }
-  }
-  if (!covered) {
-    /* Only the damaged rows — clearing the whole frame was 868KB of PSRAM
-     * writes for rows that are about to be left exactly as they were. */
+  mr_node_id cover = MR_NODE_NONE;
+  find_band_cover(s, (mr_node_id)1, 1.0f, cover);
+
+  if (cover == MR_NODE_NONE) {
+    /* Nothing opaque spans the band, so what the tree does not paint must be
+     * background. Only the damaged rows — clearing the whole frame was 868KB
+     * of PSRAM writes for rows about to be left exactly as they were. */
     MR_PROF_START(t_clear);
     for (int y = s.clip_y0; y < s.clip_y1; y++) {
       uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
@@ -469,7 +480,8 @@ void paint_run(Scene &s) {
     }
     MR_PROF_ADD(t_clear, mr_prof_clear_us);
   }
-  paint_node(s, (mr_node_id)1, 1.0f);
+  mr_node_id wait_for = cover;
+  paint_node(s, (mr_node_id)1, 1.0f, wait_for);
 }
 
 } // namespace mr

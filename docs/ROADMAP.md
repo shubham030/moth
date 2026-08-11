@@ -199,11 +199,35 @@ Desktop-first; no Dart dependency until the framework exists.
       floors this was measured against: writing the whole 177-row band costs
       9.5ms in PSRAM, so the remaining fill time is bandwidth, not waste.
 
-- [ ] R3b — Tighter damage. The band is wider than the changed text needs;
-      in the benchmark a label reports 176 rows where the same label alone
-      reports 88. Worth finding: it would roughly halve the band again —
-      and at 53.1ms a frame the band-proportional phases are most of the
-      frame, so halving it lands close to 30fps by itself.
+- [x] R3b — Tighter damage. The band was twice the changed text's height —
+      and the diagnosis found a real rendering bug, not padding: wrap_hint,
+      the width arrange last handed a label, was applied to the *next* text.
+      A clock that ticked past its first width wrapped against it, measured
+      narrower for wrapping, and shrank the hint to match — locked at two
+      lines from the second frame on, drawn that way on screen. The hint now
+      dies with the text it described (mr_set_str), the label re-measures
+      unconstrained, and the band is the 88 rows the label occupies.
+
+      Also here: painting starts at the last node in paint order that fills
+      every damaged row opaquely (find_band_cover, generalizing the old
+      whole-frame clear skip). Everything before it — the clear, the root's
+      background under a full-bleed panel — was being painted only to be
+      overwritten; that was a full extra band of PSRAM writes a frame.
+
+      | phase | R3a | R3b |
+      | --- | --- | --- |
+      | layout + paint | 30.1ms | 12.2ms |
+      | ARGB to RGB565 | 8.3ms | 4.2ms |
+      | QSPI transfer | 10.2ms | 5.3ms |
+      | **frame** | **53.1ms** | **26.2ms** |
+
+      18.8 → 38.2fps; 6.2fps at the start of R3a. The ~4.5ms the phases do
+      not account for is the VM rebuilding the widget tree each frame.
+
+- [ ] R3c — If more is ever needed: an RGB565 framebuffer deletes the
+      convert phase (4.2ms) and halves fill traffic, at the cost of the
+      mr_framebuffer() ARGB contract and some banding on antialiased edges.
+      Not worth it at 38fps on a watch face.
 
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
