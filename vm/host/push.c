@@ -165,10 +165,24 @@ void moth_push_respond(moth_push *p, bool ok) {
     uint8_t reply[MPSH_REPLY_LEN];
     mpsh_make_reply(reply, ok, p->nonce);
 #ifdef MSG_NOSIGNAL
-    (void)send(p->client, reply, sizeof reply, MSG_NOSIGNAL);
+    const int flags = MSG_NOSIGNAL;
 #else
-    (void)send(p->client, reply, sizeof reply, 0);
+    const int flags = 0;
 #endif
+    /* Nonblocking socket: one EAGAIN must not eat the verdict, since the
+     * sender has no other way to learn it. Eight bytes into an empty
+     * buffer, so the retry loop is theater almost always — but "almost" is
+     * what reviews are for. */
+    size_t off = 0;
+    const uint32_t give_up = now_ms() + 500;
+    while (off < sizeof reply && now_ms() < give_up) {
+      ssize_t n = send(p->client, reply + off, sizeof reply - off, flags);
+      if (n > 0) {
+        off += (size_t)n;
+      } else if (n < 0 && !read_would_block()) {
+        break; /* peer is gone; it just misses its reply */
+      }
+    }
   }
   p->awaiting_verdict = false;
   drop_client(p);

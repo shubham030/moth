@@ -141,13 +141,18 @@ reflash:
 $ dart run tools/mothc/bin/mothc.dart examples/ui/counter.dart \
     --push /dev/cu.usbmodem2101
 wrote examples/ui/counter.mothb (2209 bytes)
-pushed over /dev/cu.usbmodem2101 in 43ms
+pushed over /dev/cu.usbmodem2101
 ```
 
 The display never blanks — the running program stops, the new one draws over
 it. The pushed program is verified before the running one is disturbed, it
 survives reboots, and a program that crashes the board three boots in a row
 falls back to the one baked into the firmware.
+
+**Upgrading an older checkout?** The push store needs the custom partition
+table this repo now uses, and a generated `sdkconfig` from before it wins
+over the new defaults. If the boot log says `no mothb partition`, run
+`rm ui/esp-s3/sdkconfig && idf.py reconfigure` and flash again.
 
 To drop the cable entirely, give the board your WiFi once:
 

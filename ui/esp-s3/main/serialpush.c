@@ -49,8 +49,12 @@ static void reset_scanner(void) {
   memset(&s, 0, sizeof s);
 }
 
-/* Feeds one byte; returns a completed frame's blob or NULL. */
-static uint8_t *feed(uint8_t b, size_t *len_out) {
+/* Feeds one byte; returns a completed frame's blob or NULL, filling both
+ * outputs on completion. The nonce leaves through the out-parameter rather
+ * than being read from scanner state by the caller — the old shape worked
+ * only because the last body byte completes the frame before reset, and any
+ * reordering would have silently sent wrong nonces. */
+static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
   static const char magic[MPSH_MAGIC_LEN + 1] = MPSH_MAGIC;
   s.last_progress_us = esp_timer_get_time();
 
@@ -84,6 +88,7 @@ static uint8_t *feed(uint8_t b, size_t *len_out) {
 
   uint8_t *done = s.blob;
   *len_out = s.blob_len;
+  *nonce_out = s.nonce;
   s.blob = NULL;
   reset_scanner();
   return done;
@@ -106,8 +111,8 @@ static void serialpush_task(void *arg) {
     }
     for (int i = 0; i < n; i++) {
       size_t len = 0;
-      uint32_t nonce = s.nonce;
-      uint8_t *blob = feed(chunk[i], &len);
+      uint32_t nonce = 0;
+      uint8_t *blob = feed(chunk[i], &len, &nonce);
       if (!blob) continue;
       frame f = {blob, len, nonce};
       if (xQueueSend(s_frames, &f, 0) != pdTRUE) {
@@ -163,5 +168,14 @@ void serialpush_respond(uint32_t nonce, bool ok) {
    * three separate times. */
   uint8_t reply[MPSH_REPLY_LEN];
   mpsh_make_reply(reply, ok, nonce);
-  usb_serial_jtag_write_bytes(reply, sizeof reply, pdMS_TO_TICKS(250));
+  /* Sent three times: the secondary console writer shares this peripheral
+   * without the driver (esp_vfs never switched to it), so a log line can
+   * interleave into the middle of one reply and break the sender's 8-byte
+   * match. Three spaced copies make an all-copies-corrupted race
+   * vanishingly unlikely; the nonce makes duplicates harmless. Needs
+   * on-board confirmation once hardware is back. */
+  for (int i = 0; i < 3; i++) {
+    usb_serial_jtag_write_bytes(reply, sizeof reply, pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
 }

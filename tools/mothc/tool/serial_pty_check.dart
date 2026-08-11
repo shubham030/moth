@@ -1,11 +1,16 @@
-// Opens the pty slave through SerialPort and round-trips bytes written by
-// the python side on the master — exercising open(O_NONBLOCK), tcgetattr,
-// the cflag-normalized tcsetattr, readAvailable and writeAll for real.
+// Opens the pty slave through SerialPort and round-trips bytes echoed by
+// tool/serial_pty_check.py on the master — exercising open(O_NONBLOCK),
+// tcgetattr, the cflag-normalized tcsetattr, cfsetspeed, readAvailable and
+// writeAll for real. Run via the python harness, which owns the pty.
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:mothc/src/serial.dart';
 
 void main(List<String> args) {
+  if (args.length != 1) {
+    stderr.writeln('usage: run via tool/serial_pty_check.py');
+    exit(64);
+  }
   final port = SerialPort.open(args[0]);
   // binary round-trip INCLUDING 0x0A and 0x0D — the bytes cooked mode mangles
   final probe = Uint8List.fromList([0x4D, 0x0A, 0x0D, 0x00, 0xFF, 0x7F]);
