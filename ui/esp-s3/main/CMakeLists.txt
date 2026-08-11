@@ -25,3 +25,7 @@ idf_component_register(
   PRIV_REQUIRES esp_lcd esp_driver_gpio esp_driver_spi esp_driver_i2c esp_timer
   EMBED_FILES program.mothb
 )
+
+# Per-primitive frame timing. Enable together with MOTH_FRAME_PROFILE in
+# app_main.c, which provides the clock this instrumentation calls.
+# target_compile_definitions(${COMPONENT_LIB} PRIVATE MR_PROFILE=1)

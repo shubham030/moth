@@ -1,10 +1,10 @@
-/* v0 paint: flat-color software fill, full-frame repaint.
- * Enough to see layout on screen and to write the SDL harness against.
+/* Software rasterizer over s.framebuffer: flat fills, rounded rects and arcs
+ * with signed-distance antialiasing, 4bpp alpha text. Painting is clamped to
+ * the damage band mr_commit computed — y through clip_y0/clip_y1; x is not
+ * clipped, which is why damage is tracked as full-width row bands.
  *
- * TODO(R2): replace fills with a ThorVG SwCanvas over s.framebuffer —
- *           rounded rects, borders, text (real metrics), images.
  * TODO(R2): slider/switch composite rendering (track + knob from VALUE).
- * TODO(R3): dirty-rect damage tracking; only re-rasterize damaged nodes.
+ * TODO: MR_NODE_IMAGE is in the contract but not painted yet.
  */
 #include "scene_internal.hpp"
 
@@ -12,18 +12,42 @@
 #include <algorithm>
 #include <cmath>
 
+#if MR_PROFILE
+extern "C" {
+int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us, mr_prof_arc_us,
+    mr_prof_text_us;
+}
+#endif
+
 namespace mr {
 
+/* Integer blend. The float version cost the same in internal RAM as in PSRAM
+ * — measured 34ms against 13ms for this over a 177-row band on an ESP32-S3 —
+ * so the time was the six int/float conversions per pixel, not the memory.
+ * Alpha is widened 0..255 -> 0..256 so full opacity divides out exactly:
+ * opaque source pixels stay opaque instead of landing on 254. */
 static uint32_t blend(uint32_t dst, uint32_t src, float extra_opacity) {
-  float sa = ((src >> 24) & 0xFF) / 255.0f * extra_opacity;
-  if (sa <= 0.0f) return dst;
-  if (sa >= 1.0f) return 0xFF000000u | (src & 0x00FFFFFFu);
-  auto ch = [&](int shift) {
-    float d = (float)((dst >> shift) & 0xFF);
-    float s2 = (float)((src >> shift) & 0xFF);
-    return (uint32_t)(s2 * sa + d * (1.0f - sa)) << shift;
-  };
-  return 0xFF000000u | ch(16) | ch(8) | ch(0);
+  uint32_t a = ((src >> 24) & 0xFF);
+  if (extra_opacity < 1.0f) {
+    a = (uint32_t)((float)a * (extra_opacity < 0.0f ? 0.0f : extra_opacity));
+  }
+  if (a == 0) return dst;
+  if (a >= 255) return 0xFF000000u | (src & 0x00FFFFFFu);
+  const uint32_t ai = a + (a >> 7); /* 0..256 */
+  const uint32_t inv = 256 - ai;
+  const uint32_t rb =
+      (((dst & 0x00FF00FFu) * inv + (src & 0x00FF00FFu) * ai) >> 8) & 0x00FF00FFu;
+  const uint32_t g =
+      (((dst & 0x0000FF00u) * inv + (src & 0x0000FF00u) * ai) >> 8) & 0x0000FF00u;
+  return 0xFF000000u | rb | g;
+}
+
+/* Nothing to draw: fully transparent color, or a zero opacity. The blend
+ * would leave every pixel exactly as it was — but only after reading and
+ * writing it, which for a full-width wrapper node is a ~9.5ms round trip
+ * through PSRAM per node, and a scene nests many. */
+static bool invisible(uint32_t argb, float opacity) {
+  return ((argb >> 24) & 0xFF) == 0 || opacity <= 0.0f;
 }
 
 static inline float clamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
@@ -47,6 +71,7 @@ static float sd_round_rect(float px, float py, float cx, float cy,
 
 static void fill_rect(Scene &s, float fx, float fy, float fw, float fh,
                       uint32_t argb, float opacity) {
+  if (invisible(argb, opacity)) return;
   int x0 = std::max(0, (int)std::floor(fx));
   int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
@@ -81,6 +106,7 @@ static void fill_round_rect(Scene &s, float fx, float fy, float fw, float fh,
     fill_rect(s, fx, fy, fw, fh, argb, opacity);
     return;
   }
+  if (invisible(argb, opacity)) return;
   int x0 = std::max(0, (int)std::floor(fx));
   int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
@@ -106,6 +132,7 @@ static void stroke_round_rect(Scene &s, float fx, float fy, float fw, float fh,
                               float radius, float width, uint32_t argb,
                               float opacity) {
   if (width <= 0.0f || fw <= 0.0f || fh <= 0.0f) return;
+  if (invisible(argb, opacity)) return;
   int x0 = std::max(0, (int)std::floor(fx));
   int y0 = std::max(s.clip_y0, (int)std::floor(fy));
   int x1 = std::min(s.cfg.width, (int)std::ceil(fx + fw));
@@ -190,6 +217,9 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
   const uint32_t fill_argb = n.u[MR_PROP_BG_COLOR];
   const uint32_t track_argb = n.u[MR_PROP_ARC_TRACK_COLOR];
   const bool has_track = ((track_argb >> 24) & 0xFF) != 0;
+  /* A transparent fill draws nothing, so treat it as no sweep — otherwise the
+   * sweep and cap tests still run for every ring pixel. */
+  if (((fill_argb >> 24) & 0xFF) == 0) sweep = 0.0f;
   if (sweep <= 0.0f && !has_track) return;
   const bool closed = sweep >= 360.0f;
 
@@ -224,37 +254,58 @@ static void draw_arc(Scene &s, const Node &n, float opacity) {
     const float dy2 = dy * dy;
     if (dy2 > r_out2) continue;
 
+    /* Where this row crosses the annulus: one span through the middle when
+     * the row misses the inner hole, two either side of it when it does not.
+     * Scanning only those spans is what keeps an unchanged full-screen ring
+     * cheap to repaint — the full-width scan spent a multiply per pixel
+     * rejecting the middle, which on a 466px panel was most of the arc's
+     * time. The spans are padded a pixel and the exact d2 test below still
+     * decides each pixel, so this changes which pixels are visited, never
+     * what any visited pixel becomes. */
+    const float half_w = std::sqrt(r_out2 - dy2);
+    const float hole = dy2 < r_in2 ? std::sqrt(r_in2 - dy2) : 0.0f;
+    const int nspans = hole > 0.0f ? 2 : 1;
+    const float spans[2][2] = {
+        {r.cx - half_w, nspans == 2 ? r.cx - hole : r.cx + half_w},
+        {r.cx + hole, r.cx + half_w}};
+
     uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
-    for (int x = x0; x < x1; x++) {
-      const float dx = (float)x + 0.5f - r.cx;
-      const float d2 = dx * dx + dy2;
-      if (d2 > r_out2 || d2 < r_in2) continue;
+    int next_x = x0; /* padded spans can touch; never visit a pixel twice */
+    for (int si = 0; si < nspans; si++) {
+      const int sx0 = std::max(next_x, (int)std::floor(spans[si][0]) - 1);
+      const int sx1 = std::min(x1, (int)std::ceil(spans[si][1]) + 1);
+      next_x = sx1;
+      for (int x = sx0; x < sx1; x++) {
+        const float dx = (float)x + 0.5f - r.cx;
+        const float d2 = dx * dx + dy2;
+        if (d2 > r_out2 || d2 < r_in2) continue;
 
-      /* How much of this pixel the ring covers at all — the same for track
-       * and fill, since they share a centre line and a width. */
-      const float ring = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
-      if (ring <= 0.0f) continue;
+        /* How much of this pixel the ring covers at all — the same for track
+         * and fill, since they share a centre line and a width. */
+        const float ring = clamp01(r.half + 0.5f - std::fabs(std::sqrt(d2) - r.mid));
+        if (ring <= 0.0f) continue;
 
-      /* And how much of it the swept part covers. */
-      float filled = 0.0f;
-      if (sweep > 0.0f) {
-        if (closed || arc_within_sweep(n, dx, dy, sweep)) {
-          filled = ring;
+        /* And how much of it the swept part covers. */
+        float filled = 0.0f;
+        if (sweep > 0.0f) {
+          if (closed || arc_within_sweep(n, dx, dy, sweep)) {
+            filled = ring;
+          }
+          if (!closed && round_caps && filled < 1.0f) {
+            const float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            filled = std::max(filled, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
+            filled = std::max(filled, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
+          }
         }
-        if (!closed && round_caps && filled < 1.0f) {
-          const float px = (float)x + 0.5f, py = (float)y + 0.5f;
-          filled = std::max(filled, arc_cap_coverage(px, py, cap0x, cap0y, r.half));
-          filled = std::max(filled, arc_cap_coverage(px, py, cap1x, cap1y, r.half));
-        }
-      }
 
-      /* Track first, then the fill over it — but only where the fill does not
-       * already cover the pixel completely. */
-      if (has_track && filled < 0.999f) {
-        row[x] = blend(row[x], track_argb, opacity * ring);
-      }
-      if (filled > 0.0f) {
-        row[x] = blend(row[x], fill_argb, opacity * filled);
+        /* Track first, then the fill over it — but only where the fill does
+         * not already cover the pixel completely. */
+        if (has_track && filled < 0.999f) {
+          row[x] = blend(row[x], track_argb, opacity * ring);
+        }
+        if (filled > 0.0f) {
+          row[x] = blend(row[x], fill_argb, opacity * filled);
+        }
       }
     }
   }
@@ -270,6 +321,7 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
   if (!n.lines_font || n.lines.empty()) return;
   const moth_font *f = n.lines_font;
   const uint32_t color = n.u[MR_PROP_TEXT_COLOR];
+  if (invisible(color, opacity)) return;
 
   const int box_x0 = (int)std::floor(n.x);
   const int box_x1 = (int)std::ceil(n.x + n.w);
@@ -354,8 +406,11 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
   if (n->y >= (float)s.clip_y1 || n->y + n->h <= (float)s.clip_y0) return;
 
   if (n->kind == MR_NODE_ARC) {
+    MR_PROF_START(t_arc);
     draw_arc(s, *n, opacity);
+    MR_PROF_ADD(t_arc, mr_prof_arc_us);
   } else {
+    MR_PROF_START(t_rect);
     fill_round_rect(s, n->x, n->y, n->w, n->h, n->f[MR_PROP_RADIUS],
                     n->u[MR_PROP_BG_COLOR], opacity);
     if (n->f[MR_PROP_BORDER_WIDTH] > 0.0f) {
@@ -363,8 +418,11 @@ static void paint_node(Scene &s, mr_node_id id, float opacity) {
                         n->f[MR_PROP_BORDER_WIDTH], n->u[MR_PROP_BORDER_COLOR],
                         opacity);
     }
+    MR_PROF_ADD(t_rect, mr_prof_rect_us);
     if (n->kind == MR_NODE_LABEL && !n->text.empty()) {
+      MR_PROF_START(t_text);
       draw_text(s, *n, opacity);
+      MR_PROF_ADD(t_text, mr_prof_text_us);
     }
   }
 
@@ -404,10 +462,12 @@ void paint_run(Scene &s) {
   if (!covered) {
     /* Only the damaged rows — clearing the whole frame was 868KB of PSRAM
      * writes for rows that are about to be left exactly as they were. */
+    MR_PROF_START(t_clear);
     for (int y = s.clip_y0; y < s.clip_y1; y++) {
       uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
       std::fill(row, row + s.cfg.width, 0xFF000000u);
     }
+    MR_PROF_ADD(t_clear, mr_prof_clear_us);
   }
   paint_node(s, (mr_node_id)1, 1.0f);
 }

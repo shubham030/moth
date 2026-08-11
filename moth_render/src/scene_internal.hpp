@@ -5,6 +5,26 @@
 #include <string>
 #include <vector>
 
+/* Per-primitive frame timing, so optimization is aimed at where the
+ * milliseconds actually go. Off by default and free when off. When on, the
+ * embedder must provide mr_prof_now_us — a build that enables this without
+ * linking a clock fails loudly rather than quietly measuring nothing. */
+#ifndef MR_PROFILE
+#define MR_PROFILE 0
+#endif
+#if MR_PROFILE
+extern "C" {
+int64_t mr_prof_now_us(void);
+extern int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us,
+    mr_prof_arc_us, mr_prof_text_us;
+}
+#define MR_PROF_START(t) const int64_t t = mr_prof_now_us()
+#define MR_PROF_ADD(t, acc) ((acc) += mr_prof_now_us() - (t))
+#else
+#define MR_PROF_START(t) (void)0
+#define MR_PROF_ADD(t, acc) (void)0
+#endif
+
 namespace mr {
 
 /* One wrapped line, as a range into the original string. */
@@ -140,8 +160,8 @@ bool arc_hit(const Node &n, float px, float py);
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);
 
-/* paint.cpp — rasterizes the tree into s.framebuffer.
- * v0: flat-color software fill. TODO(R2): ThorVG canvas. */
+/* paint.cpp — rasterizes the tree into s.framebuffer, clamped to the damage
+ * band in clip_y0/clip_y1. */
 void paint_run(Scene &s);
 
 } // namespace mr

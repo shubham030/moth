@@ -171,9 +171,39 @@ Desktop-first; no Dart dependency until the framework exists.
       whole screen forever, since the first frame legitimately damages
       everything.
 
+- [x] R3a — Paint what shows. Per-primitive profiling (`MR_PROFILE`) found
+      115ms of the 138ms paint was rectangle fills — and nearly all of that
+      was fully transparent wrapper boxes (every Stack, Column, Padding, and
+      label background) taking the blend path, which read and wrote every
+      pixel back unchanged: a ~9.5ms round trip through PSRAM per full-width
+      node, times a dozen nested wrappers.
+
+      Three fixes, same benchmark:
+      - skip fills whose color or opacity make them invisible (115ms → 18.5ms;
+        what remains is two real opaque background fills at PSRAM write speed)
+      - scan arcs by per-row annulus spans instead of rejecting the full band
+        width pixel by pixel (18.3ms → 7.4ms)
+      - integer blend, alpha widened 0..256 so opaque stays exact. Float cost
+        the same in internal RAM as in PSRAM — 34ms vs 13ms over a 177-row
+        band — so it was the conversions, not the memory. Renders differ from
+        the float path by at most 2/255 per channel, only on blended pixels.
+
+      | phase | R3 | R3a |
+      | --- | --- | --- |
+      | layout + paint | 138.3ms | 30.1ms |
+      | ARGB to RGB565 | 8.3ms | 8.3ms |
+      | QSPI transfer | 10.2ms | 10.2ms |
+      | **frame** | **160.9ms** | **53.1ms** |
+
+      6.2 → 18.8 fps. A boot microbench (`membench` in ui/esp-s3) records the
+      floors this was measured against: writing the whole 177-row band costs
+      9.5ms in PSRAM, so the remaining fill time is bandwidth, not waste.
+
 - [ ] R3b — Tighter damage. The band is wider than the changed text needs;
       in the benchmark a label reports 176 rows where the same label alone
-      reports 88. Worth finding: it would roughly halve the band again.
+      reports 88. Worth finding: it would roughly halve the band again —
+      and at 53.1ms a frame the band-proportional phases are most of the
+      frame, so halving it lands close to 30fps by itself.
 
 - [ ] R4 — ESP-IDF port: esp_lcd + PPA on the P4 panel
 - [ ] Graduation review: conformance green + on-hardware comparison vs LVGL
