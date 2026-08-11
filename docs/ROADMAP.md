@@ -116,10 +116,17 @@ Dart program draws in a desktop window and on the board.
 - [x] `mr_reset` — the outgoing program's nodes go with it, so the new UI
       does not draw over a tree it does not own
 - [x] `mothsim --listen PORT`, and `mothc --push HOST:PORT`
-- [ ] ESP32 side: the receiver is POSIX sockets and should build on lwIP
-      as-is; what is missing is WiFi bring-up and credentials handling
-- [ ] Persist across reboot (blob to a spare partition)
-- [ ] Crash-loop protection (fall back to the previous blob)
+- [x] ESP32 side: vm/host/push.c compiles unchanged against lwIP. WiFi
+      credentials live in NVS, written from the host by
+      tools/provision/provision.py — never compiled in. The board prints
+      its push target when it connects; port 7621.
+- [x] Persist across reboot: the blob lands in a dedicated `mothb`
+      partition behind a CRC header, and boots run it straight from
+      mapped flash — a stored program costs no RAM
+- [x] Crash-loop protection: a strike counter in NVS. Booting from the
+      store costs a strike, ten seconds of uptime refunds it; three
+      strikes falls back to the embedded program and invalidates the
+      store. Runtime failures drop the stored program immediately
 
 ## M5 — v0.1 public release
 
