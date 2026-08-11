@@ -4,12 +4,15 @@
  * The Dart program owns the loop, so the host does its work from the frame
  * hook inside uiCommit — exactly as mothsim does on the desktop.
  */
+#include "hotpush.h"
 #include "moth_render.h"
 #include "moth_ui.h"
 #include "moth_vm.h"
 #include "panel.h"
+#include "push.h"
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_heap_caps.h"
@@ -123,6 +126,54 @@ static void membench(void) {
 }
 #endif
 
+/* ---- hot push: a new program arriving over WiFi ------------------------ */
+
+static moth_push *s_push;      /* listener; NULL until WiFi is up */
+static uint8_t *s_pending;     /* verified blob waiting to be swapped in */
+static size_t s_pending_len;
+static moth_vm *s_vm;          /* the running VM, so a push can halt it */
+
+static void register_natives(moth_vm *vm);
+
+/* Loads a blob into a throwaway VM to find out whether it would run, without
+ * touching the one that is running. The natives must match what the real VM
+ * offers, or a valid program would look unresolvable here. */
+static bool blob_is_loadable(const uint8_t *b, size_t len) {
+  moth_vm *probe = moth_new();
+  if (!probe) return false;
+  register_natives(probe);
+  moth_status st = moth_load(probe, b, len);
+  if (st != MOTH_OK) ESP_LOGE(TAG, "push rejected: %s", moth_error(probe));
+  moth_free(probe);
+  return st == MOTH_OK;
+}
+
+/* Takes a pushed blob if one has arrived and it survives verification.
+ * Rejecting here rather than after the swap is the whole point: a bad blob
+ * must not be able to take the running program down with it. */
+static bool accept_push(void) {
+  if (s_push == NULL && hotpush_net_connected()) {
+    s_push = moth_push_listen(HOTPUSH_PORT);
+    if (s_push) {
+      ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
+               hotpush_net_ip(), HOTPUSH_PORT);
+    }
+  }
+  if (s_push == NULL || s_pending != NULL) return false;
+
+  size_t len = 0;
+  uint8_t *blob = moth_push_poll(s_push, &len);
+  if (!blob) return false;
+  if (!blob_is_loadable(blob, len)) {
+    free(blob); /* the running program never noticed */
+    return false;
+  }
+  s_pending = blob;
+  s_pending_len = len;
+  ESP_LOGI(TAG, "push: %u bytes received, restarting", (unsigned)len);
+  return true;
+}
+
 static void on_frame(bool repainted, void *user) {
   (void)user;
 
@@ -136,6 +187,10 @@ static void on_frame(bool repainted, void *user) {
     last_y = y;
   }
   mr_pointer(down ? x : last_x, down ? y : last_y, down);
+
+  /* A push asks the running program to stop; the display stays up, so the
+   * replacement draws over a live screen rather than a blank one. */
+  if (accept_push() && s_vm) moth_request_halt(s_vm);
 
   if (repainted) {
 #if MOTH_FRAME_PROFILE
@@ -227,6 +282,13 @@ static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
   return moth_int(esp_timer_get_time() / 1000);
 }
 
+static void register_natives(moth_vm *vm) {
+  moth_register(vm, "print", n_print, NULL);
+  moth_register(vm, "delay", n_delay, NULL);
+  moth_register(vm, "millis", n_millis, NULL);
+  moth_ui_register(vm);
+}
+
 void app_main(void) {
   ESP_ERROR_CHECK(panel_init());
 
@@ -241,29 +303,59 @@ void app_main(void) {
     return;
   }
 
-  moth_vm *vm = moth_new();
-  if (!vm) {
-    ESP_LOGE(TAG, "out of memory");
-    return;
-  }
-  moth_register(vm, "print", n_print, NULL);
-  moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
-  moth_ui_register(vm);
-  moth_ui_set_frame_hook(on_frame, NULL);
+  /* WiFi comes up in the background; the UI never waits for it. */
+  hotpush_net_start();
 
-  size_t len = (size_t)(program_end - program_start);
+  const uint8_t *current = program_start;
+  size_t current_len = (size_t)(program_end - program_start);
+  bool current_is_heap = false; /* the embedded blob lives in flash */
+
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
-           (unsigned)len, PANEL_W, PANEL_H);
+           (unsigned)current_len, PANEL_W, PANEL_H);
 
-  moth_status st = moth_load(vm, program_start, len);
-  if (st != MOTH_OK) {
-    ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
-    return;
+  for (;;) {
+    moth_vm *vm = moth_new();
+    if (!vm) {
+      ESP_LOGE(TAG, "out of memory");
+      return;
+    }
+    register_natives(vm);
+    moth_ui_set_frame_hook(on_frame, NULL);
+    s_vm = vm;
+
+    moth_status st = moth_load(vm, current, current_len);
+    if (st != MOTH_OK) {
+      /* Verification happens before a push is accepted, so this is either
+       * the embedded program (a build problem) or a heap fault. */
+      ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
+    } else {
+      ESP_LOGI(TAG, "running Dart UI");
+      st = moth_run(vm);
+      if (st == MOTH_HALTED) {
+        ESP_LOGI(TAG, "program stopped for a push");
+      } else {
+        ESP_LOGI(TAG, "program finished (%d): %s", st,
+                 st == MOTH_OK ? "ok" : moth_error(vm));
+      }
+    }
+
+    /* The program ended on its own. Keep the panel showing its last frame
+     * and keep listening — a push aimed at a finished program should still
+     * take, exactly as mothsim does on the desktop. */
+    while (s_pending == NULL) {
+      accept_push();
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    /* Swap in the pushed program. The old program's nodes go with it —
+     * otherwise the new UI draws on top of a tree it does not own. */
+    s_vm = NULL;
+    mr_reset();
+    moth_free(vm);
+    if (current_is_heap) free((void *)current);
+    current = s_pending;
+    current_len = s_pending_len;
+    current_is_heap = true;
+    s_pending = NULL;
   }
-  ESP_LOGI(TAG, "running Dart UI");
-
-  st = moth_run(vm);
-  ESP_LOGI(TAG, "program finished (%d): %s", st, st == MOTH_OK ? "ok" : moth_error(vm));
-  moth_free(vm);
 }
