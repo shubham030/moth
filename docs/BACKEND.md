@@ -115,7 +115,9 @@ kind doesn't support is a no-op (logged in debug builds, never a crash).
 kinds `pressed`, `released`, `clicked`, `value_changed`. The backend performs
 hit-testing and control gestures (slider drag) natively; the sink (the VM event
 loop) only sees semantic results. The sink must never re-enter the contract
-synchronously — it queues.
+synchronously — it queues. Hit-testing for `slider` and `switch` extends to at
+least a 48px-tall band around the painted control (finger-sized targets); a
+touch that misses the pixels but lands in the band still hits.
 
 **Animation**: `anim_start(node, prop, from, to, duration_ms, easing) → anim_id`,
 `anim_stop(anim_id)`. Easing: `linear`, `ease_out`, `ease_in_out`. Animatable:
