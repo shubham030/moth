@@ -53,6 +53,13 @@ static void slider_drag(Scene &s, mr_node_id id, float px) {
   if (t < 0.0f) t = 0.0f;
   if (t > 1.0f) t = 1.0f;
   const float v = lo + t * (hi - lo);
+  /* Dedupe against what the FINGER last produced, not what the node holds
+   * (see Scene::drag_value): the app may have written back something else,
+   * and honoring that must not re-trigger an emit while the finger is
+   * still. */
+  if (s.drag_valued && v == s.drag_value) return;
+  s.drag_value = v;
+  s.drag_valued = true;
   if (v == n->f[MR_PROP_VALUE]) return;
   mr_set_f32(id, MR_PROP_VALUE, v);
   s.emit({id, MR_EV_VALUE_CHANGED, v, px, 0});
@@ -89,6 +96,14 @@ static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
    * PAINTED box is unchanged. */
   float pad_x = 0.0f, pad_y = 0.0f;
   if (n->kind == MR_NODE_SLIDER || n->kind == MR_NODE_SWITCH) {
+    if (n->kind == MR_NODE_SLIDER) {
+      /* A slider too narrow for its thumb travel (w < 2r) paints nothing
+       * and cannot drag — it must not sit invisibly on top of whatever is
+       * behind it, eating touches, either. */
+      float x0, x1, r;
+      slider_geometry(*n, &x0, &x1, &r);
+      if (x1 <= x0) return MR_NODE_NONE;
+    }
     if (n->h < 48.0f) pad_y = (48.0f - n->h) * 0.5f;
     pad_x = 8.0f;
   }
@@ -291,6 +306,7 @@ void mr_pointer(int x, int y, bool down) {
   float px = (float)x, py = (float)y;
   if (down && !s.pointer_down) {
     s.pressed_node = hit_test(s, mr_root(), px, py);
+    s.drag_valued = false; /* a new gesture owes its first value an emit */
     if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_PRESSED, 0, px, py});
       /* Pressing a slider jumps the thumb to the finger, as Flutter's
