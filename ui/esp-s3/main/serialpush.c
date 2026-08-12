@@ -83,9 +83,12 @@ static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
     }
     /* Guarded and logged: junk console bytes spelling 'MPSH' plus a large
      * length used to malloc up to 1MB silently and then swallow real frames
-     * until the stall timer fired. Half the largest free block keeps a
-     * garbage length from starving the running program. */
-    if (s.blob_len > heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 2) {
+     * until the stall timer fired. A fixed 64KB reserve, not a fraction:
+     * the half-the-largest-block form refused valid 300KB programs whenever
+     * fragmentation was unlucky, making the same push alternately work and
+     * fail. The malloc below still catches genuine exhaustion. */
+    if (s.blob_len + 64 * 1024 >
+        heap_caps_get_largest_free_block(MALLOC_CAP_8BIT)) {
       ESP_LOGW(TAG, "frame of %u bytes refused (heap)", (unsigned)s.blob_len);
       reset_scanner();
       return NULL;
@@ -191,6 +194,10 @@ void serialpush_start(void) {
     return;
   }
   ESP_LOGI(TAG, "cable push ready: mothc app.dart --push <this serial port>");
+}
+
+bool serialpush_replies_pending(void) {
+  return s_replies && uxQueueMessagesWaiting(s_replies) > 0;
 }
 
 uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out) {

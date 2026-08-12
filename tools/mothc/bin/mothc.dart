@@ -146,18 +146,15 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
   exit(70);
 }
 
-Future<void> _pushTcp(String host, int port, Uint8List blob) async {
-  final started = DateTime.now();
-  final nonce = Random.secure().nextInt(0x100000000);
+/// One connect + frame + verdict wait. Null when the host closed without a
+/// verdict — which is the receiver's "cannot verify right now, try again"
+/// (moth_push_abandon), not proof of a wrong host.
+Future<bool?> _tcpAttempt(String host, int port, Uint8List frame,
+    VerdictScanner scanner) async {
   final socket =
       await Socket.connect(host, port, timeout: const Duration(seconds: 5));
-  socket.add(pushFrame(blob, nonce));
+  socket.add(frame);
   await socket.flush();
-
-  // The framed verdict arrives AFTER the host verified the blob — so
-  // "pushed" here means "verified and about to run", not merely
-  // "delivered". Anything else listening on the port fails this check.
-  final scanner = VerdictScanner(nonce);
   bool? verdict;
   try {
     await for (final chunk
@@ -168,12 +165,34 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
       if (verdict != null) break;
     }
   } on SocketException {
-    // A peer that closes without a verdict is handled below.
+    // A peer that closes without a verdict is the null case below.
   }
   socket.destroy();
+  return verdict;
+}
+
+Future<void> _pushTcp(String host, int port, Uint8List blob) async {
+  final started = DateTime.now();
+  final nonce = Random.secure().nextInt(0x100000000);
+  final frame = pushFrame(blob, nonce);
+  final scanner = VerdictScanner(nonce);
+
+  // The framed verdict arrives AFTER the host verified the blob — so
+  // "pushed" means "verified and about to run", not merely "delivered".
+  // No verdict gets retried, matching the serial path: the receiver
+  // abandons (closes silently) when it cannot verify at that moment, and
+  // the abandon contract IS "the sender retries".
+  bool? verdict;
+  for (var attempt = 1; attempt <= 3 && verdict == null; attempt++) {
+    verdict = await _tcpAttempt(host, port, frame, scanner);
+    if (verdict == null && attempt < 3) {
+      stderr.writeln('mothc: no verdict — the host may be busy; retrying');
+      await Future<void>.delayed(const Duration(seconds: 3));
+    }
+  }
   if (verdict == null) {
-    stderr.writeln('mothc: no verdict from $host:$port — is that a moth '
-        'host? (the frame was sent, but nothing confirmed it)');
+    stderr.writeln('mothc: no verdict from $host:$port after 3 attempts — '
+        'the host is out of memory to verify, or not a moth host');
     await stderr.flush();
     exit(70);
   }
