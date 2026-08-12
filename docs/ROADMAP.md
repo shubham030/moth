@@ -123,13 +123,14 @@ Dart program draws in a desktop window and on the board.
 - [x] Push over the USB cable: the USB-Serial-JTAG console doubles as a
       push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
       the out-of-box loop needs no WiFi at all — provisioning is the
-      upgrade, not the prerequisite. "pushed" now means the framed,
-      nonce-carrying verdict came back after verification. Caveat, per
-      the honest-status rule: the verdict's on-board delivery (sent
-      thrice against console-writer interleaving) and the transfer
-      timings are verified on the desktop and in tests but await
-      on-board confirmation — the transports themselves were
-      hardware-verified under the older ack protocol.
+      upgrade, not the prerequisite. "pushed" means the framed,
+      nonce-carrying verdict came back after verification — confirmed
+      on the board: serial push 128ms compile-to-verdict, persistence
+      across reboot, and the return push 180ms, with the triple-sent
+      verdict surviving the shared console. fps re-measured at 38.1
+      after the transport polling landed on the frame hook — unchanged
+      from the R3 baseline. WiFi verdict push is desktop-verified and
+      awaits one on-board run after re-provisioning.
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM

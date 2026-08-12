@@ -119,7 +119,8 @@ static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
  * shares this peripheral without the driver, so a log line can interleave
  * into the middle of one reply and break the sender's 8-byte match. Three
  * spaced copies make an all-copies-corrupted race vanishingly unlikely; the
- * nonce makes duplicates harmless. Needs on-board confirmation. Runs on this
+ * nonce makes duplicates harmless. Confirmed on hardware: verdicts landed
+ * through live console logging on every push tried. Runs on this
  * task, never on the frame hook — the blocking writes and delays here cost
  * two-plus frame budgets, which the render loop cannot pay. */
 static void send_reply(const reply_req *r) {
