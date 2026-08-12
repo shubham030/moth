@@ -11,6 +11,8 @@
 
 final kBox = 0;
 final kLabel = 1;
+final kSlider = 3;
+final kSwitch = 4;
 final kArc = 5;
 
 final propWidth = 0;
@@ -29,6 +31,9 @@ final propRadius = 12;
 final propBorderWidth = 13;
 final propBorderColor = 14;
 final propText = 16;
+final propValue = 20;
+final propMin = 21;
+final propMax = 22;
 final propFontSize = 17;
 final propTextColor = 18;
 final propArcStart = 23;
@@ -75,6 +80,7 @@ final alignSpaceBetween = 3;
 /// rather than on their own widest line.
 final alignStretch = 4;
 final eventClicked = 2;
+final eventValueChanged = 3;
 
 // ---- widgets -------------------------------------------------------------
 
@@ -99,6 +105,10 @@ class Widget {
   void attachElement(Element e) {}
 
   Function? tapHandler() => null;
+
+  /// Overridden by controls. Called with the new value (a double) when the
+  /// renderer reports the control changed — a drag, a toggle.
+  Function? changeHandler() => null;
 }
 
 class Box extends Widget {
@@ -581,6 +591,82 @@ class GestureDetector extends Widget {
   void apply(int node) {}
 }
 
+/// A horizontal value control, as Flutter spells it. The renderer owns the
+/// drag: pressing jumps the thumb to the finger, dragging tracks it, and
+/// [onChanged] is called with the new value (a double between [min] and
+/// [max]). Like Flutter's, it is a controlled component — show the value
+/// you hold, update it in [onChanged], or the thumb snaps back on the next
+/// rebuild.
+class Slider extends Widget {
+  double value;
+  double min;
+  double max;
+
+  /// Called with the new double on every change during a drag.
+  Function? onChanged;
+
+  /// The track's filled portion and the thumb. The renderer falls back to
+  /// its default accent when unset.
+  int activeColor;
+  int width;
+  int height;
+
+  Slider({
+    this.value = 0,
+    this.min = 0,
+    this.max = 1,
+    this.onChanged,
+    this.activeColor = 0,
+    this.width = -1,
+    this.height = 24,
+  });
+
+  String typeName() => 'Slider';
+  int kind() => kSlider;
+  Function? changeHandler() => onChanged;
+
+  void apply(int node) {
+    uiSetNum(node, propMin, min);
+    uiSetNum(node, propMax, max);
+    uiSetNum(node, propValue, value);
+    uiSetInt(node, propBgColor, activeColor);
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
+    uiSetNum(node, propHeight, height);
+  }
+}
+
+/// A boolean toggle. Tapping flips it and calls [onChanged] with the new
+/// state; controlled the same way [Slider] is.
+class Switch extends Widget {
+  bool value;
+
+  /// Called with the new bool when tapped.
+  Function? onChanged;
+  int activeColor;
+
+  Switch({this.value = false, this.onChanged, this.activeColor = 0});
+
+  String typeName() => 'Switch';
+  int kind() => kSwitch;
+
+  Function? changeHandler() {
+    if (onChanged == null) return null;
+    // The renderer reports 0/1; the Flutter-shaped callback wants a bool.
+    // The lambda reaches onChanged through `this` — locals cannot be
+    // captured, fields can.
+    return (v) {
+      onChanged!(v >= 0.5);
+    };
+  }
+
+  void apply(int node) {
+    uiSetNum(node, propMin, 0);
+    uiSetNum(node, propMax, 1);
+    uiSetNum(node, propValue, value ? 1 : 0);
+    uiSetInt(node, propBgColor, activeColor);
+  }
+}
+
 /// A horizontal rule.
 class Divider extends Widget {
   int thickness;
@@ -862,6 +948,8 @@ class Element {
   }
 
   Function? tapHandler() => widget.tapHandler();
+
+  Function? changeHandler() => widget.changeHandler();
 }
 
 Element? rootElement;
@@ -882,7 +970,25 @@ void pumpFrame(int dtMs) {
   while (packed >= 0) {
     var nodeId = packed ~/ 8;
     var kind = packed % 8;
-    if (kind == eventClicked) {
+    if (kind == eventValueChanged) {
+      // The payload rides in a native slot, valid until the next uiPoll —
+      // read it before anything else polls.
+      var value = uiEventValue();
+      Element? hit;
+      for (final el in mounted) {
+        if (el.ownsNode && el.node == nodeId) hit = el;
+      }
+      var target = hit;
+      while (target != null) {
+        var handler = target.changeHandler();
+        if (handler != null) {
+          handler(value);
+          target = null;
+        } else {
+          target = target.parent;
+        }
+      }
+    } else if (kind == eventClicked) {
       // Exactly one element owns a node; composites share their child's id
       // and would otherwise make a single tap fire more than once.
       Element? hit;

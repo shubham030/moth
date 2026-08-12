@@ -38,6 +38,37 @@ static float ease(mr_easing e, float t) {
   }
 }
 
+/* Sets a slider's value from a pointer x, emitting VALUE_CHANGED only when
+ * it actually changed. Geometry comes from paint's slider_geometry, so the
+ * value under the finger is the value under the thumb. */
+static void slider_drag(Scene &s, mr_node_id id, float px) {
+  Node *n = s.get(id);
+  if (!n || n->kind != MR_NODE_SLIDER) return;
+  const float lo = n->f[MR_PROP_MIN], hi = n->f[MR_PROP_MAX];
+  if (hi <= lo) return;
+  float x0, x1, r;
+  slider_geometry(*n, &x0, &x1, &r);
+  if (x1 <= x0) return;
+  float t = (px - x0) / (x1 - x0);
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  const float v = lo + t * (hi - lo);
+  if (v == n->f[MR_PROP_VALUE]) return;
+  mr_set_f32(id, MR_PROP_VALUE, v);
+  s.emit({id, MR_EV_VALUE_CHANGED, v, px, 0});
+}
+
+/* Flips a switch and reports it. The contract has the backend own control
+ * gestures: a switch emits 0/1, and the widget layer decides whether the
+ * new state sticks (a controlled component may set it right back). */
+static void switch_toggle(Scene &s, mr_node_id id, float px, float py) {
+  Node *n = s.get(id);
+  if (!n || n->kind != MR_NODE_SWITCH) return;
+  const float v = n->f[MR_PROP_VALUE] >= 0.5f ? 0.0f : 1.0f;
+  mr_set_f32(id, MR_PROP_VALUE, v);
+  s.emit({id, MR_EV_VALUE_CHANGED, v, px, py});
+}
+
 static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
   Node *n = s.get(id);
   if (!n || n->f[MR_PROP_OPACITY] <= 0.0f) return MR_NODE_NONE;
@@ -249,17 +280,24 @@ void mr_pointer(int x, int y, bool down) {
   float px = (float)x, py = (float)y;
   if (down && !s.pointer_down) {
     s.pressed_node = hit_test(s, mr_root(), px, py);
-    if (s.pressed_node != MR_NODE_NONE)
+    if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_PRESSED, 0, px, py});
+      /* Pressing a slider jumps the thumb to the finger, as Flutter's
+       * does; the same call then tracks every move while held. */
+      slider_drag(s, s.pressed_node, px);
+    }
+  } else if (down && s.pointer_down) {
+    slider_drag(s, s.pressed_node, px);
   } else if (!down && s.pointer_down) {
     if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_RELEASED, 0, px, py});
-      if (hit_test(s, mr_root(), px, py) == s.pressed_node)
+      if (hit_test(s, mr_root(), px, py) == s.pressed_node) {
         s.emit({s.pressed_node, MR_EV_CLICKED, 0, px, py});
+        switch_toggle(s, s.pressed_node, px, py);
+      }
     }
     s.pressed_node = MR_NODE_NONE;
   }
-  /* TODO(R1): slider drag gesture -> MR_EV_VALUE_CHANGED */
   s.pointer_down = down;
 }
 

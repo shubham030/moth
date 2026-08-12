@@ -31,6 +31,18 @@ target_include_directories(render_perf_test PRIVATE include src)
 target_compile_definitions(render_perf_test PRIVATE MR_PROFILE=1)
 target_compile_options(render_perf_test PRIVATE -Wall -Wextra)
 
+# Contract test for the interactive controls: gestures in, events and
+# pixels out. Plain library build — no profiling needed.
+add_executable(render_controls_test
+  test/controls_test.cpp
+  src/scene.cpp
+  src/layout.cpp
+  src/paint.cpp
+  src/text.cpp
+)
+target_include_directories(render_controls_test PRIVATE include src)
+target_compile_options(render_controls_test PRIVATE -Wall -Wextra)
+
 # Desktop harness — built only when SDL2 is available.
 find_package(SDL2 QUIET)
 if(SDL2_FOUND)
