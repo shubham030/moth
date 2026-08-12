@@ -644,7 +644,16 @@ class Switch extends Widget {
   Function? onChanged;
   int activeColor;
 
-  Switch({this.value = false, this.onChanged, this.activeColor = 0});
+  int width;
+  int height;
+
+  Switch({
+    this.value = false,
+    this.onChanged,
+    this.activeColor = 0,
+    this.width = 40,
+    this.height = 24,
+  });
 
   String typeName() => 'Switch';
   int kind() => kSwitch;
@@ -664,6 +673,8 @@ class Switch extends Widget {
     uiSetNum(node, propMax, 1);
     uiSetNum(node, propValue, value ? 1 : 0);
     uiSetInt(node, propBgColor, activeColor);
+    uiSetNum(node, propWidth, width);
+    uiSetNum(node, propHeight, height);
   }
 }
 

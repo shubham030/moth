@@ -95,6 +95,10 @@ Dart program draws in a desktop window and on the board.
       end (moth_render/test/controls_test.cpp) — events, clamping,
       dedupe, and painted pixels asserted against the same geometry the
       gesture uses
+- [ ] Disabled controls: `onChanged: null` should disable the gesture and
+      grey the control (Flutter's semantics). Today the renderer still drags
+      the thumb and the next rebuild snaps it back; needs an enabled prop in
+      the backend contract, so it rides the next contract bump
 - [ ] Image widget
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
