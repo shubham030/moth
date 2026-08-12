@@ -8,25 +8,21 @@ bytecode VM, drawing through moth's own renderer. The VM, the renderer and the
 bindings together add about 32 KB of flash on top of ESP-IDF.
 
 ```dart
-import 'package:moth/moth.dart';
+import 'package:moth/widgets.dart';
 
 class Counter extends Component {
   int count = 0;
 
   Widget build() {
-    var label = Text();
-    label.value = 'tapped $count times';
-
-    var panel = Box();
-    panel.color = 0xFF1A1B26;
-    panel.growFactor = 1;
-    panel.kids = [label];
-    panel.onTap = () {
-      setState(() {
-        count += 1;
-      });
-    };
-    return panel;
+    return Container(
+      color: 0xFF1A1B26,
+      flex: 1,
+      onTap: () => setState(() => count += 1),
+      child: Center(
+        child: Text('tapped $count times',
+            style: TextStyle(fontSize: 20, color: 0xFFF2EFE7)),
+      ),
+    );
   }
 }
 
@@ -39,8 +35,9 @@ void main() {
 }
 ```
 
-It is wordier than Flutter because moth has no named parameters yet — that is
-a real gap, not a style choice. See [ROADMAP](docs/ROADMAP.md).
+Named parameters, `setState`, the widget names you know — and pushing a
+change to the board takes one command and about 175 milliseconds, no
+reflash. See [ROADMAP](docs/ROADMAP.md).
 
 > **Status: early, but real.** Dart runs on hardware: the VM drives GPIO, and
 > the widget layer above draws and takes touch on a 466x466 panel. A tap
@@ -81,6 +78,40 @@ $ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
 The same blob runs unchanged on the board. And because a program is 136 bytes
 of bytecode rather than a firmware image, updating it later means pushing those
 bytes — not reflashing.
+
+## The same app in moth and in LVGL
+
+One pomodoro timer, written twice — [`examples/ui/pomodoro.dart`](examples/ui/pomodoro.dart)
+in moth and [`examples/comparison/pomodoro_lvgl.c`](examples/comparison/pomodoro_lvgl.c)
+against LVGL 9's C API — both real, both compiled, both screenshotted from
+their simulators (moth left, LVGL right):
+
+![the same pomodoro in moth and LVGL](docs/img/pomodoro-side-by-side.png)
+
+The line counts are nearly equal (~115 vs ~120 plus LVGL's bring-up). The
+difference is *which* lines. moth describes the UI and the reconciler keeps
+it true:
+
+```dart
+Text(running ? 'TAP TO PAUSE' : 'TAP TO START', ...)
+```
+
+LVGL retains widgets, so every state change is hand-routed to every widget
+showing it, and a missed call is a silently stale screen:
+
+```c
+static void refresh(void) {
+  lv_label_set_text(phase_label, on_break ? "BREAK" : "FOCUS");
+  lv_obj_set_style_text_color(phase_label, accent(), 0);
+  lv_label_set_text_fmt(time_label, "%ld:%02ld", ...);
+  lv_label_set_text(hint_label, running ? "TAP TO PAUSE" : "TAP TO START");
+  lv_arc_set_value(arc, ...);
+  lv_obj_set_style_arc_color(arc, accent(), LV_PART_INDICATOR);
+}
+```
+
+The full side-by-side — including what LVGL does better — is in
+[docs/lvgl-comparison.md](docs/lvgl-comparison.md).
 
 ## Why
 

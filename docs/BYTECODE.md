@@ -18,7 +18,7 @@ All multi-byte integers are little-endian.
 
 ```
 magic        4 bytes   "MOTH"
-version      u16       MOTH_BYTECODE_VERSION (currently 4)
+version      u16       MOTH_BYTECODE_VERSION (currently 5)
 flags        u16       reserved, 0
 constants    u16 count, then each: tag u8 + payload
 natives      u16 count, then each: name_const u16 + argc u8
@@ -28,6 +28,8 @@ classes      u16 count, then each:
                nfields     u8
                field_names nfields × u16 (constant indices)
                nmethods    u16, then each: name_const u16 + func_index u16
+                           + member_kind u8 (0 method, 1 getter, 2 setter —
+                           arity cannot tell a getter from a no-arg method)
                ctor        u16  constructor function index, or 0xFFFF
 functions    u16 count, then each:
                name_const  u16
@@ -114,6 +116,8 @@ Operands are shown after the mnemonic. Stack effect is written
 | `GET_PROP` | 0x58 | u16 name | `[obj → v]` field, or `.length` |
 | `SET_PROP` | 0x59 | u16 name | `[obj v → v]` |
 | `INVOKE` | 0x5A | u16 name, u8 argc | `[obj args… → result]` |
+| `CLOSURE` | 0x5B | u16 fn, u8 captures_this | `[→ closure]` `this` captured when the flag is set |
+| `CALL_VALUE` | 0x5C | u8 argc | `[callee args… → result]` call a function value |
 
 `INVOKE` resolves the method on the receiver's class at run time, since the
 compiler has no type information. Slot 0 of a method or constructor is the
@@ -180,7 +184,8 @@ guarantee moth does not make yet, not a memory-safety hole.
 
 ## Not yet
 
-Closures, inheritance, getters/setters, static members, exceptions, `async`.
+Static members, exceptions, `async`. Closures, inheritance and
+getters/setters have shipped and are part of the format above.
 
 ## Versioning
 
@@ -197,3 +202,4 @@ firmware are updated separately and can drift apart.
 | 2       | top-level variables                      |
 | 3       | heap, strings, lists, classes            |
 | 4       | `OP_CLOSURE`, `OP_CALL_VALUE`            |
+| 5       | `member_kind` byte per class method — a getter and a zero-argument method have identical arity, so the kind is explicit |

@@ -28,6 +28,7 @@ and pyserial.
 
 import argparse
 import glob
+import os
 import re
 import shutil
 import subprocess
@@ -39,6 +40,16 @@ REPO = Path(__file__).resolve().parent.parent.parent
 APP = REPO / "ui" / "esp-s3"
 PROGRAM = APP / "main" / "program.mothb"
 BENCH_DART = REPO / "examples" / "ui" / "frame_bench.dart"
+
+
+def mothb_offset():
+    """The push store's offset, read from the same partitions.csv the build
+    uses — the provisioning tool learned this lesson already."""
+    for line in open(APP / "partitions.csv"):
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) >= 5 and parts[0] == "mothb" and parts[3]:
+            return parts[3]
+    sys.exit("fpsbench: no mothb row in partitions.csv")
 
 
 def run(cmd, cwd=None):
@@ -119,6 +130,14 @@ def main():
         run(["idf.py", "-B", "build-fps", "-D", "MOTH_FPSBENCH=1",
              "build"], cwd=APP)
         run(["idf.py", "-B", "build-fps", "-p", port, "flash"], cwd=APP)
+        # The push store shadows the embedded program: a previously pushed
+        # app boots instead of the benchmark and the capture sees no summary.
+        # One erased sector kills the store's header; the benchmark's own
+        # reboot after flashing then runs the embedded blob.
+        idf_env = os.environ.get("IDF_PYTHON_ENV_PATH")
+        py = os.path.join(idf_env, "bin", "python") if idf_env else sys.executable
+        subprocess.run([py, "-m", "esptool", "--port", port, "erase_region",
+                        mothb_offset(), "0x1000"], check=True)
         fps = report(capture_serial(port, args.capture_seconds), args.min_fps)
     finally:
         PROGRAM.write_bytes(backup)

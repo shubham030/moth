@@ -13,9 +13,16 @@
 extern "C" {
 #endif
 
-/* Registers every ui* native. Call after mr_init and before moth_load, so a
- * program needing the display fails at load on a board without one. */
+/* Registers every ui* native and takes ownership of the render event sink
+ * and queue. Call after mr_init and before moth_load, so a program needing
+ * the display fails at load on a board without one. */
 void moth_ui_register(moth_vm *vm);
+
+/* Registers the ui* natives only, touching no shared state. For probe VMs:
+ * verifying a pushed blob means loading it against the same native names,
+ * and the full register on a throwaway VM was resetting the live program's
+ * event queue — a tap delivered during verification simply vanished. */
+void moth_ui_register_natives(moth_vm *vm);
 
 /* Called from inside uiCommit, which is the only point the host gets control
  * while a Dart program's own loop is running: present the framebuffer when

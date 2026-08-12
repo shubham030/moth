@@ -225,7 +225,10 @@ void moth_ui_register(moth_vm *vm) {
   g_events.head = 0;
   g_events.count = 0;
   mr_set_event_sink(on_event, NULL);
+  moth_ui_register_natives(vm);
+}
 
+void moth_ui_register_natives(moth_vm *vm) {
   moth_register(vm, "uiWidth", n_ui_width, NULL);
   moth_register(vm, "uiHeight", n_ui_height, NULL);
   moth_register(vm, "uiRoot", n_ui_root, NULL);
