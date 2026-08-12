@@ -144,7 +144,13 @@ void hotpush_net_start(void) {
   /* INVALID_STATE means a loop already exists, which is fine — some other
    * subsystem got there first. */
   if (err != ESP_ERR_INVALID_STATE && !net_step(err, "event loop")) return;
-  esp_netif_create_default_wifi_sta();
+  /* The one bring-up call that reports failure as NULL instead of an
+   * esp_err_t — and the out-of-memory case net_step exists for is exactly
+   * what it returns NULL for. */
+  if (esp_netif_create_default_wifi_sta() == NULL) {
+    ESP_LOGW(TAG, "sta netif creation failed — hot push over wifi disabled");
+    return;
+  }
   wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
   if (!net_step(esp_wifi_init(&init), "wifi init")) return;
   if (!net_step(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,

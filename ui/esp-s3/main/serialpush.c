@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "driver/usb_serial_jtag.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -30,7 +31,13 @@ typedef struct {
   uint32_t nonce; /* echoed in the verdict reply */
 } frame;
 
-static QueueHandle_t s_frames; /* depth 1: at most one push in flight */
+static QueueHandle_t s_frames;  /* depth 1: at most one push in flight */
+
+typedef struct {
+  uint32_t nonce;
+  bool ok;
+} reply_req;
+static QueueHandle_t s_replies; /* verdicts the task sends between reads */
 
 /* Scanner state, owned by the task. The wire format constants and header
  * decode come from push_proto.h, shared with the TCP receiver; only the
@@ -74,8 +81,19 @@ static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
       reset_scanner();
       return NULL;
     }
+    /* Guarded and logged: junk console bytes spelling 'MPSH' plus a large
+     * length used to malloc up to 1MB silently and then swallow real frames
+     * until the stall timer fired. Half the largest free block keeps a
+     * garbage length from starving the running program. */
+    if (s.blob_len > heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 2) {
+      ESP_LOGW(TAG, "frame of %u bytes refused (heap)", (unsigned)s.blob_len);
+      reset_scanner();
+      return NULL;
+    }
+    ESP_LOGI(TAG, "receiving %u-byte frame", (unsigned)s.blob_len);
     s.blob = malloc(s.blob_len);
     if (!s.blob) {
+      ESP_LOGW(TAG, "frame of %u bytes dropped (malloc)", (unsigned)s.blob_len);
       reset_scanner();
       return NULL;
     }
@@ -94,10 +112,30 @@ static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
   return done;
 }
 
+/* Sends one verdict, three copies 20ms apart: the secondary console writer
+ * shares this peripheral without the driver, so a log line can interleave
+ * into the middle of one reply and break the sender's 8-byte match. Three
+ * spaced copies make an all-copies-corrupted race vanishingly unlikely; the
+ * nonce makes duplicates harmless. Needs on-board confirmation. Runs on this
+ * task, never on the frame hook — the blocking writes and delays here cost
+ * two-plus frame budgets, which the render loop cannot pay. */
+static void send_reply(const reply_req *r) {
+  uint8_t reply[MPSH_REPLY_LEN];
+  mpsh_make_reply(reply, r->ok, r->nonce);
+  for (int i = 0; i < 3; i++) {
+    usb_serial_jtag_write_bytes(reply, sizeof reply, pdMS_TO_TICKS(250));
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
 static void serialpush_task(void *arg) {
   (void)arg;
   uint8_t chunk[256];
   for (;;) {
+    reply_req r;
+    while (s_replies && xQueueReceive(s_replies, &r, 0) == pdTRUE) {
+      send_reply(&r);
+    }
     int n = usb_serial_jtag_read_bytes(chunk, sizeof chunk, pdMS_TO_TICKS(100));
     if (n <= 0) {
       /* Mid-frame and silent too long: the sender is gone, and a half frame
@@ -135,8 +173,13 @@ void serialpush_start(void) {
    * framebuffer are already allocated — and the task would write to a NULL
    * queue on its first completed frame, mid-push. */
   s_frames = xQueueCreate(1, sizeof(frame));
-  if (!s_frames) {
-    ESP_LOGW(TAG, "out of memory for the push queue — cable push disabled");
+  s_replies = xQueueCreate(4, sizeof(reply_req));
+  if (!s_frames || !s_replies) {
+    ESP_LOGW(TAG, "out of memory for the push queues — cable push disabled");
+    if (s_frames) vQueueDelete(s_frames);
+    if (s_replies) vQueueDelete(s_replies);
+    s_frames = NULL;
+    s_replies = NULL;
     return;
   }
   /* Modest stack: the task moves bytes and calls malloc, nothing deep. */
@@ -159,23 +202,13 @@ uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out) {
 }
 
 void serialpush_respond(uint32_t nonce, bool ok) {
-  if (!s_frames) return; /* transport never came up */
-  /* Through the driver's interrupt-driven TX, not the console's polling
-   * path: the console's secondary writer drops output under back-pressure,
-   * and a dropped verdict makes the sender re-push a program that already
-   * landed. A binary reply carrying the sender's own nonce also cannot be
-   * forged by log lines or a program's print() — which text acks were,
-   * three separate times. */
-  uint8_t reply[MPSH_REPLY_LEN];
-  mpsh_make_reply(reply, ok, nonce);
-  /* Sent three times: the secondary console writer shares this peripheral
-   * without the driver (esp_vfs never switched to it), so a log line can
-   * interleave into the middle of one reply and break the sender's 8-byte
-   * match. Three spaced copies make an all-copies-corrupted race
-   * vanishingly unlikely; the nonce makes duplicates harmless. Needs
-   * on-board confirmation once hardware is back. */
-  for (int i = 0; i < 3; i++) {
-    usb_serial_jtag_write_bytes(reply, sizeof reply, pdMS_TO_TICKS(250));
-    vTaskDelay(pdMS_TO_TICKS(20));
+  if (!s_frames || !s_replies) return; /* transport never came up */
+  /* Enqueued for the task, not sent here: this is called from the render
+   * frame hook, and the send takes >=60ms against a ~26ms frame budget.
+   * The task drains the queue between reads, through the driver's
+   * interrupt-driven TX. */
+  const reply_req r = {nonce, ok};
+  if (xQueueSend(s_replies, &r, 0) != pdTRUE) {
+    ESP_LOGW(TAG, "verdict queue full — reply dropped, sender will retry");
   }
 }

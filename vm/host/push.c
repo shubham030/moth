@@ -170,20 +170,30 @@ void moth_push_respond(moth_push *p, bool ok) {
     const int flags = 0;
 #endif
     /* Nonblocking socket: one EAGAIN must not eat the verdict, since the
-     * sender has no other way to learn it. Eight bytes into an empty
-     * buffer, so the retry loop is theater almost always — but "almost" is
-     * what reviews are for. */
+     * sender has no other way to learn it. Elapsed-time form, not an
+     * absolute deadline — now_ms() wraps every 49.7 days and an absolute
+     * `now + 500` near the wrap never admits even one iteration (the stall
+     * check 75 lines up already does it right). Yield on EAGAIN rather
+     * than spinning a core against a full buffer. */
     size_t off = 0;
-    const uint32_t give_up = now_ms() + 500;
-    while (off < sizeof reply && now_ms() < give_up) {
+    const uint32_t start = now_ms();
+    while (off < sizeof reply && now_ms() - start < 500) {
       ssize_t n = send(p->client, reply + off, sizeof reply - off, flags);
       if (n > 0) {
         off += (size_t)n;
       } else if (n < 0 && !read_would_block()) {
         break; /* peer is gone; it just misses its reply */
+      } else {
+        usleep(1000);
       }
     }
   }
+  p->awaiting_verdict = false;
+  drop_client(p);
+}
+
+void moth_push_abandon(moth_push *p) {
+  if (!p || !p->awaiting_verdict) return;
   p->awaiting_verdict = false;
   drop_client(p);
 }
