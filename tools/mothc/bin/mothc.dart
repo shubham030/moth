@@ -1,21 +1,25 @@
-import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:analyzer/source/line_info.dart';
 import 'package:mothc/src/compiler.dart';
 import 'package:mothc/src/errors.dart';
+import 'package:mothc/src/push_wire.dart';
+import 'package:mothc/src/serial.dart';
 
 const _usage = '''
 mothc — compile Dart to moth bytecode
 
-usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT]
+usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
 
   --push  send the compiled program to a running host, which stops what it
           is doing and starts this instead. The display stays up.
+          HOST:PORT pushes over the network; a serial device path
+          (/dev/cu.usbmodemXXXX) pushes over the USB cable — no WiFi needed.
 ''';
 
-void main(List<String> args) {
+Future<void> main(List<String> args) async {
   if (args.isEmpty || args.contains('-h') || args.contains('--help')) {
     stdout.write(_usage);
     exit(args.isEmpty ? 64 : 0);
@@ -33,7 +37,7 @@ void main(List<String> args) {
       output = args[++i];
     } else if (args[i] == '--push') {
       if (i + 1 >= args.length) {
-        stderr.writeln('mothc: --push needs HOST:PORT');
+        stderr.writeln('mothc: --push needs HOST:PORT or a serial device');
         exit(64);
       }
       push = args[++i];
@@ -64,7 +68,11 @@ void main(List<String> args) {
     File(outPath).writeAsBytesSync(result.blob);
     stdout.writeln('wrote $outPath (${result.blob.length} bytes)');
     if (push != null) {
-      _push(push, result.blob);
+      // Awaited, so a throw anywhere in the push surfaces as a message and
+      // an exit code — unawaited, a missing stty or a yanked cable printed
+      // a raw async stack trace, and main could not tell pushed from
+      // still-in-flight.
+      await _push(push, result.blob);
     }
   } on CompileError catch (e) {
     // The error may have come from an imported file, so report it against
@@ -79,40 +87,164 @@ void main(List<String> args) {
   }
 }
 
+/// Pushes over a serial device — the board's USB console doubles as a push
+/// transport, so a cable is enough and no WiFi setup is needed.
+///
+/// The port handling lives in SerialPort (lib/src/serial.dart): nonblocking
+/// open and raw mode via FFI, because Dart's File API can block forever on a
+/// modem-class device and stty had the same flaw one subprocess removed.
+///
+/// The verdict is a framed binary reply carrying this push's nonce, so no
+/// draining, no log-line grepping, and no ambiguity about which push a
+/// reply answers — text acks lost that game three review rounds running.
+/// No reply can mean the board was resetting when the port opened — some
+/// adapters toggle the reset lines on open — so the frame is sent again
+/// after a boot's worth of waiting before giving up; the nonce makes the
+/// retry safe, since a late reply to attempt one still names this push.
+Future<void> _pushSerial(String device, Uint8List blob) async {
+  final SerialPort port;
+  try {
+    port = SerialPort.open(device);
+  } on SerialException catch (e) {
+    stderr.writeln('mothc: $e');
+    exit(74);
+  }
+
+  final started = DateTime.now();
+  final nonce = Random.secure().nextInt(0x100000000);
+  final frame = pushFrame(blob, nonce);
+  final scanner = VerdictScanner(nonce);
+  for (var attempt = 1; attempt <= 3; attempt++) {
+    port.writeAll(frame);
+    final deadline = DateTime.now().add(const Duration(seconds: 4));
+    while (DateTime.now().isBefore(deadline)) {
+      final chunk = port.readAvailable();
+      if (chunk.isEmpty) {
+        sleep(const Duration(milliseconds: 20));
+        continue;
+      }
+      final verdict = scanner.feed(chunk);
+      if (verdict == true) {
+        final ms = DateTime.now().difference(started).inMilliseconds;
+        stdout.writeln('pushed over $device in ${ms}ms');
+        await stdout.flush(); // exit() does not drain stdout into a pipe
+        exit(0);
+      }
+      if (verdict == false) {
+        stderr.writeln('mothc: the board rejected the program — see its log');
+        await stderr.flush();
+        exit(70);
+      }
+    }
+    if (attempt < 3) {
+      stderr.writeln('mothc: no reply — the board may be booting; retrying');
+      sleep(const Duration(seconds: 5));
+    }
+  }
+  stderr.writeln('mothc: no reply from $device after 3 attempts');
+  await stderr.flush();
+  exit(70);
+}
+
+/// One connect + frame + verdict wait. Null when the host closed without a
+/// verdict — which is the receiver's "cannot verify right now, try again"
+/// (moth_push_abandon), not proof of a wrong host.
+Future<bool?> _tcpAttempt(String host, int port, Uint8List frame,
+    VerdictScanner scanner) async {
+  final socket =
+      await Socket.connect(host, port, timeout: const Duration(seconds: 5));
+  socket.add(frame);
+  await socket.flush();
+  bool? verdict;
+  try {
+    await for (final chunk
+        in socket.timeout(const Duration(seconds: 5), onTimeout: (sink) {
+      sink.close();
+    })) {
+      verdict = scanner.feed(chunk);
+      if (verdict != null) break;
+    }
+  } on SocketException {
+    // A peer that closes without a verdict is the null case below.
+  }
+  socket.destroy();
+  return verdict;
+}
+
+Future<void> _pushTcp(String host, int port, Uint8List blob) async {
+  final started = DateTime.now();
+  final nonce = Random.secure().nextInt(0x100000000);
+  final frame = pushFrame(blob, nonce);
+  final scanner = VerdictScanner(nonce);
+
+  // The framed verdict arrives AFTER the host verified the blob — so
+  // "pushed" means "verified and about to run", not merely "delivered".
+  // No verdict gets retried, matching the serial path: the receiver
+  // abandons (closes silently) when it cannot verify at that moment, and
+  // the abandon contract IS "the sender retries".
+  bool? verdict;
+  for (var attempt = 1; attempt <= 3 && verdict == null; attempt++) {
+    verdict = await _tcpAttempt(host, port, frame, scanner);
+    if (verdict == null && attempt < 3) {
+      stderr.writeln('mothc: no verdict — the host may be busy; retrying');
+      await Future<void>.delayed(const Duration(seconds: 3));
+    }
+  }
+  if (verdict == null) {
+    stderr.writeln('mothc: no verdict from $host:$port after 3 attempts — '
+        'the host is out of memory to verify, or not a moth host');
+    await stderr.flush();
+    exit(70);
+  }
+  if (verdict == false) {
+    stderr.writeln('mothc: the host rejected the program — see its log');
+    await stderr.flush();
+    exit(70);
+  }
+  final ms = DateTime.now().difference(started).inMilliseconds;
+  stdout.writeln('pushed to $host:$port in ${ms}ms');
+  await stdout.flush();
+  exit(0);
+}
+
 /// Sends a compiled program to a listening host: "MPSH", a little-endian
 /// length, then the bytes. The host verifies before running it.
-void _push(String target, Uint8List blob) {
+///
+/// The transport is picked by what the target *is*, not by how it is
+/// spelled: a serial device exists on the filesystem, and testing the
+/// spelling routed `COM3:` (a common Windows form, colon included) to the
+/// network branch and rejected `./ttyUSB0` outright.
+Future<void> _push(String target, Uint8List blob) async {
+  // A COM port is exactly COM + digits — a bare prefix test swallowed
+  // hostnames like com.example.local:7621.
+  if (Platform.isWindows &&
+      RegExp(r'^COM\d+$', caseSensitive: false).hasMatch(target)) {
+    stderr.writeln('mothc: serial push is not implemented on Windows yet — '
+        'push over WiFi (HOST:PORT) instead');
+    exit(74);
+  }
+  if (File(target).existsSync()) {
+    try {
+      await _pushSerial(target, blob);
+    } on SerialException catch (e) {
+      stderr.writeln('mothc: serial push failed — $e');
+      exit(74);
+    }
+    return;
+  }
+
   final colon = target.lastIndexOf(':');
-  if (colon < 0) {
-    stderr.writeln('mothc: --push wants HOST:PORT');
+  final port = colon < 0 ? null : int.tryParse(target.substring(colon + 1));
+  if (port == null) {
+    stderr.writeln('mothc: --push wants HOST:PORT or an existing serial '
+        'device path (got "$target")');
     exit(64);
   }
   final host = target.substring(0, colon);
-  final port = int.tryParse(target.substring(colon + 1));
-  if (port == null) {
-    stderr.writeln('mothc: --push wants HOST:PORT');
-    exit(64);
-  }
-
-  final header = BytesBuilder()
-    ..add(ascii.encode('MPSH'))
-    ..add([
-      blob.length & 0xFF,
-      (blob.length >> 8) & 0xFF,
-      (blob.length >> 16) & 0xFF,
-      (blob.length >> 24) & 0xFF,
-    ]);
-
-  final started = DateTime.now();
-  Socket.connect(host, port, timeout: const Duration(seconds: 5)).then((socket) async {
-    socket.add(header.toBytes());
-    socket.add(blob);
-    await socket.flush();
-    await socket.close();
-    final ms = DateTime.now().difference(started).inMilliseconds;
-    stdout.writeln('pushed to $host:$port in ${ms}ms');
-  }).catchError((Object e) {
-    stderr.writeln('mothc: could not push to $host:$port — $e');
+  try {
+    await _pushTcp(host, port, blob);
+  } on SocketException catch (e) {
+    stderr.writeln('mothc: could not push to $host:$port — ${e.message}');
     exit(70);
-  });
+  }
 }

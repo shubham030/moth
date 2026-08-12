@@ -1,4 +1,5 @@
 #include "push.h"
+#include "push_proto.h"
 
 #include <errno.h>
 #include <stdbool.h>
@@ -11,9 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define PUSH_MAGIC "MPSH"
-#define HEADER_LEN 8
-#define MAX_BLOB (1u << 20) /* a megabyte is far beyond any real program */
+#define HEADER_LEN MPSH_HEADER_LEN
 
 /* A peer that disappears without a FIN or an RST — a board losing power, a
  * laptop closing its lid mid-push — leaves a socket that never reports an
@@ -35,6 +34,8 @@ struct moth_push {
   size_t header_got;
   uint8_t *blob;
   size_t blob_len, blob_got;
+  uint32_t nonce;         /* from the frame being received */
+  bool awaiting_verdict;  /* poll returned a blob; respond has not run */
   uint32_t last_progress_ms;
 };
 
@@ -86,12 +87,19 @@ moth_push *moth_push_listen(int port) {
 }
 
 uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
-  if (!p) return NULL;
+  if (!p || p->awaiting_verdict) return NULL;
 
   if (p->client < 0) {
     int c = accept(p->listener, NULL, NULL);
     if (c < 0) return NULL; /* nothing waiting, or a transient failure */
     set_nonblocking(c);
+#ifdef SO_NOSIGPIPE
+    /* The verdict reply is this file's only write; a peer that closed first
+     * must cost an EPIPE errno, not a process-killing SIGPIPE. Linux and
+     * lwIP get the same via MSG_NOSIGNAL at the send. */
+    int nosig = 1;
+    setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof nosig);
+#endif
     p->client = c;
     p->last_progress_ms = now_ms();
   } else if (now_ms() - p->last_progress_ms > PUSH_STALL_MS) {
@@ -112,10 +120,13 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
     p->last_progress_ms = now_ms();
     if (p->header_got < HEADER_LEN) return NULL;
 
-    if (memcmp(p->header, PUSH_MAGIC, 4) != 0) { drop_client(p); return NULL; }
-    p->blob_len = (size_t)p->header[4] | ((size_t)p->header[5] << 8) |
-                  ((size_t)p->header[6] << 16) | ((size_t)p->header[7] << 24);
-    if (p->blob_len == 0 || p->blob_len > MAX_BLOB) { drop_client(p); return NULL; }
+    if (memcmp(p->header, MPSH_MAGIC, MPSH_MAGIC_LEN) != 0) {
+      drop_client(p);
+      return NULL;
+    }
+    p->blob_len = mpsh_header_len(p->header);
+    p->nonce = mpsh_header_nonce(p->header);
+    if (!mpsh_len_ok(p->blob_len)) { drop_client(p); return NULL; }
     p->blob = malloc(p->blob_len);
     if (!p->blob) { drop_client(p); return NULL; }
     p->blob_got = 0;
@@ -137,8 +148,54 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out) {
   uint8_t *complete = p->blob;
   *len_out = p->blob_len;
   p->blob = NULL; /* ownership passes to the caller */
-  drop_client(p);
+  /* The client stays open: the reply is the VERDICT, and the verdict does
+   * not exist until the caller has verified the blob. An earlier version
+   * acked on receipt, which told the sender "pushed" for a blob the host
+   * then rejected. */
+  p->awaiting_verdict = true;
   return complete;
+}
+
+void moth_push_respond(moth_push *p, bool ok) {
+  if (!p || !p->awaiting_verdict) return;
+  /* The verdict flag clears even when the peer is already gone — otherwise
+   * a client that vanished mid-verify would leave the channel refusing every
+   * future push. */
+  if (p->client >= 0) {
+    uint8_t reply[MPSH_REPLY_LEN];
+    mpsh_make_reply(reply, ok, p->nonce);
+#ifdef MSG_NOSIGNAL
+    const int flags = MSG_NOSIGNAL;
+#else
+    const int flags = 0;
+#endif
+    /* Nonblocking socket: one EAGAIN must not eat the verdict, since the
+     * sender has no other way to learn it. Elapsed-time form, not an
+     * absolute deadline — now_ms() wraps every 49.7 days and an absolute
+     * `now + 500` near the wrap never admits even one iteration (the stall
+     * check 75 lines up already does it right). Yield on EAGAIN rather
+     * than spinning a core against a full buffer. */
+    size_t off = 0;
+    const uint32_t start = now_ms();
+    while (off < sizeof reply && now_ms() - start < 500) {
+      ssize_t n = send(p->client, reply + off, sizeof reply - off, flags);
+      if (n > 0) {
+        off += (size_t)n;
+      } else if (n < 0 && !read_would_block()) {
+        break; /* peer is gone; it just misses its reply */
+      } else {
+        usleep(1000);
+      }
+    }
+  }
+  p->awaiting_verdict = false;
+  drop_client(p);
+}
+
+void moth_push_abandon(moth_push *p) {
+  if (!p || !p->awaiting_verdict) return;
+  p->awaiting_verdict = false;
+  drop_client(p);
 }
 
 void moth_push_close(moth_push *p) {

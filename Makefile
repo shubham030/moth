@@ -2,7 +2,7 @@
 MOTHC := dart run tools/mothc/bin/mothc.dart
 MOTHRUN := ./build/vm/mothrun
 
-.PHONY: help vm deps test render-test fps blink sim ui docs docs-build render clean
+.PHONY: help vm deps test render-test serial-test fps blink sim ui docs docs-build render clean
 
 help:
 	@echo "make vm           build the VM and the mothrun simulator"
@@ -28,8 +28,14 @@ ui: vm
 deps:
 	dart pub get --directory tools/mothc
 
-test: vm deps render-test
+test: vm deps render-test serial-test
 	cd tools/mothc && dart test
+
+# The FFI serial layer against a real pty — raw mode, binary transparency,
+# nonblocking IO. The push wire format itself is covered by dart test above
+# (test/push_wire_test.dart).
+serial-test: deps
+	cd tools/mothc && python3 tool/serial_pty_check.py
 
 # Deterministic paint-cost budgets — pixels visited per frame, not wall time.
 # See docs/PERF_REVIEW.md for what a failure here means.

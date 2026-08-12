@@ -116,10 +116,33 @@ Dart program draws in a desktop window and on the board.
 - [x] `mr_reset` — the outgoing program's nodes go with it, so the new UI
       does not draw over a tree it does not own
 - [x] `mothsim --listen PORT`, and `mothc --push HOST:PORT`
-- [ ] ESP32 side: the receiver is POSIX sockets and should build on lwIP
-      as-is; what is missing is WiFi bring-up and credentials handling
-- [ ] Persist across reboot (blob to a spare partition)
-- [ ] Crash-loop protection (fall back to the previous blob)
+- [x] ESP32 side: vm/host/push.c compiles unchanged against lwIP. WiFi
+      credentials live in NVS, written from the host by
+      tools/provision/provision.py — never compiled in. The board prints
+      its push target when it connects; port 7621.
+- [x] Push over the USB cable: the USB-Serial-JTAG console doubles as a
+      push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
+      the out-of-box loop needs no WiFi at all — provisioning is the
+      upgrade, not the prerequisite. "pushed" means the framed,
+      nonce-carrying verdict came back after verification — confirmed
+      on the board: serial push 128ms compile-to-verdict, persistence
+      across reboot, and the return push 180ms, with the triple-sent
+      verdict surviving the shared console. Those measurements are
+      from the build before the final quiet-window fix (581c2c0),
+      which is strictly more protective but compile-verified only —
+      one flash and one push confirms the tip. fps re-measured at
+      38.1 with the transport polling on the frame hook, unchanged
+      from the R3 baseline. WiFi verdict push is desktop-verified and
+      awaits one on-board run after re-provisioning.
+- [x] Persist across reboot: the blob lands in a dedicated `mothb`
+      partition behind a CRC header, and boots run it straight from
+      mapped flash — a stored program costs no RAM
+- [x] Crash-loop protection: a strike counter in NVS driven by
+      esp_reset_reason() — a panic or watchdog reset while the pushed
+      program ran is a strike, any clean reset clears, and three strikes
+      falls back to the embedded program and invalidates the store.
+      (Brownouts are power faults and never count.) Runtime failures
+      drop the stored program immediately
 
 ## M5 — v0.1 public release
 

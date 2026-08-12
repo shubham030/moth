@@ -4,16 +4,24 @@
  * The Dart program owns the loop, so the host does its work from the frame
  * hook inside uiCommit — exactly as mothsim does on the desktop.
  */
+#include "hotpush.h"
 #include "moth_render.h"
 #include "moth_ui.h"
 #include "moth_vm.h"
 #include "panel.h"
+#include "push.h"
+#include "pushstore.h"
+#include "serialpush.h"
 
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include "nvs_flash.h"
 
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -123,6 +131,141 @@ static void membench(void) {
 }
 #endif
 
+/* ---- hot push: a new program arriving over WiFi ------------------------ */
+
+static moth_push *s_push;  /* listener; NULL until WiFi is up */
+static moth_vm *s_vm;      /* the running VM, so a push can halt it */
+
+/* A pushed blob waiting to be swapped in. `verified` may be false: when the
+ * verifier cannot run beside the live program (its heap is still allocated),
+ * verification is deferred to the swap path, where the old VM is gone and
+ * memory is as free as it gets. The transport and nonce are kept so the
+ * verdict can be sent when it finally exists. */
+static uint8_t *s_pending;
+static size_t s_pending_len;
+static bool s_pending_verified;
+static uint32_t s_pending_nonce;
+typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
+static push_src s_pending_src;
+
+/* Set when a deferred verification still could not run after teardown —
+ * meaning the memory pressure is real, not contention with the old program.
+ * While it holds, further unverifiable pushes are abandoned WITHOUT halting
+ * the running program: killing it again to rediscover the same scarcity
+ * cost the user three restarts per pressure episode instead of one. */
+static int64_t s_scarce_until_us;
+
+static void register_host_natives(moth_vm *vm);
+
+/* What verification concluded — and "could not run the verifier" is not
+ * "the blob is bad". Treating them alike let a transient out-of-memory at
+ * boot erase a perfectly good stored program. */
+typedef enum { BLOB_OK, BLOB_BAD, BLOB_UNVERIFIABLE } blob_verdict;
+
+/* Loads a blob into a throwaway VM to find out whether it would run, without
+ * touching the one that is running. The natives must match what the real VM
+ * offers by NAME only — moth_ui_register_natives, not the full register,
+ * which would reset the live program's event queue and eat any tap queued
+ * while the probe ran. Logging is the caller's: a bad boot-time store and a
+ * bad live push are different messages (and mothc greps for the latter). */
+static blob_verdict verify_blob(const uint8_t *b, size_t len, char *why,
+                                size_t why_len) {
+  moth_vm *probe = moth_new();
+  if (!probe) {
+    snprintf(why, why_len, "out of memory for the verifier");
+    return BLOB_UNVERIFIABLE;
+  }
+  register_host_natives(probe);
+  moth_ui_register_natives(probe);
+  moth_status st = moth_load(probe, b, len);
+  if (st != MOTH_OK) snprintf(why, why_len, "%s", moth_error(probe));
+  moth_free(probe);
+  if (st == MOTH_OK) return BLOB_OK;
+  /* Out of memory DURING the load is as transient as failing to create the
+   * probe — it says nothing about the blob. Only a verdict about the blob
+   * itself may erase a stored program. */
+  return st == MOTH_ERR_OOM ? BLOB_UNVERIFIABLE : BLOB_BAD;
+}
+
+/* Takes a pushed blob if one has arrived and it survives verification —
+ * immediately when the verifier can run beside the live program, deferred to
+ * the swap path when it cannot. A bad blob still never takes the running
+ * program down: the deferred case verifies before anything replaces it. */
+
+/* Routes the framed verdict back over whichever transport delivered the
+ * frame. The reply carries the sender's nonce (push_proto.h), so the log
+ * lines here are for the human watching the console — mothc no longer
+ * reads them. */
+static void respond_push(push_src src, uint32_t nonce, bool ok) {
+  if (src == PUSH_SRC_TCP) moth_push_respond(s_push, ok);
+  else serialpush_respond(nonce, ok);
+}
+
+static bool accept_push(void) {
+  if (s_push == NULL && hotpush_net_connected()) {
+    /* Throttled: this runs on the frame hook, and a bind that keeps failing
+     * (port held after a soft restart, say) must not add a socket syscall
+     * burst to every frame forever. */
+    static int64_t next_listen_us;
+    if (esp_timer_get_time() >= next_listen_us) {
+      s_push = moth_push_listen(HOTPUSH_PORT);
+      if (s_push) {
+        ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
+                 hotpush_net_ip(), HOTPUSH_PORT);
+      } else {
+        next_listen_us = esp_timer_get_time() + 2 * 1000 * 1000;
+      }
+    }
+  }
+  if (s_pending != NULL) return false;
+
+  /* Two transports, one path from here on: WiFi when it is up, and the USB
+   * console always. */
+  size_t len = 0;
+  uint32_t nonce = 0;
+  push_src src = PUSH_SRC_TCP;
+  uint8_t *blob = s_push ? moth_push_poll(s_push, &len) : NULL;
+  if (!blob) {
+    blob = serialpush_poll(&len, &nonce);
+    src = PUSH_SRC_SERIAL;
+  }
+  if (!blob) return false;
+  char why[128] = {0};
+  const blob_verdict verdict = verify_blob(blob, len, why, sizeof why);
+  if (verdict == BLOB_BAD) {
+    /* Only a verdict about the BLOB earns a rejection. */
+    ESP_LOGE(TAG, "push rejected: %s", why);
+    respond_push(src, nonce, false);
+    free(blob); /* the running program never noticed */
+    return false;
+  }
+  if (verdict == BLOB_UNVERIFIABLE) {
+    if (esp_timer_get_time() < s_scarce_until_us) {
+      /* A recent teardown already proved the scarcity is real. Abandon
+       * without killing the program again — the sender times out and
+       * retries into the same answer until the pressure lifts. */
+      ESP_LOGW(TAG, "still cannot verify pushes (%s) — abandoning", why);
+      if (src == PUSH_SRC_TCP) moth_push_abandon(s_push);
+      free(blob);
+      return false;
+    }
+    /* The verifier could not run beside the live program — which says
+     * nothing about the push. Rejecting here reported good programs as bad
+     * whenever memory was tight. Take the blob, stop the program, and
+     * verify in the swap path once its heap is gone; the verdict goes out
+     * then. */
+    ESP_LOGW(TAG, "deferring push verification (%s)", why);
+  }
+  s_pending = blob;
+  s_pending_len = len;
+  s_pending_verified = verdict == BLOB_OK;
+  s_pending_nonce = nonce;
+  s_pending_src = src;
+  if (s_pending_verified) respond_push(src, nonce, true);
+  ESP_LOGI(TAG, "push: %u bytes received, restarting", (unsigned)len);
+  return true;
+}
+
 static void on_frame(bool repainted, void *user) {
   (void)user;
 
@@ -136,6 +279,10 @@ static void on_frame(bool repainted, void *user) {
     last_y = y;
   }
   mr_pointer(down ? x : last_x, down ? y : last_y, down);
+
+  /* A push asks the running program to stop; the display stays up, so the
+   * replacement draws over a live screen rather than a blank one. */
+  if (accept_push() && s_vm) moth_request_halt(s_vm);
 
   if (repainted) {
 #if MOTH_FRAME_PROFILE
@@ -227,43 +374,319 @@ static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
   return moth_int(esp_timer_get_time() / 1000);
 }
 
-void app_main(void) {
-  ESP_ERROR_CHECK(panel_init());
+static void register_host_natives(moth_vm *vm) {
+  moth_register(vm, "print", n_print, NULL);
+  moth_register(vm, "delay", n_delay, NULL);
+  moth_register(vm, "millis", n_millis, NULL);
+}
 
+/* What the VM is currently executing, and how to let go of it. Both flash
+ * sources — the embedded blob and the mapped store — are freed by doing
+ * nothing; only a fresh push lives on the heap until the next boot. */
+typedef struct {
+  const uint8_t *blob;
+  size_t len;
+  bool heap;       /* free(blob) when swapped out */
+  bool from_store; /* executing from the mothb partition's mapped flash */
+  bool in_store;   /* the store holds this blob — booted from it, or a push
+                      take_pending just saved. The runtime-failure fallback
+                      gates on this: a just-pushed program is NOT
+                      from_store, but its copy is in flash and would come
+                      back on the next boot if only from_store were checked. */
+} program_src;
+
+static program_src embedded_program(void) {
+  program_src p = {program_start, (size_t)(program_end - program_start),
+                   false, false, false};
+  return p;
+}
+
+/* The one teardown ordering, used by every path that stops a program. The
+ * failure path and the swap path each having their own copy is how the
+ * failure path came to erase the store while the VM still held pointers
+ * into its mapped flash. */
+static void teardown_vm(moth_vm *vm) {
+  s_vm = NULL;
+  mr_reset(); /* the program's nodes go with it */
+  moth_free(vm);
+}
+
+/* Crash accounting by ground truth rather than by timer. The previous
+ * design refunded a strike after ten stable seconds, which a program that
+ * panics at t=30s defeated forever — it earned its refund every boot and
+ * the guard never fired. esp_reset_reason() says what actually ended the
+ * last boot: a panic or watchdog while the stored program ran is a strike,
+ * and any clean reset clears the record. */
+static bool crash_reset(void) {
+  switch (esp_reset_reason()) {
+    case ESP_RST_PANIC:
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:
+      return true;
+    /* Not brownout: that is a power fault, and three of them on a weak hub
+     * would erase a good program that never did anything wrong. */
+    default:
+      return false;
+  }
+}
+
+/* Picks what to run at boot: the last pushed program if one is stored, still
+ * verifies, and has not crashed the chip PUSHSTORE_MAX_STRIKES boots in a
+ * row — the embedded program otherwise. */
+static program_src choose_boot_blob(void) {
+  /* Account for how the LAST boot ended before deciding this one. */
+  const bool crashed = crash_reset();
+  if (crashed && pushstore_boot_was_store()) {
+    pushstore_add_strike();
+    ESP_LOGW(TAG, "last boot crashed while running the pushed program "
+                  "(strike %d of %d)", pushstore_strikes(),
+             PUSHSTORE_MAX_STRIKES);
+  } else if (!crashed) {
+    pushstore_clear_strikes();
+  }
+
+  size_t stored_len = 0;
+  const uint8_t *stored = pushstore_load(&stored_len);
+  if (!stored) return embedded_program();
+
+  if (pushstore_strikes() >= PUSHSTORE_MAX_STRIKES) {
+    ESP_LOGW(TAG, "stored program crashed %d boots in a row; falling back "
+                  "to the embedded one", pushstore_strikes());
+    pushstore_invalidate();
+    pushstore_clear_strikes();
+    return embedded_program();
+  }
+  char why[128] = {0};
+  const blob_verdict verdict = verify_blob(stored, stored_len, why, sizeof why);
+  if (verdict == BLOB_BAD) {
+    ESP_LOGW(TAG, "stored program rejected: %s — dropping it", why);
+    pushstore_invalidate();
+    return embedded_program();
+  }
+  if (verdict == BLOB_UNVERIFIABLE) {
+    /* Could not check — which says nothing about the blob. Run the embedded
+     * program this boot and leave the store intact for the next; erasing on
+     * a transient out-of-memory would destroy a good program forever. */
+    ESP_LOGW(TAG, "cannot verify the stored program (%s) — "
+                  "running the embedded one this boot", why);
+    pushstore_release();
+    return embedded_program();
+  }
+
+  ESP_LOGI(TAG, "booting the last pushed program (%u bytes)",
+           (unsigned)stored_len);
+  program_src p = {stored, stored_len, false, true, true};
+  return p;
+}
+
+/* Creates a VM for `p` and runs it to completion, halt, or failure. */
+static moth_status run_program(const program_src *p, moth_vm **vm_out) {
+  moth_vm *vm = moth_new();
+  *vm_out = vm;
+  if (!vm) {
+    ESP_LOGE(TAG, "out of memory");
+    return MOTH_ERR_OOM;
+  }
+  register_host_natives(vm);
+  moth_ui_register(vm);
+  moth_ui_set_frame_hook(on_frame, NULL);
+  s_vm = vm;
+
+  moth_status st = moth_load(vm, p->blob, p->len);
+  if (st != MOTH_OK) {
+    ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
+    return st;
+  }
+  ESP_LOGI(TAG, "running Dart UI");
+  return moth_run(vm);
+}
+
+/* Blocks until a verified push is waiting. The panel keeps its last frame:
+ * a push aimed at a finished program should still take, exactly as mothsim
+ * behaves on the desktop. */
+static void wait_for_pending(void) {
+  while (s_pending == NULL) {
+    accept_push();
+    vTaskDelay(pdMS_TO_TICKS(50));
+  }
+}
+
+/* Shared persistent storage, initialized before anything that needs it.
+ * This was owned by the WiFi bring-up once — which meant a wifi failure took
+ * the crash-loop strike counter down with it, in the code whose whole job is
+ * surviving failures. Failure here degrades (no credentials, no strikes)
+ * but never stops the UI. */
+static void storage_init(void) {
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    /* A layout upgrade wipes NVS — and the wifi credentials with it. Say
+     * so, or the board silently stops connecting after an IDF bump. */
+    ESP_LOGW(TAG, "NVS layout changed; erasing — wifi needs re-provisioning");
+    if (nvs_flash_erase() == ESP_OK) err = nvs_flash_init();
+  }
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "NVS unavailable (%s) — no wifi credentials and no "
+                  "crash-loop strike counter this boot", esp_err_to_name(err));
+  }
+}
+
+/* Tries to claim the pending push as the program to run. Called with the
+ * old VM already torn down — both because the outgoing program may execute
+ * from the very flash pushstore_save erases, and because a deferred
+ * verification finally has the memory to run here. False means the push was
+ * rejected (verdict sent, blob freed) and the caller keeps its current
+ * program. */
+static bool take_pending(program_src *out) {
+  if (!s_pending_verified) {
+    char why[128] = {0};
+    blob_verdict verdict = BLOB_UNVERIFIABLE;
+    /* The old program's heap is gone, so the verifier has its best shot —
+     * but heap coalescing is not instant, so give a transient OOM a few
+     * tries before concluding anything. */
+    for (int i = 0; i < 3 && verdict == BLOB_UNVERIFIABLE; i++) {
+      if (i > 0) vTaskDelay(pdMS_TO_TICKS(100));
+      verdict = verify_blob(s_pending, s_pending_len, why, sizeof why);
+    }
+    if (verdict == BLOB_UNVERIFIABLE) {
+      /* Still no verdict — so none is sent, and the scarcity is now proven
+       * real (the old heap is gone and it STILL cannot run). Remember that,
+       * so the sender's retries are abandoned cheaply instead of killing
+       * the replacement program each time. */
+      s_scarce_until_us = esp_timer_get_time() + 30 * 1000 * 1000;
+      ESP_LOGW(TAG, "cannot verify the push (%s) — dropping it unanswered",
+               why);
+      if (s_pending_src == PUSH_SRC_TCP) moth_push_abandon(s_push);
+      free(s_pending);
+      s_pending = NULL;
+      return false;
+    }
+    if (verdict == BLOB_BAD) {
+      ESP_LOGE(TAG, "push rejected: %s", why);
+      respond_push(s_pending_src, s_pending_nonce, false);
+      free(s_pending);
+      s_pending = NULL;
+      return false;
+    }
+    respond_push(s_pending_src, s_pending_nonce, true);
+  }
+
+  const bool saved = pushstore_save(s_pending, s_pending_len);
+  if (!saved) {
+    ESP_LOGW(TAG, "push not persisted — it runs now, and a reboot returns "
+                  "to the embedded program");
+  }
+  pushstore_clear_strikes(); /* a new program starts with a clean record */
+
+  /* Runs from the RAM copy until the next boot picks it up from flash —
+   * but a crash while it runs is still the pushed program's crash. */
+  pushstore_set_boot_source(true);
+  program_src p = {s_pending, s_pending_len, true, false, saved};
+  s_pending = NULL;
+  *out = p;
+  return true;
+}
+
+/* Swaps to the pending push when it is accepted; keeps *cur otherwise. The
+ * two call sites previously carried diverging copies of this block — which
+ * is the exact drift that produced the teardown-order bug in round two. */
+static bool swap_to_pending(program_src *cur) {
+  program_src next;
+  if (!take_pending(&next)) return false;
+  if (cur->heap) free((void *)cur->blob);
+  *cur = next;
+  return true;
+}
+
+/* Panel, renderer, storage, transports, and the boot program — everything
+ * before the run loop. False only when the display itself cannot start. */
+static bool boot_init(program_src *cur) {
+  ESP_ERROR_CHECK(panel_init());
 #if MOTH_FRAME_PROFILE
   membench();
 #endif
-
   /* 1.75" CO5300 is circular: corners sit behind the bezel. */
   mr_config cfg = {PANEL_W, PANEL_H, MR_SHAPE_ROUND};
   if (!mr_init(&cfg)) {
     ESP_LOGE(TAG, "renderer init failed");
-    return;
+    return false;
   }
+  /* NVS first — the strike counter and the wifi credentials both live
+   * there. Then the transports, in the background; the UI never waits for
+   * them and neither one failing may stop it. */
+  storage_init();
+  hotpush_net_start();
+  serialpush_start();
 
-  moth_vm *vm = moth_new();
-  if (!vm) {
-    ESP_LOGE(TAG, "out of memory");
-    return;
-  }
-  moth_register(vm, "print", n_print, NULL);
-  moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
-  moth_ui_register(vm);
-  moth_ui_set_frame_hook(on_frame, NULL);
-
-  size_t len = (size_t)(program_end - program_start);
+  *cur = choose_boot_blob();
+  pushstore_set_boot_source(cur->from_store);
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
-           (unsigned)len, PANEL_W, PANEL_H);
+           (unsigned)cur->len, PANEL_W, PANEL_H);
+  return true;
+}
 
-  moth_status st = moth_load(vm, program_start, len);
-  if (st != MOTH_OK) {
-    ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
-    return;
+/* Drops a failing program the store holds and swaps to the embedded one.
+ * Teardown strictly before invalidate — the erase must not pull flash out
+ * from under a VM that still points into it. */
+static void drop_bad_store(moth_vm *vm, program_src *cur) {
+  ESP_LOGW(TAG, "dropping the stored program");
+  teardown_vm(vm);
+  pushstore_invalidate();
+  pushstore_clear_strikes();
+  if (cur->heap) free((void *)cur->blob);
+  *cur = embedded_program();
+  pushstore_set_boot_source(false);
+}
+
+/* Lets queued verdicts reach the wire before the main task floods the
+ * shared console with the swap's logging — the halted program is silent, so
+ * this bounded wait is the quietest bus the reply will ever get. */
+static void quiet_bus_for_verdict(void) {
+  const int64_t quiet_until = esp_timer_get_time() + 500 * 1000;
+  while (serialpush_replies_pending() && esp_timer_get_time() < quiet_until) {
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
-  ESP_LOGI(TAG, "running Dart UI");
+}
 
-  st = moth_run(vm);
-  ESP_LOGI(TAG, "program finished (%d): %s", st, st == MOTH_OK ? "ok" : moth_error(vm));
-  moth_free(vm);
+void app_main(void) {
+  program_src cur;
+  if (!boot_init(&cur)) return;
+
+  for (;;) {
+    moth_vm *vm = NULL;
+    moth_status st = run_program(&cur, &vm);
+    if (!vm) {
+      /* Returning here would leave a live-looking board that can never be
+       * pushed again — the one state hot push exists to prevent. Keep
+       * polling the transports while waiting: a smaller pushed program may
+       * be exactly the thing that fits the memory this one cannot. */
+      accept_push();
+      if (s_pending != NULL && swap_to_pending(&cur)) continue;
+      vTaskDelay(pdMS_TO_TICKS(5000));
+      continue;
+    }
+
+    if (st == MOTH_HALTED) {
+      quiet_bus_for_verdict();
+      ESP_LOGI(TAG, "program stopped for a push");
+    } else if (st != MOTH_OK) {
+      ESP_LOGE(TAG, "program failed (%d): %s", st, moth_error(vm));
+      /* A failing program the STORE holds is not worth keeping — fall back
+       * to the embedded one rather than failing the same way every boot.
+       * Gated on in_store, not from_store: a just-pushed program runs from
+       * RAM but its copy is in flash. */
+      if (cur.in_store && s_pending == NULL) {
+        drop_bad_store(vm, &cur);
+        continue;
+      }
+    } else {
+      ESP_LOGI(TAG, "program finished: ok");
+    }
+
+    wait_for_pending();
+    teardown_vm(vm);
+    /* A rejected or unanswerable deferred push keeps `cur`: the loop
+     * re-runs the program that was already on screen. */
+    swap_to_pending(&cur);
+  }
 }

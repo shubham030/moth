@@ -94,18 +94,16 @@ int map(int v, int inMin, int inMax, int outMin, int outMax) {
 
 ## Not yet — and what each is waiting on
 
+The language blockers are gone: strings, lists, classes, closures and the
+garbage collector all shipped with M1b, so `print('text $value')`, list
+literals and custom classes work today. What remains is event plumbing and
+library work:
+
 | Arduino | moth status | Blocked on |
 | --- | --- | --- |
-| `Serial.print("text")` | ❌ numbers only | strings (M1b) |
-| `String`, `char` | ❌ | heap + GC (M1b) |
-| arrays, `Wire.requestFrom(n)` | ❌ | lists (M1b) |
-| `attachInterrupt(pin, fn, mode)` | ❌ | closures + event loop (M1b/M2) |
-| `Servo`, `EEPROM`, `SPI` | ❌ | lists, then library work |
-| `struct`, custom types | ❌ | classes (M1b) |
-
-Everything in that table depends on the same milestone: **M1b adds the heap**,
-which unlocks strings, lists and classes together. Nothing there needs new VM
-architecture — it needs the allocator and collector.
+| `attachInterrupt(pin, fn, mode)` | ❌ | interrupts + event loop |
+| `Wire.requestFrom(n)` | ❌ | I2C bulk-read library work |
+| `Servo`, `EEPROM`, `SPI` | ❌ | library work |
 
 ## The API this is heading toward
 
