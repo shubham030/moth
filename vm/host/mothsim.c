@@ -64,21 +64,32 @@ static void pump_input(void) {
 
 static void register_host_natives(moth_vm *vm);
 
+/* What verification concluded. "Could not run the verifier" is not "the
+ * blob is bad" — the distinction the board learned in round two and this
+ * file did not, until a review caught the host answering MPRJ with a blank
+ * reason for a blob it never examined. */
+typedef enum { BLOB_OK, BLOB_BAD, BLOB_UNVERIFIABLE } blob_verdict;
+
 /* Loads a blob into a throwaway VM to find out whether it would run, without
  * touching the one that is running. The natives have to match what the real
  * VM offers by NAME only — moth_ui_register_natives, not the full register,
  * which would reset the live program's event queue and eat any click queued
  * while the probe ran. */
-static bool blob_is_loadable(const uint8_t *b, size_t len, char *err, size_t err_len) {
+static blob_verdict verify_blob(const uint8_t *b, size_t len, char *err,
+                                size_t err_len) {
   moth_vm *probe = moth_new();
-  if (!probe) return false;
+  if (!probe) {
+    snprintf(err, err_len, "out of memory for the verifier");
+    return BLOB_UNVERIFIABLE;
+  }
   register_host_natives(probe);
   moth_ui_register_natives(probe);
 
   moth_status st = moth_load(probe, b, len);
   if (st != MOTH_OK) snprintf(err, err_len, "%s", moth_error(probe));
   moth_free(probe);
-  return st == MOTH_OK;
+  if (st == MOTH_OK) return BLOB_OK;
+  return st == MOTH_ERR_OOM ? BLOB_UNVERIFIABLE : BLOB_BAD;
 }
 
 /* Takes a pushed blob if one has arrived and it survives verification.
@@ -92,7 +103,18 @@ static bool accept_push(void) {
   if (!blob) return false;
 
   char err[256] = {0};
-  if (!blob_is_loadable(blob, len, err, sizeof err)) {
+  const blob_verdict verdict = verify_blob(blob, len, err, sizeof err);
+  if (verdict == BLOB_UNVERIFIABLE) {
+    /* No verdict exists, so none is sent: the sender times out and retries
+     * against a hopefully less-starved process. MPRJ here blamed the blob
+     * for the host's memory pressure. */
+    fprintf(stderr, "push: cannot verify right now (%s) — try again\n", err);
+    fflush(stderr);
+    moth_push_abandon(g_sim.push);
+    free(blob);
+    return false;
+  }
+  if (verdict == BLOB_BAD) {
     fprintf(stderr, "push: rejected (%zu bytes): %s\n", len, err);
     fflush(stderr);
     moth_push_respond(g_sim.push, false);

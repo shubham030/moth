@@ -30,6 +30,11 @@ uint8_t *moth_push_poll(moth_push *p, size_t *len_out);
  * vanished just misses its reply. */
 void moth_push_respond(moth_push *p, bool ok);
 
+/* Closes the client WITHOUT a verdict, for when none truthfully exists —
+ * the verifier could not run, which says nothing about the blob. The sender
+ * times out and retries; MPRJ would tell it the program was bad. */
+void moth_push_abandon(moth_push *p);
+
 void moth_push_close(moth_push *p);
 
 #endif /* MOTH_PUSH_H */

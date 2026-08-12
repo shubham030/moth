@@ -124,16 +124,21 @@ Dart program draws in a desktop window and on the board.
       push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
       the out-of-box loop needs no WiFi at all — provisioning is the
       upgrade, not the prerequisite. "pushed" now means the framed,
-      nonce-carrying verdict came back after verification — earlier
-      21-43ms figures timed a weaker receipt ack and need re-measuring
-      on hardware under the verdict protocol.
+      nonce-carrying verdict came back after verification. Caveat, per
+      the honest-status rule: the verdict's on-board delivery (sent
+      thrice against console-writer interleaving) and the transfer
+      timings are verified on the desktop and in tests but await
+      on-board confirmation — the transports themselves were
+      hardware-verified under the older ack protocol.
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM
-- [x] Crash-loop protection: a strike counter in NVS. Booting from the
-      store costs a strike, ten seconds of uptime refunds it; three
-      strikes falls back to the embedded program and invalidates the
-      store. Runtime failures drop the stored program immediately
+- [x] Crash-loop protection: a strike counter in NVS driven by
+      esp_reset_reason() — a panic or watchdog reset while the pushed
+      program ran is a strike, any clean reset clears, and three strikes
+      falls back to the embedded program and invalidates the store.
+      (Brownouts are power faults and never count.) Runtime failures
+      drop the stored program immediately
 
 ## M5 — v0.1 public release
 

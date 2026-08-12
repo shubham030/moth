@@ -145,7 +145,8 @@ static uint8_t *s_pending;
 static size_t s_pending_len;
 static bool s_pending_verified;
 static uint32_t s_pending_nonce;
-static int s_pending_src; /* push_src, declared below */
+typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
+static push_src s_pending_src;
 
 static void register_host_natives(moth_vm *vm);
 
@@ -183,7 +184,6 @@ static blob_verdict verify_blob(const uint8_t *b, size_t len, char *why,
  * immediately when the verifier can run beside the live program, deferred to
  * the swap path when it cannot. A bad blob still never takes the running
  * program down: the deferred case verifies before anything replaces it. */
-typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
 
 /* Routes the framed verdict back over whichever transport delivered the
  * frame. The reply carries the sender's nonce (push_proto.h), so the log
@@ -244,7 +244,7 @@ static bool accept_push(void) {
   s_pending_len = len;
   s_pending_verified = verdict == BLOB_OK;
   s_pending_nonce = nonce;
-  s_pending_src = (int)src;
+  s_pending_src = src;
   if (s_pending_verified) respond_push(src, nonce, true);
   ESP_LOGI(TAG, "push: %u bytes received, restarting", (unsigned)len);
   return true;
@@ -379,8 +379,6 @@ typedef struct {
                       back on the next boot if only from_store were checked. */
 } program_src;
 
-static program_src embedded_program(void);
-
 static program_src embedded_program(void) {
   program_src p = {program_start, (size_t)(program_end - program_start),
                    false, false, false};
@@ -422,12 +420,13 @@ static bool crash_reset(void) {
  * row — the embedded program otherwise. */
 static program_src choose_boot_blob(void) {
   /* Account for how the LAST boot ended before deciding this one. */
-  if (crash_reset() && pushstore_boot_was_store()) {
+  const bool crashed = crash_reset();
+  if (crashed && pushstore_boot_was_store()) {
     pushstore_add_strike();
     ESP_LOGW(TAG, "last boot crashed while running the pushed program "
                   "(strike %d of %d)", pushstore_strikes(),
              PUSHSTORE_MAX_STRIKES);
-  } else if (!crash_reset()) {
+  } else if (!crashed) {
     pushstore_clear_strikes();
   }
 
@@ -525,18 +524,34 @@ static void storage_init(void) {
 static bool take_pending(program_src *out) {
   if (!s_pending_verified) {
     char why[128] = {0};
-    const blob_verdict verdict =
-        verify_blob(s_pending, s_pending_len, why, sizeof why);
-    if (verdict != BLOB_OK) {
-      /* With the old program's heap gone, an OOM here is real scarcity, not
-       * contention — the honest verdict either way is rejection. */
-      ESP_LOGE(TAG, "push rejected: %s", why);
-      respond_push((push_src)s_pending_src, s_pending_nonce, false);
+    blob_verdict verdict = BLOB_UNVERIFIABLE;
+    /* The old program's heap is gone, so the verifier has its best shot —
+     * but heap coalescing is not instant, so give a transient OOM a few
+     * tries before concluding anything. */
+    for (int i = 0; i < 3 && verdict == BLOB_UNVERIFIABLE; i++) {
+      if (i > 0) vTaskDelay(pdMS_TO_TICKS(100));
+      verdict = verify_blob(s_pending, s_pending_len, why, sizeof why);
+    }
+    if (verdict == BLOB_UNVERIFIABLE) {
+      /* Still no verdict — so none is sent. MPRJ here blamed the blob for
+       * the board's memory pressure and threw away the user's running
+       * program for nothing; abandoning lets the sender time out, retry,
+       * and be told the truth by whichever attempt can actually verify. */
+      ESP_LOGW(TAG, "cannot verify the push (%s) — dropping it unanswered",
+               why);
+      if (s_pending_src == PUSH_SRC_TCP) moth_push_abandon(s_push);
       free(s_pending);
       s_pending = NULL;
       return false;
     }
-    respond_push((push_src)s_pending_src, s_pending_nonce, true);
+    if (verdict == BLOB_BAD) {
+      ESP_LOGE(TAG, "push rejected: %s", why);
+      respond_push(s_pending_src, s_pending_nonce, false);
+      free(s_pending);
+      s_pending = NULL;
+      return false;
+    }
+    respond_push(s_pending_src, s_pending_nonce, true);
   }
 
   const bool saved = pushstore_save(s_pending, s_pending_len);
@@ -552,6 +567,17 @@ static bool take_pending(program_src *out) {
   program_src p = {s_pending, s_pending_len, true, false, saved};
   s_pending = NULL;
   *out = p;
+  return true;
+}
+
+/* Swaps to the pending push when it is accepted; keeps *cur otherwise. The
+ * two call sites previously carried diverging copies of this block — which
+ * is the exact drift that produced the teardown-order bug in round two. */
+static bool swap_to_pending(program_src *cur) {
+  program_src next;
+  if (!take_pending(&next)) return false;
+  if (cur->heap) free((void *)cur->blob);
+  *cur = next;
   return true;
 }
 
@@ -590,14 +616,7 @@ void app_main(void) {
        * polling the transports while waiting: a smaller pushed program may
        * be exactly the thing that fits the memory this one cannot. */
       accept_push();
-      if (s_pending != NULL) {
-        program_src next;
-        if (take_pending(&next)) {
-          if (cur.heap) free((void *)cur.blob);
-          cur = next;
-          continue; /* try the replacement immediately */
-        }
-      }
+      if (s_pending != NULL && swap_to_pending(&cur)) continue;
       vTaskDelay(pdMS_TO_TICKS(5000));
       continue;
     }
@@ -630,12 +649,8 @@ void app_main(void) {
 
     wait_for_pending();
     teardown_vm(vm);
-    program_src next;
-    if (take_pending(&next)) {
-      if (cur.heap) free((void *)cur.blob);
-      cur = next;
-    }
-    /* A rejected deferred push keeps `cur`: the loop re-runs the program
-     * that was already on screen. */
+    /* A rejected or unanswerable deferred push keeps `cur`: the loop
+     * re-runs the program that was already on screen. */
+    swap_to_pending(&cur);
   }
 }

@@ -166,7 +166,9 @@ class SerialPort {
             'is the board draining its console?');
       }
       final chunk = data.length - off > _bufSize ? _bufSize : data.length - off;
-      _buf.asTypedList(chunk).setAll(0, data.sublist(off, off + chunk));
+      // setRange copies straight from the source — sublist allocated and
+      // copied a fresh list per 4KB chunk, per retry.
+      _buf.asTypedList(chunk).setRange(0, chunk, data, off);
       final n = _write(_fd, _buf, chunk);
       if (n > 0) {
         off += n;

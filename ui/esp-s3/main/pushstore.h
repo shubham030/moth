@@ -5,11 +5,14 @@
  * blob in place, the way it runs the embedded one — so a stored program
  * costs no RAM.
  *
- * The strike counter is the crash-loop guard: it is incremented before a
- * stored program runs and cleared once the program has stayed up for a
- * while. A blob that panics the chip on boot grows the counter each cycle;
- * at the limit the caller falls back to the embedded program instead of
- * rebooting forever.
+ * The strike counter is the crash-loop guard, driven by reset ground truth:
+ * on boot, a panic/watchdog reset that happened while the stored program was
+ * running (pushstore_boot_was_store) adds a strike, and any clean reset
+ * clears the record. A blob that crashes the chip — at boot or an hour in —
+ * accumulates strikes until the caller falls back to the embedded program.
+ * (An earlier design refunded a strike after ten stable seconds of uptime;
+ * a program panicking after the refund defeated it forever, so it was
+ * replaced. Brownouts are power faults and never count.)
  */
 #pragma once
 
