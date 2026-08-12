@@ -146,7 +146,8 @@ pushed over /dev/cu.usbmodem2101 in 128ms
 
 (128ms measured on an ESP32-S3: compile-to-verdict for a 2.2KB program,
 where "pushed" means the board verified the program and confirmed with a
-nonce-carrying reply.)
+nonce-carrying reply. Measured on the build preceding one final reliability
+fix to the reply path; the current tip awaits its one confirming push.)
 
 The display never blanks — the running program stops, the new one draws over
 it. The pushed program is verified before the running one is disturbed, it
