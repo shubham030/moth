@@ -148,6 +148,13 @@ static uint32_t s_pending_nonce;
 typedef enum { PUSH_SRC_TCP, PUSH_SRC_SERIAL } push_src;
 static push_src s_pending_src;
 
+/* Set when a deferred verification still could not run after teardown —
+ * meaning the memory pressure is real, not contention with the old program.
+ * While it holds, further unverifiable pushes are abandoned WITHOUT halting
+ * the running program: killing it again to rediscover the same scarcity
+ * cost the user three restarts per pressure episode instead of one. */
+static int64_t s_scarce_until_us;
+
 static void register_host_natives(moth_vm *vm);
 
 /* What verification concluded — and "could not run the verifier" is not
@@ -233,6 +240,15 @@ static bool accept_push(void) {
     return false;
   }
   if (verdict == BLOB_UNVERIFIABLE) {
+    if (esp_timer_get_time() < s_scarce_until_us) {
+      /* A recent teardown already proved the scarcity is real. Abandon
+       * without killing the program again — the sender times out and
+       * retries into the same answer until the pressure lifts. */
+      ESP_LOGW(TAG, "still cannot verify pushes (%s) — abandoning", why);
+      if (src == PUSH_SRC_TCP) moth_push_abandon(s_push);
+      free(blob);
+      return false;
+    }
     /* The verifier could not run beside the live program — which says
      * nothing about the push. Rejecting here reported good programs as bad
      * whenever memory was tight. Take the blob, stop the program, and
@@ -533,10 +549,11 @@ static bool take_pending(program_src *out) {
       verdict = verify_blob(s_pending, s_pending_len, why, sizeof why);
     }
     if (verdict == BLOB_UNVERIFIABLE) {
-      /* Still no verdict — so none is sent. MPRJ here blamed the blob for
-       * the board's memory pressure and threw away the user's running
-       * program for nothing; abandoning lets the sender time out, retry,
-       * and be told the truth by whichever attempt can actually verify. */
+      /* Still no verdict — so none is sent, and the scarcity is now proven
+       * real (the old heap is gone and it STILL cannot run). Remember that,
+       * so the sender's retries are abandoned cheaply instead of killing
+       * the replacement program each time. */
+      s_scarce_until_us = esp_timer_get_time() + 30 * 1000 * 1000;
       ESP_LOGW(TAG, "cannot verify the push (%s) — dropping it unanswered",
                why);
       if (s_pending_src == PUSH_SRC_TCP) moth_push_abandon(s_push);
@@ -581,20 +598,19 @@ static bool swap_to_pending(program_src *cur) {
   return true;
 }
 
-void app_main(void) {
+/* Panel, renderer, storage, transports, and the boot program — everything
+ * before the run loop. False only when the display itself cannot start. */
+static bool boot_init(program_src *cur) {
   ESP_ERROR_CHECK(panel_init());
-
 #if MOTH_FRAME_PROFILE
   membench();
 #endif
-
   /* 1.75" CO5300 is circular: corners sit behind the bezel. */
   mr_config cfg = {PANEL_W, PANEL_H, MR_SHAPE_ROUND};
   if (!mr_init(&cfg)) {
     ESP_LOGE(TAG, "renderer init failed");
-    return;
+    return false;
   }
-
   /* NVS first — the strike counter and the wifi credentials both live
    * there. Then the transports, in the background; the UI never waits for
    * them and neither one failing may stop it. */
@@ -602,10 +618,39 @@ void app_main(void) {
   hotpush_net_start();
   serialpush_start();
 
-  program_src cur = choose_boot_blob();
-  pushstore_set_boot_source(cur.from_store);
+  *cur = choose_boot_blob();
+  pushstore_set_boot_source(cur->from_store);
   ESP_LOGI(TAG, "loading %u bytes of Dart bytecode for a %dx%d display",
-           (unsigned)cur.len, PANEL_W, PANEL_H);
+           (unsigned)cur->len, PANEL_W, PANEL_H);
+  return true;
+}
+
+/* Drops a failing program the store holds and swaps to the embedded one.
+ * Teardown strictly before invalidate — the erase must not pull flash out
+ * from under a VM that still points into it. */
+static void drop_bad_store(moth_vm *vm, program_src *cur) {
+  ESP_LOGW(TAG, "dropping the stored program");
+  teardown_vm(vm);
+  pushstore_invalidate();
+  pushstore_clear_strikes();
+  if (cur->heap) free((void *)cur->blob);
+  *cur = embedded_program();
+  pushstore_set_boot_source(false);
+}
+
+/* Lets queued verdicts reach the wire before the main task floods the
+ * shared console with the swap's logging — the halted program is silent, so
+ * this bounded wait is the quietest bus the reply will ever get. */
+static void quiet_bus_for_verdict(void) {
+  const int64_t quiet_until = esp_timer_get_time() + 500 * 1000;
+  while (serialpush_replies_pending() && esp_timer_get_time() < quiet_until) {
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void app_main(void) {
+  program_src cur;
+  if (!boot_init(&cur)) return;
 
   for (;;) {
     moth_vm *vm = NULL;
@@ -622,25 +667,16 @@ void app_main(void) {
     }
 
     if (st == MOTH_HALTED) {
+      quiet_bus_for_verdict();
       ESP_LOGI(TAG, "program stopped for a push");
     } else if (st != MOTH_OK) {
       ESP_LOGE(TAG, "program failed (%d): %s", st, moth_error(vm));
       /* A failing program the STORE holds is not worth keeping — fall back
-       * to the embedded one now rather than showing a dead screen and
-       * failing the same way on every boot. Gated on in_store, not
-       * from_store: a just-pushed program runs from RAM but its copy is in
-       * flash, and checking only how it was loaded left the bad copy to
-       * come back on the next boot. Teardown strictly before invalidate —
-       * the erase must not pull flash out from under a VM that still points
-       * into it. */
+       * to the embedded one rather than failing the same way every boot.
+       * Gated on in_store, not from_store: a just-pushed program runs from
+       * RAM but its copy is in flash. */
       if (cur.in_store && s_pending == NULL) {
-        ESP_LOGW(TAG, "dropping the stored program");
-        teardown_vm(vm);
-        pushstore_invalidate();
-        pushstore_clear_strikes();
-        if (cur.heap) free((void *)cur.blob);
-        cur = embedded_program();
-        pushstore_set_boot_source(false);
+        drop_bad_store(vm, &cur);
         continue;
       }
     } else {

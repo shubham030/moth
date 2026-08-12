@@ -22,6 +22,12 @@ void serialpush_start(void);
  * frame's nonce once the blob has been verified. */
 uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out);
 
-/* Sends the framed verdict (push_proto.h) over the USB console via the
- * driver's reliable TX path. */
+/* Enqueues the framed verdict (push_proto.h); the transport task sends it
+ * over the driver's reliable TX path. */
 void serialpush_respond(uint32_t nonce, bool ok);
+
+/* True while queued verdicts have not yet been sent. The swap path holds
+ * its logging until this clears: moving the send off the frame hook put it
+ * concurrent with the densest logging window in the flow, and a quiet bus
+ * is what gives the interleaving-prone reply its best odds. */
+bool serialpush_replies_pending(void);
