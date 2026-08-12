@@ -127,8 +127,11 @@ Dart program draws in a desktop window and on the board.
       nonce-carrying verdict came back after verification — confirmed
       on the board: serial push 128ms compile-to-verdict, persistence
       across reboot, and the return push 180ms, with the triple-sent
-      verdict surviving the shared console. fps re-measured at 38.1
-      after the transport polling landed on the frame hook — unchanged
+      verdict surviving the shared console. Those measurements are
+      from the build before the final quiet-window fix (581c2c0),
+      which is strictly more protective but compile-verified only —
+      one flash and one push confirms the tip. fps re-measured at
+      38.1 with the transport polling on the frame hook, unchanged
       from the R3 baseline. WiFi verdict push is desktop-verified and
       awaits one on-board run after re-provisioning.
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
