@@ -39,6 +39,13 @@ typedef struct {
 } reply_req;
 static QueueHandle_t s_replies; /* verdicts the task sends between reads */
 
+/* True from dequeue to the end of transmission. The pending check must
+ * cover this too: xQueueReceive empties the queue BEFORE send_reply runs,
+ * so a queue-depth check alone reported "nothing pending" for the whole
+ * 60ms send — releasing the main task's quiet-bus wait at the exact moment
+ * the vulnerable interval began. */
+static volatile bool s_reply_in_flight;
+
 /* Scanner state, owned by the task. The wire format constants and header
  * decode come from push_proto.h, shared with the TCP receiver; only the
  * resync behavior is this transport's own (see the note there). */
@@ -138,7 +145,9 @@ static void serialpush_task(void *arg) {
   for (;;) {
     reply_req r;
     while (s_replies && xQueueReceive(s_replies, &r, 0) == pdTRUE) {
+      s_reply_in_flight = true;
       send_reply(&r);
+      s_reply_in_flight = false;
     }
     int n = usb_serial_jtag_read_bytes(chunk, sizeof chunk, pdMS_TO_TICKS(100));
     if (n <= 0) {
@@ -198,7 +207,8 @@ void serialpush_start(void) {
 }
 
 bool serialpush_replies_pending(void) {
-  return s_replies && uxQueueMessagesWaiting(s_replies) > 0;
+  return s_reply_in_flight ||
+         (s_replies && uxQueueMessagesWaiting(s_replies) > 0);
 }
 
 uint8_t *serialpush_poll(size_t *len_out, uint32_t *nonce_out) {
