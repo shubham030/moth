@@ -119,6 +119,15 @@ struct Scene {
   bool pointer_down = false;
   mr_node_id pressed_node = MR_NODE_NONE;
 
+  /* The last value THIS drag derived from the finger, NaN when no drag has
+   * emitted yet. slider_drag dedupes against this, not the node's value: the
+   * widget layer rewrites the node every rebuild, so an app that clamps or
+   * quantizes what it accepts (Flutter's `divisions` idiom) would defeat a
+   * node-value dedupe and a stationary finger would emit — and repaint — at
+   * frame rate forever. */
+  float drag_value = 0.0f;
+  bool drag_valued = false;
+
   Node *get(mr_node_id id) {
     if (id == MR_NODE_NONE || id >= nodes.size() || !nodes[id].alive) return nullptr;
     return &nodes[id];
