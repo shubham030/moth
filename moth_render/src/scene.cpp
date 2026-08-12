@@ -303,7 +303,14 @@ void mr_pointer(int x, int y, bool down) {
     if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_RELEASED, 0, px, py});
       if (hit_test(s, mr_root(), px, py) == s.pressed_node) {
-        s.emit({s.pressed_node, MR_EV_CLICKED, 0, px, py});
+        /* Controls claim their gesture, as Flutter's do: a completed slider
+         * drag or switch tap already reported itself as VALUE_CHANGED, and
+         * a CLICKED here would bubble to any tappable ancestor — a slider
+         * inside a tappable card would fire the card on every drag. */
+        const Node *rn = s.get(s.pressed_node);
+        const bool claims = rn && (rn->kind == MR_NODE_SLIDER ||
+                                   rn->kind == MR_NODE_SWITCH);
+        if (!claims) s.emit({s.pressed_node, MR_EV_CLICKED, 0, px, py});
         switch_toggle(s, s.pressed_node, px, py);
       }
     }

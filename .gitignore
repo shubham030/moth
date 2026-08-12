@@ -27,3 +27,4 @@ docs/vendor/
 website/node_modules/
 website/build/
 website/.docusaurus/
+.cache/

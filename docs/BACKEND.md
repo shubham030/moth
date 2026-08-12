@@ -116,8 +116,13 @@ kinds `pressed`, `released`, `clicked`, `value_changed`. The backend performs
 hit-testing and control gestures (slider drag) natively; the sink (the VM event
 loop) only sees semantic results. The sink must never re-enter the contract
 synchronously — it queues. Hit-testing for `slider` and `switch` extends to at
-least a 48px-tall band around the painted control (finger-sized targets); a
-touch that misses the pixels but lands in the band still hits.
+least a 48px-tall band around the painted control, plus 8px on each side
+(finger-sized targets); a touch that misses the pixels but lands in the band
+still hits. When expanded bands overlap, the node attached later wins — the
+band is a tolerance, so keep adjacent controls at least 24px apart if the
+tie-break matters. Controls claim their gesture: a slider drag or switch tap
+reports only `value_changed` (plus `pressed`/`released`), never `clicked`, so
+a control inside a tappable ancestor does not also fire the ancestor.
 
 **Animation**: `anim_start(node, prop, from, to, duration_ms, easing) → anim_id`,
 `anim_stop(anim_id)`. Easing: `linear`, `ease_out`, `ease_in_out`. Animatable:
