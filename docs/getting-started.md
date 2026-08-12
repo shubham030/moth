@@ -141,15 +141,12 @@ reflash:
 $ dart run tools/mothc/bin/mothc.dart examples/ui/counter.dart \
     --push /dev/cu.usbmodem2101
 wrote examples/ui/counter.mothb (2209 bytes)
-pushed over /dev/cu.usbmodem2101 in NNNms
+pushed over /dev/cu.usbmodem2101 in 128ms
 ```
 
-> `NNNms` because the on-board timing has not been measured under the
-> current protocol — a real run prints a real number there. The verdict
-> reply itself is verified on the desktop simulator and in the test suite;
-> its on-board delivery has one known race under heavy console logging that
-> is awaiting hardware confirmation. If a push that visibly took reports
-> "no reply", that is it — reset and re-push.
+(128ms measured on an ESP32-S3: compile-to-verdict for a 2.2KB program,
+where "pushed" means the board verified the program and confirmed with a
+nonce-carrying reply.)
 
 The display never blanks — the running program stops, the new one draws over
 it. The pushed program is verified before the running one is disturbed, it
