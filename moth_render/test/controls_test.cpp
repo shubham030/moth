@@ -128,6 +128,15 @@ int main(void) {
   check(vs.size() == 1 && vs[0] == 0.0f, "tap turns it back off",
         vs.empty() ? -1 : vs[0], 0);
 
+  /* A finger-sized touch target: 10px above the slider's painted strip
+   * still drags it — the first on-glass test missed the 24px box almost
+   * every time, so controls hit out to a 48px band. */
+  mr_pointer(100, 0, true); /* slider is y 0..24; band reaches y -12..36 */
+  mr_pointer(100, 0, false);
+  vs = value_events(slider);
+  check(vs.size() == 1, "touch above the strip still drags", vs.size(), 1);
+  g_events.clear();
+
   /* A press that releases OUTSIDE the switch is not a click — no toggle. */
   mr_pointer(20, 36, true);
   mr_pointer(300, 300, false);
