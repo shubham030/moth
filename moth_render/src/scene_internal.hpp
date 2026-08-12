@@ -165,6 +165,12 @@ void layout_text(Node &n, float max_w, float &out_w, float &out_h);
  * overlay swallow every tap inside it. */
 bool arc_hit(const Node &n, float px, float py);
 
+/* paint.cpp — where a slider's thumb travels: inset a thumb radius from each
+ * end of the box. Paint and the drag gesture must agree on this to the
+ * pixel, or the thumb lands beside the finger — which is why both read it
+ * from one function. */
+void slider_geometry(const Node &n, float *x0, float *x1, float *radius);
+
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);
 
