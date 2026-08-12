@@ -82,7 +82,18 @@ static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
    * beneath it. Ask the geometry instead. */
   if (n->kind == MR_NODE_ARC) return arc_hit(*n, px, py) ? id : MR_NODE_NONE;
 
-  bool inside = px >= n->x && px < n->x + n->w && py >= n->y && py < n->y + n->h;
+  /* A finger is not a mouse. The first on-glass test of the 24px slider
+   * logged thirty touches around it and almost none inside it — one landed
+   * seven pixels off. Controls accept touches out to a 48px-tall band
+   * (Flutter's minimum touch target) and a little past each end; their
+   * PAINTED box is unchanged. */
+  float pad_x = 0.0f, pad_y = 0.0f;
+  if (n->kind == MR_NODE_SLIDER || n->kind == MR_NODE_SWITCH) {
+    if (n->h < 48.0f) pad_y = (48.0f - n->h) * 0.5f;
+    pad_x = 8.0f;
+  }
+  bool inside = px >= n->x - pad_x && px < n->x + n->w + pad_x &&
+                py >= n->y - pad_y && py < n->y + n->h + pad_y;
   return inside ? id : MR_NODE_NONE;
 }
 
