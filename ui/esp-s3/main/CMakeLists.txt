@@ -16,6 +16,7 @@ idf_component_register(
     # The push receiver is plain BSD sockets, which lwIP provides — the same
     # file mothsim uses on the desktop, unchanged.
     "${ROOT}/vm/host/push.c"
+    "${ROOT}/vm/host/hmac_sha256.c"
     "${ROOT}/ui/src/moth_ui.c"
     "${ROOT}/moth_render/src/scene.cpp"
     "${ROOT}/moth_render/src/layout.cpp"

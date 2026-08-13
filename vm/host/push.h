@@ -19,6 +19,13 @@ typedef struct moth_push moth_push;
 /* Returns NULL if the port cannot be listened on. */
 moth_push *moth_push_listen(int port);
 
+/* Pairs the receiver. With a key set, only authenticated MPH2 frames are
+ * accepted: the HMAC (pairing key over nonce || blob) must verify, and a
+ * legacy MPSH frame is answered MPRJ without its blob being read. With no
+ * key (the out-of-box state) both frames are accepted unauthenticated.
+ * Call before the first poll; NULL clears. The key is copied. */
+void moth_push_set_key(moth_push *p, const uint8_t *key32);
+
 /* Non-blocking. Returns a complete blob and its length once one has fully
  * arrived, otherwise NULL. The caller owns the returned buffer, and the
  * client connection stays open until moth_push_respond delivers the

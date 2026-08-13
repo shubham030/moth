@@ -25,3 +25,7 @@ endif()
 add_executable(mothrun host/mothrun.c)
 target_link_libraries(mothrun PRIVATE moth_vm)
 target_compile_options(mothrun PRIVATE -Wall -Wextra)
+
+# Hand-rolled crypto is only tolerable pinned to published vectors.
+add_executable(hmac_test test/hmac_test.c host/hmac_sha256.c)
+target_compile_options(hmac_test PRIVATE -Wall -Wextra)

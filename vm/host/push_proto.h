@@ -32,6 +32,25 @@
 #define MPSH_MAGIC_LEN 4
 #define MPSH_HEADER_LEN 12 /* magic + u32 len + u32 nonce */
 
+/* The authenticated frame: same header, then a 32-byte HMAC-SHA256 computed
+ * with the pairing key over nonce (little-endian) || blob, then the blob.
+ *
+ * The HMAC, not a bare token, because a token crosses the network in the
+ * clear on every push — one sniff and any machine on the LAN can push
+ * arbitrary programs forever. With the HMAC the secret never travels: an
+ * observer can at most REPLAY a frame it saw, re-installing a program the
+ * owner already chose to run. That residual is accepted for v0.1 and
+ * recorded in docs/DECISIONS.md; closing it needs a challenge-response
+ * round-trip.
+ *
+ * A paired TCP receiver accepts only this frame. An unpaired one accepts
+ * both (out of the box nothing is provisioned, and the first-run experience
+ * must not demand a secret). Serial receivers accept both and never check
+ * the HMAC — plugging in the cable is the pairing. */
+#define MPH2_MAGIC "MPH2"
+#define MPH2_HMAC_LEN 32
+#define MPH2_HEADER_LEN (MPSH_HEADER_LEN + MPH2_HMAC_LEN)
+
 #define MPSH_REPLY_OK "MPOK"
 #define MPSH_REPLY_REJECT "MPRJ"
 #define MPSH_REPLY_LEN 8 /* 4CC + u32 nonce */
@@ -52,6 +71,18 @@ static inline uint32_t mpsh_header_nonce(const uint8_t h[MPSH_HEADER_LEN]) {
 /* True when a decoded length can be a real frame. */
 static inline int mpsh_len_ok(size_t len) {
   return len > 0 && len <= MPSH_MAX_BLOB;
+}
+
+/* The length and nonce fields sit at the same offsets in both frames, so
+ * the MPSH decoders above apply; the MPH2 header just carries the HMAC
+ * after them. This helper writes the nonce in the exact byte order the
+ * HMAC's first segment must use — the frame's little-endian encoding, so
+ * both sides authenticate the bytes that actually crossed the wire. */
+static inline void mpsh_nonce_le(uint32_t nonce, uint8_t out[4]) {
+  out[0] = (uint8_t)(nonce & 0xFF);
+  out[1] = (uint8_t)((nonce >> 8) & 0xFF);
+  out[2] = (uint8_t)((nonce >> 16) & 0xFF);
+  out[3] = (uint8_t)((nonce >> 24) & 0xFF);
 }
 
 /* Fills an 8-byte reply. */

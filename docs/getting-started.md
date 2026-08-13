@@ -164,9 +164,21 @@ To drop the cable entirely, give the board your WiFi once:
 $ python3 tools/provision/provision.py --ssid your-network
 ```
 
-(the password is prompted, stored only on the board, and never compiled in).
-After a reset the board prints its address — then `--push 192.168.x.x:7621`
-works from anywhere on your network.
+The WiFi password and a **pairing phrase** are prompted, stored only on the
+board, and never compiled in. After a reset the board prints its address —
+then
+
+```console
+$ mothc app.dart --push 192.168.x.x:7621 --token
+```
+
+works from anywhere on your network: `--token` asks for the same phrase and
+signs the push with it (scripts can set `MOTH_PUSH_TOKEN` instead). A paired
+board refuses network pushes that aren't signed — otherwise anyone on your
+WiFi could replace what the board is running. Serial pushes never need the
+phrase: holding the cable is proof enough. Pairing can be skipped with
+`--no-token` at provision time, and the board then warns at boot that its
+push port is open.
 
 ## 6. Scan a real I2C bus
 

@@ -11,6 +11,8 @@ library;
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
+
 Uint8List pushFrame(Uint8List blob, int nonce) {
   final b = BytesBuilder()
     ..add(ascii.encode('MPSH'))
@@ -24,6 +26,38 @@ Uint8List pushFrame(Uint8List blob, int nonce) {
       (nonce >> 16) & 0xFF,
       (nonce >> 24) & 0xFF,
     ])
+    ..add(blob);
+  return b.toBytes();
+}
+
+/// The key a pairing phrase derives: its SHA-256, the same 32 bytes
+/// provision.py stores on the board. Deriving on both ends means the phrase
+/// itself never exists anywhere but the two keyboards it was typed on.
+Uint8List keyFromPassphrase(String phrase) =>
+    Uint8List.fromList(sha256.convert(utf8.encode(phrase)).bytes);
+
+/// The authenticated frame: "MPH2", length, nonce, then HMAC-SHA256 with
+/// [key] over the nonce's wire bytes followed by the blob, then the blob.
+/// The receiver recomputes the same MAC before the blob reaches its
+/// verifier; vm/host/push_proto.h is the format's home.
+Uint8List pushFrameAuthed(Uint8List blob, int nonce, List<int> key) {
+  final nonceLe = [
+    nonce & 0xFF,
+    (nonce >> 8) & 0xFF,
+    (nonce >> 16) & 0xFF,
+    (nonce >> 24) & 0xFF,
+  ];
+  final mac = Hmac(sha256, key).convert([...nonceLe, ...blob]);
+  final b = BytesBuilder()
+    ..add(ascii.encode('MPH2'))
+    ..add([
+      blob.length & 0xFF,
+      (blob.length >> 8) & 0xFF,
+      (blob.length >> 16) & 0xFF,
+      (blob.length >> 24) & 0xFF,
+    ])
+    ..add(nonceLe)
+    ..add(mac.bytes)
     ..add(blob);
   return b.toBytes();
 }

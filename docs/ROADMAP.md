@@ -155,6 +155,10 @@ Dart program draws in a desktop window and on the board.
 
 ## M5 — v0.1 public release
 
+- [x] Push pairing: WiFi pushes are HMAC-authenticated against a phrase set
+      at provision time (ADR-010); a paired board refuses unsigned pushes,
+      an unpaired one warns at boot. Serial needs no pairing — the cable is
+      possession. Replay consciously deferred to v0.2 (ADR-010 records why)
 - [ ] README demo GIF (simulator + real hardware)
 - [ ] `moth create` project template
 - [x] Golden tests wired to CI (simulator, no hardware)

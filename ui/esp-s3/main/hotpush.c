@@ -58,6 +58,17 @@ static void log_visible_networks(void) {
   }
 }
 
+bool hotpush_load_push_key(uint8_t out[32]) {
+  nvs_handle_t h;
+  if (nvs_open("moth", NVS_READONLY, &h) != ESP_OK) return false;
+  size_t len = 32;
+  esp_err_t err = nvs_get_blob(h, "push_key", out, &len);
+  nvs_close(h);
+  /* A short blob is a corrupt or hand-rolled entry; treat it as absent
+   * rather than padding it into a weak key. */
+  return err == ESP_OK && len == 32;
+}
+
 static bool load_creds(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap) {
   nvs_handle_t h;
   if (nvs_open("moth", NVS_READONLY, &h) != ESP_OK) return false;
