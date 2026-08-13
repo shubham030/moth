@@ -41,6 +41,7 @@ serial-test: deps
 # See docs/PERF_REVIEW.md for what a failure here means.
 render-test: vm
 	./build/moth_render/render_perf_test
+	./build/moth_render/render_controls_test
 
 # End-to-end fps on real hardware; the only measurement fps claims come from.
 # make fps PORT=/dev/cu.usbmodemXXXX  (auto-detects if one board is attached)

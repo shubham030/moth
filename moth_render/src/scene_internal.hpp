@@ -119,6 +119,15 @@ struct Scene {
   bool pointer_down = false;
   mr_node_id pressed_node = MR_NODE_NONE;
 
+  /* The last value THIS drag derived from the finger, NaN when no drag has
+   * emitted yet. slider_drag dedupes against this, not the node's value: the
+   * widget layer rewrites the node every rebuild, so an app that clamps or
+   * quantizes what it accepts (Flutter's `divisions` idiom) would defeat a
+   * node-value dedupe and a stationary finger would emit — and repaint — at
+   * frame rate forever. */
+  float drag_value = 0.0f;
+  bool drag_valued = false;
+
   Node *get(mr_node_id id) {
     if (id == MR_NODE_NONE || id >= nodes.size() || !nodes[id].alive) return nullptr;
     return &nodes[id];
@@ -164,6 +173,12 @@ void layout_text(Node &n, float max_w, float &out_w, float &out_h);
  * box spans the whole ring, so testing that box would have a decorative
  * overlay swallow every tap inside it. */
 bool arc_hit(const Node &n, float px, float py);
+
+/* paint.cpp — where a slider's thumb travels: inset a thumb radius from each
+ * end of the box. Paint and the drag gesture must agree on this to the
+ * pixel, or the thumb lands beside the finger — which is why both read it
+ * from one function. */
+void slider_geometry(const Node &n, float *x0, float *x1, float *radius);
 
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);

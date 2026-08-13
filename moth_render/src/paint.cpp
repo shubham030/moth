@@ -390,6 +390,67 @@ static void draw_text(Scene &s, const Node &n, float opacity) {
   }
 }
 
+/* The accent for a control whose bg_color was never set. Transparent would
+ * mean an invisible slider, and a control you cannot see is worse than one
+ * in the wrong theme color. Matches CircularProgressIndicator's default. */
+static uint32_t control_accent(const Node &n) {
+  const uint32_t c = n.u[MR_PROP_BG_COLOR];
+  return ((c >> 24) & 0xFF) ? c : 0xFFE0AF68;
+}
+
+/* Where a slider's thumb travels: inset a thumb radius from each end, so the
+ * thumb at 0 or 1 sits fully inside the box. paint and the drag gesture in
+ * scene.cpp must agree on this, or the thumb lands beside the finger. */
+void slider_geometry(const Node &n, float *x0, float *x1, float *radius) {
+  float r = n.h * 0.5f - 2.0f;
+  if (r < 3.0f) r = 3.0f;
+  *radius = r;
+  *x0 = n.x + r;
+  *x1 = n.x + n.w - r;
+}
+
+/* Track, filled portion, thumb — bg_color is the accent, per the contract's
+ * single style slot for controls. A square with full corner radius is a
+ * circle, so the thumb needs no new primitive. */
+static void draw_slider(Scene &s, const Node &n, float opacity) {
+  const uint32_t accent = control_accent(n);
+  const float min = n.f[MR_PROP_MIN], max = n.f[MR_PROP_MAX];
+  float t = max > min ? (n.f[MR_PROP_VALUE] - min) / (max - min) : 0.0f;
+  t = clamp01(t);
+
+  float x0, x1, r;
+  slider_geometry(n, &x0, &x1, &r);
+  if (x1 <= x0) return;
+  const float cy = n.y + n.h * 0.5f;
+  const float cx = x0 + t * (x1 - x0);
+
+  float track_h = 4.0f;
+  if (track_h > n.h * 0.5f) track_h = n.h * 0.5f;
+  const uint32_t inactive = (accent & 0x00FFFFFFu) | 0x3D000000u; /* ~24% */
+
+  fill_round_rect(s, x0, cy - track_h * 0.5f, x1 - x0, track_h,
+                  track_h * 0.5f, inactive, opacity);
+  fill_round_rect(s, x0, cy - track_h * 0.5f, cx - x0, track_h,
+                  track_h * 0.5f, accent, opacity);
+  fill_round_rect(s, cx - r, cy - r, r * 2.0f, r * 2.0f, r, accent, opacity);
+}
+
+/* A pill that changes color and a knob that slides across it. Off is drawn
+ * in fixed grays rather than a dimmed accent: a switch must read as off at a
+ * glance, and a faint version of the on color reads as "partly on". */
+static void draw_switch(Scene &s, const Node &n, float opacity) {
+  const bool on = n.f[MR_PROP_VALUE] >= 0.5f;
+  const float r = n.h * 0.5f;
+  const uint32_t track = on ? control_accent(n) : 0xFF3A3A44u;
+  fill_round_rect(s, n.x, n.y, n.w, n.h, r, track, opacity);
+
+  float kr = r - 3.0f;
+  if (kr < 2.0f) kr = 2.0f;
+  const float kcx = on ? n.x + n.w - r : n.x + r;
+  fill_round_rect(s, kcx - kr, n.y + r - kr, kr * 2.0f, kr * 2.0f, kr,
+                  on ? 0xFFFFFFFFu : 0xFFB9B9C3u, opacity);
+}
+
 bool arc_hit(const Node &n, float px, float py) {
   ArcRing r;
   if (!arc_ring(n, r)) return false;
@@ -429,6 +490,16 @@ static void paint_node(Scene &s, mr_node_id id, float opacity,
     MR_PROF_START(t_arc);
     draw_arc(s, *n, opacity);
     MR_PROF_ADD(t_arc, mr_prof_arc_us);
+  } else if (n->kind == MR_NODE_SLIDER) {
+    /* Controls own their whole box; the generic background fill would
+     * paint bg_color as a rectangle when it means the accent. */
+    MR_PROF_START(t_slider);
+    draw_slider(s, *n, opacity);
+    MR_PROF_ADD(t_slider, mr_prof_rect_us);
+  } else if (n->kind == MR_NODE_SWITCH) {
+    MR_PROF_START(t_switch);
+    draw_switch(s, *n, opacity);
+    MR_PROF_ADD(t_switch, mr_prof_rect_us);
   } else {
     MR_PROF_START(t_rect);
     fill_round_rect(s, n->x, n->y, n->w, n->h, n->f[MR_PROP_RADIUS],

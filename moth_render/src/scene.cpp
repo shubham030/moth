@@ -38,6 +38,44 @@ static float ease(mr_easing e, float t) {
   }
 }
 
+/* Sets a slider's value from a pointer x, emitting VALUE_CHANGED only when
+ * it actually changed. Geometry comes from paint's slider_geometry, so the
+ * value under the finger is the value under the thumb. */
+static void slider_drag(Scene &s, mr_node_id id, float px) {
+  Node *n = s.get(id);
+  if (!n || n->kind != MR_NODE_SLIDER) return;
+  const float lo = n->f[MR_PROP_MIN], hi = n->f[MR_PROP_MAX];
+  if (hi <= lo) return;
+  float x0, x1, r;
+  slider_geometry(*n, &x0, &x1, &r);
+  if (x1 <= x0) return;
+  float t = (px - x0) / (x1 - x0);
+  if (t < 0.0f) t = 0.0f;
+  if (t > 1.0f) t = 1.0f;
+  const float v = lo + t * (hi - lo);
+  /* Dedupe against what the FINGER last produced, not what the node holds
+   * (see Scene::drag_value): the app may have written back something else,
+   * and honoring that must not re-trigger an emit while the finger is
+   * still. */
+  if (s.drag_valued && v == s.drag_value) return;
+  s.drag_value = v;
+  s.drag_valued = true;
+  if (v == n->f[MR_PROP_VALUE]) return;
+  mr_set_f32(id, MR_PROP_VALUE, v);
+  s.emit({id, MR_EV_VALUE_CHANGED, v, px, 0});
+}
+
+/* Flips a switch and reports it. The contract has the backend own control
+ * gestures: a switch emits 0/1, and the widget layer decides whether the
+ * new state sticks (a controlled component may set it right back). */
+static void switch_toggle(Scene &s, mr_node_id id, float px, float py) {
+  Node *n = s.get(id);
+  if (!n || n->kind != MR_NODE_SWITCH) return;
+  const float v = n->f[MR_PROP_VALUE] >= 0.5f ? 0.0f : 1.0f;
+  mr_set_f32(id, MR_PROP_VALUE, v);
+  s.emit({id, MR_EV_VALUE_CHANGED, v, px, py});
+}
+
 static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
   Node *n = s.get(id);
   if (!n || n->f[MR_PROP_OPACITY] <= 0.0f) return MR_NODE_NONE;
@@ -51,7 +89,26 @@ static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
    * beneath it. Ask the geometry instead. */
   if (n->kind == MR_NODE_ARC) return arc_hit(*n, px, py) ? id : MR_NODE_NONE;
 
-  bool inside = px >= n->x && px < n->x + n->w && py >= n->y && py < n->y + n->h;
+  /* A finger is not a mouse. The first on-glass test of the 24px slider
+   * logged thirty touches around it and almost none inside it — one landed
+   * seven pixels off. Controls accept touches out to a 48px-tall band
+   * (Flutter's minimum touch target) and a little past each end; their
+   * PAINTED box is unchanged. */
+  float pad_x = 0.0f, pad_y = 0.0f;
+  if (n->kind == MR_NODE_SLIDER || n->kind == MR_NODE_SWITCH) {
+    if (n->kind == MR_NODE_SLIDER) {
+      /* A slider too narrow for its thumb travel (w < 2r) paints nothing
+       * and cannot drag — it must not sit invisibly on top of whatever is
+       * behind it, eating touches, either. */
+      float x0, x1, r;
+      slider_geometry(*n, &x0, &x1, &r);
+      if (x1 <= x0) return MR_NODE_NONE;
+    }
+    if (n->h < 48.0f) pad_y = (48.0f - n->h) * 0.5f;
+    pad_x = 8.0f;
+  }
+  bool inside = px >= n->x - pad_x && px < n->x + n->w + pad_x &&
+                py >= n->y - pad_y && py < n->y + n->h + pad_y;
   return inside ? id : MR_NODE_NONE;
 }
 
@@ -249,17 +306,32 @@ void mr_pointer(int x, int y, bool down) {
   float px = (float)x, py = (float)y;
   if (down && !s.pointer_down) {
     s.pressed_node = hit_test(s, mr_root(), px, py);
-    if (s.pressed_node != MR_NODE_NONE)
+    s.drag_valued = false; /* a new gesture owes its first value an emit */
+    if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_PRESSED, 0, px, py});
+      /* Pressing a slider jumps the thumb to the finger, as Flutter's
+       * does; the same call then tracks every move while held. */
+      slider_drag(s, s.pressed_node, px);
+    }
+  } else if (down && s.pointer_down) {
+    slider_drag(s, s.pressed_node, px);
   } else if (!down && s.pointer_down) {
     if (s.pressed_node != MR_NODE_NONE) {
       s.emit({s.pressed_node, MR_EV_RELEASED, 0, px, py});
-      if (hit_test(s, mr_root(), px, py) == s.pressed_node)
-        s.emit({s.pressed_node, MR_EV_CLICKED, 0, px, py});
+      if (hit_test(s, mr_root(), px, py) == s.pressed_node) {
+        /* Controls claim their gesture, as Flutter's do: a completed slider
+         * drag or switch tap already reported itself as VALUE_CHANGED, and
+         * a CLICKED here would bubble to any tappable ancestor — a slider
+         * inside a tappable card would fire the card on every drag. */
+        const Node *rn = s.get(s.pressed_node);
+        const bool claims = rn && (rn->kind == MR_NODE_SLIDER ||
+                                   rn->kind == MR_NODE_SWITCH);
+        if (!claims) s.emit({s.pressed_node, MR_EV_CLICKED, 0, px, py});
+        switch_toggle(s, s.pressed_node, px, py);
+      }
     }
     s.pressed_node = MR_NODE_NONE;
   }
-  /* TODO(R1): slider drag gesture -> MR_EV_VALUE_CHANGED */
   s.pointer_down = down;
 }
 
