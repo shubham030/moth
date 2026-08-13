@@ -4,6 +4,7 @@
  * only the panel differs. A Dart program's own loop drives everything, so the
  * host does its work from the frame hook inside uiCommit.
  */
+#include "hmac_sha256.h"
 #include "moth_render.h"
 #include "moth_ui.h"
 #include "moth_vm.h"
@@ -254,6 +255,20 @@ int main(int argc, char **argv) {
       if (!g_sim.push) {
         fprintf(stderr, "mothsim: cannot listen on that port\n");
         return 1;
+      }
+      /* MOTH_PUSH_TOKEN pairs the simulator exactly as provision.py pairs a
+       * board: the phrase runs through the same PBKDF2, so `MOTH_PUSH_TOKEN=x
+       * mothsim --listen` and `MOTH_PUSH_TOKEN=x mothc --push` agree — and
+       * the paired-receiver path is testable with no hardware. The KDF costs
+       * a moment at startup by design; that cost is the pairing's strength. */
+      const char *token = getenv("MOTH_PUSH_TOKEN");
+      if (token && token[0]) {
+        uint8_t key[SHA256_DIGEST_LEN];
+        pbkdf2_hmac_sha256((const uint8_t *)token, strlen(token),
+                           (const uint8_t *)MOTH_PAIR_SALT,
+                           sizeof MOTH_PAIR_SALT - 1, MOTH_PAIR_ITERS, key);
+        moth_push_set_key(g_sim.push, key);
+        fprintf(stderr, "mothsim: push port paired (MOTH_PUSH_TOKEN)\n");
       }
     } else if (strcmp(argv[i], "--round") == 0) {
       g_sim.round = true;

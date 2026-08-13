@@ -19,7 +19,7 @@ target_compile_options(moth_ui PRIVATE -Wall -Wextra)
 
 find_package(SDL2 QUIET)
 if(SDL2_FOUND)
-  add_executable(mothsim vm/host/mothsim.c vm/host/push.c)
+  add_executable(mothsim vm/host/mothsim.c vm/host/push.c vm/host/hmac_sha256.c)
   target_link_libraries(mothsim PRIVATE moth_ui SDL2::SDL2)
   target_compile_options(mothsim PRIVATE -Wall -Wextra)
   # moth_render is C++, so the link needs the C++ runtime.

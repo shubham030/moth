@@ -38,8 +38,8 @@ void main() {
   test('log noise around the verdict does not hide it', () {
     final s = VerdictScanner(9);
     expect(s.feed(ascii.encode('I (123) moth: running Dart UI\n')), null);
-    expect(s.feed([...ascii.encode('garbage'), ...verdictReply('MPOK', 9)]),
-        true);
+    expect(
+        s.feed([...ascii.encode('garbage'), ...verdictReply('MPOK', 9)]), true);
   });
 
   test('the wrong nonce never matches — stale and forged replies are inert',
@@ -60,7 +60,8 @@ void main() {
     expect(s.feed(verdictReply('MPOK', 3)), true);
   });
 
-  test('a verdict interleaved mid-reply by other bytes is NOT matched — '
+  test(
+      'a verdict interleaved mid-reply by other bytes is NOT matched — '
       'which is why the board sends it three times', () {
     final s = VerdictScanner(5);
     final r = verdictReply('MPOK', 5);
@@ -68,5 +69,37 @@ void main() {
     expect(s.feed(corrupted), null);
     // The second, clean copy lands.
     expect(s.feed(r), true);
+  });
+
+  test('the authenticated frame matches an independent implementation', () {
+    // key = PBKDF2("test", moth-push-v1, 600k), nonce 0x04030201, blob
+    // [1,2,3]. The expected MAC comes from Python (hashlib.pbkdf2_hmac +
+    // hmac) over nonce_le || blob — so the Dart sender, the C receiver,
+    // and a third implementation all have to agree on the derivation AND
+    // on exactly which bytes are authenticated.
+    final key = keyFromPassphrase('test');
+    final frame =
+        pushFrameAuthed(Uint8List.fromList([1, 2, 3]), 0x04030201, key);
+    expect(ascii.decode(frame.sublist(0, 4)), 'MPH2');
+    expect(frame.sublist(4, 8), [3, 0, 0, 0]); // length, little-endian
+    expect(frame.sublist(8, 12), [1, 2, 3, 4]); // nonce, little-endian
+    const wantMac = 'ee1cc30a0f44386edfa4bcbe070b5818488a1e1c0ed785e5'
+        '7cc37860a9e4a802';
+    final gotMac = frame
+        .sublist(12, 44)
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+    expect(gotMac, wantMac);
+    expect(frame.sublist(44), [1, 2, 3]);
+    expect(frame.length, 47);
+  });
+
+  test('a different key or nonce changes the MAC — nothing is vestigial', () {
+    final blob = Uint8List.fromList([1, 2, 3]);
+    final a = pushFrameAuthed(blob, 7, keyFromPassphrase('one'));
+    final b = pushFrameAuthed(blob, 7, keyFromPassphrase('two'));
+    final c = pushFrameAuthed(blob, 8, keyFromPassphrase('one'));
+    expect(a.sublist(12, 44), isNot(b.sublist(12, 44)));
+    expect(a.sublist(12, 44), isNot(c.sublist(12, 44)));
   });
 }

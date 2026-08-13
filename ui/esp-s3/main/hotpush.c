@@ -58,6 +58,25 @@ static void log_visible_networks(void) {
   }
 }
 
+hotpush_key_state hotpush_load_push_key(uint8_t out[32]) {
+  nvs_handle_t h;
+  esp_err_t err = nvs_open("moth", NVS_READONLY, &h);
+  /* A missing namespace is a board that was never provisioned at all. Any
+   * other open failure is storage trouble on a board whose pairing state
+   * is unknown — which must not be read as "open the port". */
+  if (err == ESP_ERR_NVS_NOT_FOUND) return HOTPUSH_KEY_ABSENT;
+  if (err != ESP_OK) return HOTPUSH_KEY_FAULT;
+  size_t len = 32;
+  err = nvs_get_blob(h, "push_key", out, &len);
+  nvs_close(h);
+  if (err == ESP_ERR_NVS_NOT_FOUND) return HOTPUSH_KEY_ABSENT;
+  /* A wrong-sized blob is a corrupt or hand-rolled entry. Refusing to pad
+   * it into a weak key is necessary; treating it as never-paired would
+   * fail open, so it faults instead. */
+  if (err != ESP_OK || len != 32) return HOTPUSH_KEY_FAULT;
+  return HOTPUSH_KEY_OK;
+}
+
 static bool load_creds(char *ssid, size_t ssid_cap, char *pass, size_t pass_cap) {
   nvs_handle_t h;
   if (nvs_open("moth", NVS_READONLY, &h) != ESP_OK) return false;

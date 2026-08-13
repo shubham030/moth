@@ -208,10 +208,36 @@ static bool accept_push(void) {
      * burst to every frame forever. */
     static int64_t next_listen_us;
     if (esp_timer_get_time() >= next_listen_us) {
-      s_push = moth_push_listen(HOTPUSH_PORT);
-      if (s_push) {
-        ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
-                 hotpush_net_ip(), HOTPUSH_PORT);
+      /* The key is read BEFORE the port opens: a pairing that exists but
+       * cannot be read must refuse network pushes, and the only reliable
+       * refusal is a listener that never comes up. Failing open here would
+       * mean storage trouble silently un-pairs the board. Serial pushes
+       * still work throughout — recovery is a cable, not a network hole. */
+      uint8_t key[32];
+      hotpush_key_state ks = hotpush_load_push_key(key);
+      if (ks == HOTPUSH_KEY_FAULT) {
+        static bool logged_fault;
+        if (!logged_fault) {
+          logged_fault = true;
+          ESP_LOGE(TAG, "pairing key unreadable — network push stays OFF "
+                        "(serial still works); re-run tools/provision");
+        }
+        /* No listener while the pairing state is unreadable; fall through
+         * so the serial transport below still polls. */
+        next_listen_us = esp_timer_get_time() + 60 * 1000 * 1000;
+      } else if ((s_push = moth_push_listen(HOTPUSH_PORT)) != NULL) {
+        if (ks == HOTPUSH_KEY_OK) {
+          moth_push_set_key(s_push, key);
+          ESP_LOGI(TAG, "hot push ready (paired): mothc app.dart --push %s:%d",
+                   hotpush_net_ip(), HOTPUSH_PORT);
+        } else {
+          /* Loud on purpose: an unpaired listener accepts programs from
+           * anyone who can reach this port. */
+          ESP_LOGW(TAG, "hot push ready UNPAIRED — anyone on this network "
+                        "can push; re-run tools/provision to set a token");
+          ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
+                   hotpush_net_ip(), HOTPUSH_PORT);
+        }
       } else {
         next_listen_us = esp_timer_get_time() + 2 * 1000 * 1000;
       }
