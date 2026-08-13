@@ -44,7 +44,14 @@ void moth_ui_set_frame_hook(moth_ui_frame_fn hook, void *user) {
 
 static void on_event(const mr_event *ev, void *user) {
   (void)user;
-  if (g_events.count == EVENT_QUEUE) return; /* drop oldest-first overflow */
+  /* On overflow, drop the OLDEST. For a value stream the newest sample is
+   * the one that matters: the node already holds the new value, so losing
+   * the tail would leave the program with a stale value that the next
+   * rebuild writes back, snapping a dragged thumb backward. */
+  if (g_events.count == EVENT_QUEUE) {
+    g_events.head = (g_events.head + 1) % EVENT_QUEUE;
+    g_events.count--;
+  }
   int slot = (g_events.head + g_events.count) % EVENT_QUEUE;
   g_events.items[slot] = *ev;
   g_events.count++;

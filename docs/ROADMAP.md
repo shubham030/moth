@@ -89,7 +89,17 @@ Dart program draws in a desktop window and on the board.
 - [x] Flutter-named widgets: Container, Column, Row, Stack, Center, Padding,
       SizedBox, GestureDetector, Divider, Text/TextStyle,
       CircularProgressIndicator
-- [ ] More widgets: Slider, Switch, Image
+- [x] Slider and Switch: renderer-owned gestures (press jumps the thumb,
+      drag tracks, tap toggles) emitting VALUE_CHANGED; Flutter-shaped
+      controlled components in the widget layer; contract-tested end to
+      end (moth_render/test/controls_test.cpp) — events, clamping,
+      dedupe, and painted pixels asserted against the same geometry the
+      gesture uses
+- [ ] Disabled controls: `onChanged: null` should disable the gesture and
+      grey the control (Flutter's semantics). Today the renderer still drags
+      the thumb and the next rebuild snaps it back; needs an enabled prop in
+      the backend contract, so it rides the next contract bump
+- [ ] Image widget
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
 ## Known limitations to close
