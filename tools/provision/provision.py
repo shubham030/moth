@@ -84,6 +84,8 @@ def main():
     ap.add_argument("--no-token", action="store_true",
                     help="leave the push port UNPAIRED: anyone on the "
                          "network can replace the running program")
+    ap.add_argument("--token", help="pairing phrase; prefer the interactive "
+                                    "prompt — a flag lands in shell history")
     args = ap.parse_args()
 
     password = args.password
@@ -100,6 +102,8 @@ def main():
     if args.no_token:
         print("provision: --no-token — the push port will accept programs "
               "from ANYONE on this network")
+    elif args.token:
+        token = args.token
     else:
         while True:
             token = getpass.getpass(
