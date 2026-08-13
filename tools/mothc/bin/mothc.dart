@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:analyzer/source/line_info.dart';
 import 'package:mothc/src/compiler.dart';
+import 'package:mothc/src/create.dart';
 import 'package:mothc/src/errors.dart';
 import 'package:mothc/src/push_wire.dart';
 import 'package:mothc/src/serial.dart';
@@ -12,6 +13,10 @@ const _usage = '''
 mothc — compile Dart to moth bytecode
 
 usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
+       mothc create <dir>
+
+  create  scaffold a new moth project: one app.dart, a README, nothing else
+          to install.
 
   --push  send the compiled program to a running host, which stops what it
           is doing and starts this instead. The display stays up.
@@ -27,6 +32,27 @@ Future<void> main(List<String> args) async {
   if (args.isEmpty || args.contains('-h') || args.contains('--help')) {
     stdout.write(_usage);
     exit(args.isEmpty ? 64 : 0);
+  }
+
+  if (args.first == 'create') {
+    if (args.length != 2) {
+      stderr.writeln('mothc: create needs exactly one argument, the '
+          'project directory');
+      exit(64);
+    }
+    try {
+      createProject(args[1]);
+    } on CreateError catch (e) {
+      stderr.writeln('mothc: $e');
+      exit(73);
+    }
+    stdout
+      ..writeln('created ${args[1]}/')
+      ..writeln('  app.dart    — the whole app; start in build()')
+      ..writeln('  README.md   — how to run it, desktop and board')
+      ..writeln()
+      ..writeln('next: make ui F=${args[1]}/app.dart');
+    exit(0);
   }
 
   String? input;

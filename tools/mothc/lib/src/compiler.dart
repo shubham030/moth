@@ -127,8 +127,8 @@ class Compiler {
       if (directive is ImportDirective) {
         final target = directive.uri.stringValue;
         if (target == null) {
-          throw CompileError('this import is not a plain string',
-              directive.offset);
+          throw CompileError(
+              'this import is not a plain string', directive.offset);
         }
         if (target.startsWith('dart:')) {
           throw CompileError(
@@ -361,8 +361,8 @@ class Compiler {
     final rest = uri.substring('package:'.length);
     final slash = rest.indexOf('/');
     if (slash <= 0 || slash == rest.length - 1) {
-      throw CompileError("'$uri' is missing a file after the package name",
-          offset,
+      throw CompileError(
+          "'$uri' is missing a file after the package name", offset,
           hint: 'it should look like package:moth/moth.dart');
     }
     final packageName = rest.substring(0, slash);
@@ -413,11 +413,20 @@ class Compiler {
       dir = parent;
     }
 
-    // moth's own packages, which ship with the compiler.
+    // moth's own packages, which ship with the compiler. Two anchors,
+    // because neither is always right: Platform.script points at
+    // bin/mothc.dart under `dart run` but at a generated harness under
+    // `dart test` (which is how the create-template test compiles), and the
+    // working directory covers a compiled mothc invoked from anywhere in a
+    // checkout.
     final here = p.dirname(p.dirname(p.absolute(Platform.script.toFilePath())));
+    final cwd = Directory.current.path;
     for (final guess in [
       p.join(here, '..', '..', 'packages', name, 'lib'),
       p.join(here, '..', 'packages', name, 'lib'),
+      p.join(cwd, 'packages', name, 'lib'),
+      p.join(cwd, '..', 'packages', name, 'lib'),
+      p.join(cwd, '..', '..', 'packages', name, 'lib'),
     ]) {
       roots.add(p.normalize(guess));
     }
@@ -511,7 +520,8 @@ class Compiler {
     // it appears among the members (and exists even when synthesized).
     if (classCtorIndex.containsKey(index)) {
       ctor = classCtorIndex[index]!;
-      functions[ctor] = (FunctionCompiler.member(this, fields, methodNames, setterNames,
+      functions[ctor] = (FunctionCompiler.member(
+              this, fields, methodNames, setterNames,
               isConstructor: true)
           .compileMember(
         name: '${decl.name.lexeme}()',
@@ -565,7 +575,8 @@ class Compiler {
         final reserved = classMethodSlots[index]
             .firstWhere((s) => s.$1 == _memberKey(member))
             .$2;
-        functions[reserved] = FunctionCompiler.member(this, fields, methodNames, setterNames,
+        functions[reserved] = FunctionCompiler.member(
+                this, fields, methodNames, setterNames,
                 isConstructor: false)
             .compileMember(
           name: '${decl.name.lexeme}.${member.name.lexeme}',
@@ -640,7 +651,8 @@ class Compiler {
     // dead code, which in a hardware API is the line that drives the pin.
     final fieldNames = fields.toSet();
     for (final member in decl.members) {
-      if (member is MethodDeclaration && fieldNames.contains(member.name.lexeme)) {
+      if (member is MethodDeclaration &&
+          fieldNames.contains(member.name.lexeme)) {
         throw CompileError(
           "'${member.name.lexeme}' is already a field of this class",
           member.offset,
