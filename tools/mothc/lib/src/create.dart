@@ -118,8 +118,11 @@ void createProject(String dir) {
   // would skip the guard and let createSync throw ENOTDIR — and "I typed a
   // filename instead of a directory name" is exactly the mistake this
   // command's audience makes.
+  // typeSync follows links, so a symlink reports its target's type: a link
+  // to a file hits this refusal, a link to a directory is treated as one,
+  // and a dangling link falls to the write path's CreateError.
   final kind = FileSystemEntity.typeSync(dir);
-  if (kind == FileSystemEntityType.file || kind == FileSystemEntityType.link) {
+  if (kind == FileSystemEntityType.file) {
     throw CreateError("'$dir' already exists and is a file — create wants a "
         'directory name');
   }
