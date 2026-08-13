@@ -38,7 +38,10 @@ void sha256(const void *data, size_t len, uint8_t out[SHA256_DIGEST_LEN]);
 
 /* HMAC-SHA256 over two segments, because the push frame authenticates
  * nonce || blob and the caller should not have to concatenate a megabyte
- * to prove it. Either segment may be NULL when its length is 0. */
+ * to prove it. Either segment may be NULL when its length is 0. `out` MAY
+ * alias either input segment — both are fully absorbed before `out` is
+ * written; pbkdf2_hmac_sha256's inner loop depends on this, so a streaming
+ * rework that writes `out` early would break the KDF silently. */
 void hmac_sha256_2(const uint8_t *key, size_t key_len,
                    const void *seg1, size_t len1,
                    const void *seg2, size_t len2,

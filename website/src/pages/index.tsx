@@ -113,7 +113,7 @@ const FEATURES = [
   {
     icon: '📦',
     title: 'Programs are 130 bytes',
-    body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable or WiFi and it is on the screen in well under a second — no reflashing.',
+    body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
   },
 ];
 
