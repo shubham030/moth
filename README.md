@@ -174,7 +174,7 @@ moth reimplements that model at MCU scale:
 Verified end to end: **ESP32-S3** with the Waveshare 1.75" round AMOLED
 (466x466, CO5300 panel, CST9217 touch) — everything measured in these docs
 was measured there. The VM and renderer are plain C/C++ on ESP-IDF with the
-panel behind a four-function interface, so other IDF targets (ESP32-P4
+panel behind a three-function interface, so other IDF targets (ESP32-P4
 included) are ports, not rewrites — but no other board is verified yet. The
 UI framework wants PSRAM for its framebuffer; bare 512KB-SRAM chips are out
 of scope. Headless (no display) use works on anything ESP-IDF supports.
