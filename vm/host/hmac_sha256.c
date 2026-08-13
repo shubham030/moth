@@ -104,6 +104,13 @@ void sha256(const void *data, size_t len, uint8_t out[SHA256_DIGEST_LEN]) {
   sha256_final(&c, out);
 }
 
+/* memset the optimizer cannot elide — the plain call on a dying local is
+ * dead-store-eliminated, which makes a "wipe" a comment. */
+static void wipe(void *p, size_t n) {
+  volatile uint8_t *v = (volatile uint8_t *)p;
+  while (n--) *v++ = 0;
+}
+
 void hmac_sha256_2(const uint8_t *key, size_t key_len,
                    const void *seg1, size_t len1,
                    const void *seg2, size_t len2,
@@ -132,8 +139,10 @@ void hmac_sha256_2(const uint8_t *key, size_t key_len,
   sha256_update(&c, inner, sizeof inner);
   sha256_final(&c, out);
 
-  memset(k, 0, sizeof k);
-  memset(pad, 0, sizeof pad);
+  wipe(k, sizeof k);
+  wipe(pad, sizeof pad);
+  wipe(inner, sizeof inner);
+  wipe(&c, sizeof c);
 }
 
 int hmac_sha256_eq(const uint8_t a[SHA256_DIGEST_LEN],
@@ -141,4 +150,21 @@ int hmac_sha256_eq(const uint8_t a[SHA256_DIGEST_LEN],
   uint8_t d = 0;
   for (int i = 0; i < SHA256_DIGEST_LEN; i++) d |= a[i] ^ b[i];
   return d == 0;
+}
+
+void pbkdf2_hmac_sha256(const uint8_t *pass, size_t pass_len,
+                        const uint8_t *salt, size_t salt_len, uint32_t iters,
+                        uint8_t out[SHA256_DIGEST_LEN]) {
+  /* One output block: T = F(P, S, c, 1) = U1 ^ U2 ^ ... ^ Uc, with
+   * U1 = HMAC(P, S || INT_BE(1)) and Un = HMAC(P, Un-1). */
+  uint8_t block_index[4] = {0, 0, 0, 1};
+  uint8_t u[SHA256_DIGEST_LEN];
+  hmac_sha256_2(pass, pass_len, salt, salt_len, block_index,
+                sizeof block_index, u);
+  memcpy(out, u, SHA256_DIGEST_LEN);
+  for (uint32_t i = 1; i < iters; i++) {
+    hmac_sha256_2(pass, pass_len, u, SHA256_DIGEST_LEN, NULL, 0, u);
+    for (int j = 0; j < SHA256_DIGEST_LEN; j++) out[j] ^= u[j];
+  }
+  wipe(u, sizeof u);
 }

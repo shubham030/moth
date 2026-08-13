@@ -30,11 +30,36 @@ Uint8List pushFrame(Uint8List blob, int nonce) {
   return b.toBytes();
 }
 
-/// The key a pairing phrase derives: its SHA-256, the same 32 bytes
+/// The pairing KDF's parameters — vm/host/hmac_sha256.h is their home; the
+/// C receiver, provision.py and this file must agree or a paired board and
+/// its sender silently derive different keys.
+const pairSalt = 'moth-push-v1';
+const pairIters = 600000;
+
+/// The key a pairing phrase derives: PBKDF2-HMAC-SHA256, the same 32 bytes
 /// provision.py stores on the board. Deriving on both ends means the phrase
-/// itself never exists anywhere but the two keyboards it was typed on.
+/// itself never exists anywhere but the two keyboards it was typed on. A
+/// KDF and not a bare hash, because one captured push frame is a complete
+/// offline verifier for the phrase — the iteration count is the attacker's
+/// per-guess cost, paid here once per push instead.
 Uint8List keyFromPassphrase(String phrase) =>
-    Uint8List.fromList(sha256.convert(utf8.encode(phrase)).bytes);
+    _pbkdf2Sha256(utf8.encode(phrase), utf8.encode(pairSalt), pairIters);
+
+/// One 32-byte block of RFC 2898 PBKDF2: U1 = HMAC(P, S || 00000001),
+/// Un = HMAC(P, Un-1), T = U1 ^ ... ^ Uc. package:crypto has the HMAC but
+/// not the KDF.
+Uint8List _pbkdf2Sha256(List<int> pass, List<int> salt, int iters) {
+  final prf = Hmac(sha256, pass);
+  var u = Uint8List.fromList(prf.convert([...salt, 0, 0, 0, 1]).bytes);
+  final out = Uint8List.fromList(u);
+  for (var i = 1; i < iters; i++) {
+    u = Uint8List.fromList(prf.convert(u).bytes);
+    for (var j = 0; j < out.length; j++) {
+      out[j] ^= u[j];
+    }
+  }
+  return out;
+}
 
 /// The authenticated frame: "MPH2", length, nonce, then HMAC-SHA256 with
 /// [key] over the nonce's wire bytes followed by the blob, then the blob.

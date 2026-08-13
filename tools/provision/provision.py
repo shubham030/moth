@@ -130,7 +130,13 @@ def main():
             w.writerow(["wifi_ssid", "data", "string", args.ssid])
             w.writerow(["wifi_pass", "data", "string", password])
             if token is not None:
-                key = hashlib.sha256(token.encode()).digest()
+                # PBKDF2, not a bare hash: one captured push frame is a
+                # complete offline verifier for the phrase, so the KDF's
+                # iteration count is the attacker's per-guess cost. Salt and
+                # count are fixed by vm/host/hmac_sha256.h — every deriver
+                # must match or the pairing silently fails.
+                key = hashlib.pbkdf2_hmac("sha256", token.encode(),
+                                          b"moth-push-v1", 600000)
                 # nvs_partition_gen reads binary blobs from base64.
                 w.writerow(["push_key", "data", "base64",
                             base64.b64encode(key).decode()])
