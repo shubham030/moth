@@ -140,7 +140,7 @@ Dart program draws in a desktop window and on the board.
       upgrade, not the prerequisite. Measured on the board: 125–180ms
       compile-to-verdict over serial, persistence across reboot, and fps
       unchanged at 38 with the transport polling on the frame hook. WiFi
-      pushes verified on-board end to end, paired and unpaired (see M5).
+      pushes verified on-board end to end (the paired flows under M5).
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM

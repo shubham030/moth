@@ -41,8 +41,8 @@ Commands: `mothc app.dart` (compile), `mothc app.dart --push <target>`
 
 ## 2. Device VM (`vm/`)
 
-A stack-based interpreter (ADR-003) in portable C11, ~2k lines, no OS
-assumptions beyond malloc/tick/log shims. The same source compiles for
+A stack-based interpreter (ADR-003) in portable C11, ~1.7k lines of
+implementation, no OS assumptions beyond malloc/tick/log shims. The same source compiles for
 ESP-IDF and for macOS/Linux (the simulator and CI).
 
 - **Values:** null, bool, 64-bit int, double, and heap objects (strings,
@@ -104,7 +104,7 @@ to the first ancestor with a handler.
 | Region | Actual |
 | ------ | ------ |
 | Framebuffer (466x466 ARGB) | ~850KB PSRAM |
-| VM + renderer + bindings, flash | ~32KB on top of ESP-IDF |
+| VM + renderer + bindings + fonts, flash | ~90KB on top of ESP-IDF (`idf.py size-components`: 48KB code + 42KB data) |
 | Bytecode blob | ~11KB for a full widget app; stored programs execute from mapped flash, costing no RAM |
 | VM heap | sized by the host; the S3 host gives the program its PSRAM remainder |
 

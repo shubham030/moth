@@ -94,8 +94,7 @@ void main() {
     final ran = Process.runSync(mothrun, [blob]);
     final out = '${ran.stdout}${ran.stderr}';
     expect(out, contains('no field or getter'));
-    expect(out, isNot(contains('\n1')),
-        reason: 'bump() must not have run');
+    expect(out, isNot(contains('\n1')), reason: 'bump() must not have run');
   });
 
   test('a field and an accessor cannot share a name', () {
@@ -124,5 +123,21 @@ void main() { var c = C()..log.add(1); print(c.log); }
   test('dart: imports say why they cannot work', () {
     final out = compile("import 'dart:io';\nvoid main() { print(1); }\n");
     expect(out, contains('not available on a microcontroller'));
+  });
+
+  test('a closure capturing an enclosing local is refused, with the idiom', () {
+    // The docs' headline constraint — closures capture only `this` — rests
+    // on this rejection. Silently compiling it would read the wrong
+    // variable at runtime; the hint teaches the field/top-level idiom the
+    // examples use.
+    final out = compile('''
+void main() {
+  var x = 1;
+  var f = () { print(x); };
+  f();
+}
+''');
+    expect(out, contains("cannot use 'x' from the enclosing function"));
+    expect(out, contains('field'));
   });
 }

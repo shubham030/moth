@@ -36,7 +36,7 @@ $ dart pub get --directory tools/mothc
 
 ```console
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
-wrote examples/blink.mothb (130 bytes)
+wrote examples/blink.mothb (136 bytes)
 
 $ ./vm/build/mothrun examples/blink.mothb --stop-after 3000
 [     0ms] pin 38 -> output
@@ -124,7 +124,7 @@ $ dart run tools/mothc/bin/mothc.dart examples/board_demo.dart \
 
 $ . $HOME/esp/esp-idf/export.sh
 $ cd vm/esp
-$ idf.py set-target esp32s3          # or esp32p4
+$ idf.py set-target esp32s3
 $ idf.py build
 $ idf.py -p /dev/cu.usbmodem2101 -b 115200 flash monitor
 ```

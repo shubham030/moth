@@ -1,7 +1,8 @@
 # Contributing to moth
 
-moth is small on purpose: a ~2k-line VM, a ~1.5k-line renderer, a compiler,
-and a widget framework, each behind a documented contract. Most changes touch
+moth is small on purpose: a ~1.7k-line VM, a ~1.5k-line renderer (`wc -l`
+over each one's implementation files), a compiler, and a widget framework,
+each behind a documented contract. Most changes touch
 one of them and can be built, tested and verified without hardware.
 
 ## Build and run
