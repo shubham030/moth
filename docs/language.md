@@ -243,8 +243,8 @@ This is what makes [package:moth's hardware API](hardware.md) worth using:
 
 | Feature | Milestone |
 | --- | --- |
-| Maps | M1b |
-| Static members, named constructors | after M1b |
+| Maps | planned |
+| Static members, named constructors | planned |
 | `async` / `await`, `Future` | needs an event loop; see below |
 | Networking — WiFi, sockets, HTTP | not started |
 | Mixins, generics, extensions, records | not planned for v1 |
