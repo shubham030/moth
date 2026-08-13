@@ -6,8 +6,8 @@ moth lets you write UI and application logic for ESP32-class microcontrollers in
 real Dart — widgets, `setState`, `build()` — and run it on-device via a small
 bytecode VM, drawing through moth's own renderer. The VM, the renderer, the
 bindings and the bundled fonts together add about 90 KB of flash on top of
-ESP-IDF (`idf.py size-components`: 48 KB code + 42 KB data, half of that
-glyph tables).
+ESP-IDF (`idf.py size-components`: 48 KB code + 42 KB data, most of the
+data being glyph tables).
 
 ```dart
 import 'package:moth/widgets.dart';
