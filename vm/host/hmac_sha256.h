@@ -48,6 +48,19 @@ void hmac_sha256_2(const uint8_t *key, size_t key_len,
 int hmac_sha256_eq(const uint8_t a[SHA256_DIGEST_LEN],
                    const uint8_t b[SHA256_DIGEST_LEN]);
 
+/* PBKDF2-HMAC-SHA256, one 32-byte block (RFC 2898). This is the pairing
+ * KDF: a bare SHA-256 of a human phrase hands a passive observer an offline
+ * dictionary attack — one captured frame is a complete verifier, and people
+ * do not type 128-bit phrases. The iteration count multiplies the
+ * attacker's per-guess cost by itself; the salt kills precomputation shared
+ * across targets. Every deriver (provision.py, mothc, this) must agree on
+ * salt and count, so they live here. */
+#define MOTH_PAIR_SALT "moth-push-v1"
+#define MOTH_PAIR_ITERS 600000
+void pbkdf2_hmac_sha256(const uint8_t *pass, size_t pass_len,
+                        const uint8_t *salt, size_t salt_len, uint32_t iters,
+                        uint8_t out[SHA256_DIGEST_LEN]);
+
 #ifdef __cplusplus
 }
 #endif

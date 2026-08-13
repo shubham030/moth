@@ -257,13 +257,16 @@ int main(int argc, char **argv) {
         return 1;
       }
       /* MOTH_PUSH_TOKEN pairs the simulator exactly as provision.py pairs a
-       * board: the phrase's SHA-256 becomes the key, so `MOTH_PUSH_TOKEN=x
+       * board: the phrase runs through the same PBKDF2, so `MOTH_PUSH_TOKEN=x
        * mothsim --listen` and `MOTH_PUSH_TOKEN=x mothc --push` agree — and
-       * the paired-receiver path is testable with no hardware. */
+       * the paired-receiver path is testable with no hardware. The KDF costs
+       * a moment at startup by design; that cost is the pairing's strength. */
       const char *token = getenv("MOTH_PUSH_TOKEN");
       if (token && token[0]) {
         uint8_t key[SHA256_DIGEST_LEN];
-        sha256(token, strlen(token), key);
+        pbkdf2_hmac_sha256((const uint8_t *)token, strlen(token),
+                           (const uint8_t *)MOTH_PAIR_SALT,
+                           sizeof MOTH_PAIR_SALT - 1, MOTH_PAIR_ITERS, key);
         moth_push_set_key(g_sim.push, key);
         fprintf(stderr, "mothsim: push port paired (MOTH_PUSH_TOKEN)\n");
       }

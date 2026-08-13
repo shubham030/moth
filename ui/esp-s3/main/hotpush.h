@@ -16,9 +16,16 @@
  * retries forever, so the UI never waits on the network. */
 void hotpush_net_start(void);
 
-/* Reads the 32-byte pairing key provision.py stored in NVS. False when the
- * board is unpaired (or the stored blob is malformed). */
-bool hotpush_load_push_key(uint8_t out[32]);
+/* Reads the 32-byte pairing key provision.py stored in NVS. The three
+ * outcomes are NOT collapsible: "never paired" opens the port with a
+ * warning, but "paired and unreadable" must REFUSE network pushes — a
+ * security posture that degrades open on storage trouble isn't one. */
+typedef enum {
+  HOTPUSH_KEY_OK,     /* out[] holds the pairing key */
+  HOTPUSH_KEY_ABSENT, /* never provisioned — genuinely unpaired */
+  HOTPUSH_KEY_FAULT,  /* a key exists or existed and cannot be read */
+} hotpush_key_state;
+hotpush_key_state hotpush_load_push_key(uint8_t out[32]);
 
 /* True while the station has an IP. */
 bool hotpush_net_connected(void);

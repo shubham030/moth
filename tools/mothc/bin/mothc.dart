@@ -247,12 +247,24 @@ Future<void> _push(String target, Uint8List blob, bool wantToken) async {
   }
 
   // The phrase comes from the prompt (--token) or the environment; it is
-  // reduced to its SHA-256 immediately and never stored or echoed. A board
-  // that is paired rejects a plain push with MPRJ before reading the blob,
-  // so a forgotten token fails in one round-trip, not a timeout.
+  // reduced to its derived key immediately and never stored or echoed. A
+  // paired board answers a plain push with a real MPRJ — after draining
+  // the frame (replying mid-stream draws an RST that eats the reply), so
+  // a forgotten token costs one full transfer, then fails cleanly rather
+  // than timing out.
   Uint8List? key;
+  // MOTH_PUSH_KEY carries the DERIVED key (64 hex chars) and skips the
+  // ~2s KDF — for scripts that push in a loop. Deriving it once:
+  //   python3 -c "import hashlib; print(hashlib.pbkdf2_hmac('sha256',
+  //     b'PHRASE', b'moth-push-v1', 600000).hex())"
+  final envKey = Platform.environment['MOTH_PUSH_KEY'];
   final envToken = Platform.environment['MOTH_PUSH_TOKEN'];
-  if (wantToken) {
+  if (envKey != null && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(envKey)) {
+    key = Uint8List.fromList([
+      for (var i = 0; i < 64; i += 2)
+        int.parse(envKey.substring(i, i + 2), radix: 16),
+    ]);
+  } else if (wantToken) {
     stderr.write('pairing phrase: ');
     final hadEcho = stdin.echoMode;
     stdin.echoMode = false;

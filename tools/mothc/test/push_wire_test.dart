@@ -72,18 +72,19 @@ void main() {
   });
 
   test('the authenticated frame matches an independent implementation', () {
-    // key = SHA-256("test"), nonce 0x04030201, blob [1,2,3]. The expected
-    // MAC comes from Python's hmac module over nonce_le || blob — so the
-    // Dart sender, the C receiver, and a third implementation all have to
-    // agree on exactly which bytes are authenticated.
+    // key = PBKDF2("test", moth-push-v1, 600k), nonce 0x04030201, blob
+    // [1,2,3]. The expected MAC comes from Python (hashlib.pbkdf2_hmac +
+    // hmac) over nonce_le || blob — so the Dart sender, the C receiver,
+    // and a third implementation all have to agree on the derivation AND
+    // on exactly which bytes are authenticated.
     final key = keyFromPassphrase('test');
     final frame =
         pushFrameAuthed(Uint8List.fromList([1, 2, 3]), 0x04030201, key);
     expect(ascii.decode(frame.sublist(0, 4)), 'MPH2');
     expect(frame.sublist(4, 8), [3, 0, 0, 0]); // length, little-endian
     expect(frame.sublist(8, 12), [1, 2, 3, 4]); // nonce, little-endian
-    const wantMac = '228e8bf986c15531af341236a435408bb5b4a7e5e28f29a6'
-        '0d1112b26150c71d';
+    const wantMac = 'ee1cc30a0f44386edfa4bcbe070b5818488a1e1c0ed785e5'
+        '7cc37860a9e4a802';
     final gotMac = frame
         .sublist(12, 44)
         .map((b) => b.toRadixString(16).padLeft(2, '0'))
