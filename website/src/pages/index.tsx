@@ -155,10 +155,10 @@ function Status() {
             <ul className="statusList">
               <li className="tick">Strings, lists, classes, closures, garbage collection</li>
               <li className="tick">Flutter-named widgets, setState, sliders and switches — 38fps on a round AMOLED</li>
-              <li className="tick">Hot push over the USB cable or WiFi — no reflashing</li>
+              <li className="tick">Hot push over the USB cable or paired WiFi — no reflashing</li>
               <li className="tick">Digital and analog I/O, PWM, tone, I2C, UART</li>
               <li className="tick">Desktop simulator, golden tests, paint-cost budgets</li>
-              <li className="tick">ESP32-S3 and ESP32-P4</li>
+              <li className="tick">ESP32-S3 with the Waveshare 1.75&quot; round AMOLED — the verified board</li>
             </ul>
           </div>
           <div className="statusCol">
@@ -169,6 +169,7 @@ function Status() {
               <li className="pending">Images</li>
               <li className="pending">Scalable text and gradients</li>
               <li className="pending">State-preserving hot reload (push restarts the program)</li>
+              <li className="pending">Boards beyond the one above (ESP32-P4 builds, unverified)</li>
             </ul>
           </div>
         </div>

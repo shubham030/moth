@@ -6,127 +6,111 @@ slug: /architecture
 
 # moth architecture
 
-Four layers, each independently shippable:
+Four layers, each independently shippable and independently testable:
 
-1. **Host toolchain** — Dart CLI that compiles a Dart package to a `.mothb` bytecode blob
-2. **Device VM** — C interpreter + GC, packaged as an ESP-IDF component
-3. **LVGL bindings** — native functions exposed to bytecode, generated from a binding spec
-4. **Widget framework** — pure Dart (`package:moth`), compiled into the app blob like user code
+1. **Host toolchain** (`tools/mothc`, Dart) — compiles a Dart subset to a `.mothb` bytecode blob
+2. **Device VM** (`vm/`, C) — interpreter + GC, portable across ESP-IDF and POSIX
+3. **Renderer** (`moth_render/`, C++) — scene graph, flex layout, software paint, native animations
+4. **Widget framework** (`packages/moth`, pure Dart) — compiled into the app blob like user code
 
-## 1. Host toolchain (`moth` CLI)
+This page describes the system as built. For a gentler walkthrough of the
+same pipeline, start with [how it works](/docs/how-it-works).
 
-Written in Dart, runs on the developer machine. Pipeline:
+## 1. Host toolchain (`tools/mothc`)
+
+Runs on the developer machine. Pipeline:
 
 ```
-app source ──► package:analyzer (resolved AST) ──► lowering ──► moth bytecode ──► app.mothb
+app source ──► package:analyzer (AST) ──► lowering ──► moth bytecode ──► app.mothb
 ```
 
-- **Front end: `package:analyzer`.** We never write a Dart parser; the official
-  analyzer gives us resolved types, constant evaluation, and error reporting.
-  (The kernel/.dill route via the CFE is a possible later swap — see ADR-004.)
-- **Lowering:** desugar to a small core — classes flattened to vtables, closures
-  to heap-allocated environments, generics erased, string interpolation to
-  concat calls, `async` to state machines over the event loop (post-v1).
-- **Output:** a single relocatable blob: constant pool, function table, bytecode,
-  plus a name table for stack traces. Target size: a hello-world framework app
-  well under 100KB.
+- **Front end: `package:analyzer`.** moth never implements a Dart parser; the
+  official analyzer supplies syntax and error locations, so unsupported
+  constructs are rejected with a source position and a hint rather than
+  guessed at (ADR-004).
+- **Lowering:** classes flatten to member tables with single inheritance;
+  closures become heap objects capturing `this`; string interpolation becomes
+  concatenation. What the subset excludes is rejected at compile time — see
+  [language.md](/docs/language).
+- **Output:** one self-contained blob — constant pool, native-import table,
+  bytecode per function. Blink is 136 bytes; a full widget app is ~11KB.
+  Format in [BYTECODE.md](/docs/bytecode).
 
-Commands: `moth build`, `moth run` (build + push + attach console),
-`moth simulate` (run against desktop LVGL — see §6).
+Commands: `mothc app.dart` (compile), `mothc app.dart --push <target>`
+(compile and hot-push over serial or WiFi), `mothc create <dir>` (scaffold).
 
-## 2. Device VM
+## 2. Device VM (`vm/`)
 
-A stack-based bytecode interpreter (ADR-003) in portable C11, ~15–25k lines,
-no OS assumptions beyond malloc/tick/log shims. ESP-IDF is the first port;
-POSIX is the second (for the simulator and CI).
+A stack-based interpreter (ADR-003) in portable C11, ~2k lines, no OS
+assumptions beyond malloc/tick/log shims. The same source compiles for
+ESP-IDF and for macOS/Linux (the simulator and CI).
 
-- **Object model:** everything is a `moth_obj*` — tagged small ints (31-bit
-  smis), heap objects with a class-id header. Core types implemented natively:
-  int, double, bool, String, List, Map, closure, instance.
-- **GC:** precise mark-sweep over a dedicated PSRAM heap (default 4MB) with a
-  small nursery for the widget-tree churn described in §5. No compaction in v1;
-  allocation is free-list based. GC never runs inside an LVGL callback — the VM
-  only allocates from the interpreter loop.
-- **Dispatch:** classic `switch`-based inner loop first; computed-goto if the
-  P4 profile demands it. Interpretation speed is *not* the bottleneck — LVGL
-  does layout and rendering in C; bytecode only runs app logic and diffing.
-- **Concurrency:** the VM is single-threaded and lives in one FreeRTOS task.
-  LVGL events are queued to it; there is no Dart-visible threading (no isolates).
-- **Event loop:** a run-to-completion queue (timers, input events, network).
-  This is also the future foundation for `Future`/`async` lowering.
+- **Values:** null, bool, 64-bit int, double, and heap objects (strings,
+  lists, class instances, closures) — a tagged `moth_value` struct, not
+  pointer tagging.
+- **GC:** precise mark-sweep over the VM heap. No compaction and no
+  generational nursery — measured first; neither has been needed yet.
+- **Dispatch:** a classic `switch` inner loop. Interpretation speed is not
+  the bottleneck: layout and painting are native, so bytecode runs only app
+  logic and tree diffing (~4.5ms of a 26ms frame).
+- **Verification:** every function is abstractly interpreted at load — stack
+  effects checked, jumps bounded — so a malformed or hostile blob is refused
+  before it runs. Types are checked dynamically at execution.
+- **Concurrency:** single-threaded, one task. No isolates, no interrupts
+  visible to Dart. There is no event loop yet; programs own their loop and
+  call `pumpFrame` (async lowering is future work, see ROADMAP).
+- **Natives:** the blob names the built-ins it needs; the VM resolves them by
+  name at load and refuses to load if one is missing — "this board cannot
+  run this program" is a load error, not a runtime surprise.
 
-### Memory budget (ESP32-P4, 32MB PSRAM)
+## 3. Renderer (`moth_render/`)
 
-| Region              | Budget      |
-| ------------------- | ----------- |
-| LVGL frame buffers  | ~1.5MB (2 × 480×320×16bpp double-buffered, adjust per panel) |
-| Dart heap           | 4MB default, configurable |
-| Bytecode blob       | < 512KB, executed in place from PSRAM |
-| VM C footprint      | < 200KB flash, < 64KB internal SRAM (interpreter stack, GC roots) |
+moth's own C++ scene graph behind the documented backend contract
+([BACKEND.md](/docs/backend)): semantic nodes (box, label, slider, switch,
+arc), moth-owned flex layout, an antialiased software rasterizer with
+row-band damage tracking, native animations, and hit-testing with
+finger-sized touch targets. The same code paints a desktop SDL window and
+the board's panel; the panel itself sits behind a three-function interface
+(`panel_init`, `panel_present_argb`, `panel_touch_read`), which is what
+makes new boards ports rather than rewrites.
 
-## 3. LVGL bindings
+moth owns layout and style semantics (ADR-007), so a tree renders
+identically everywhere — the same renderer code paints both hosts, and
+contract tests plus per-frame paint budgets gate every commit (the fuller
+conformance suite in [BACKEND.md](/docs/backend) §7 is planned). Measured on
+an ESP32-S3 at 466x466: 38 fps ([ROADMAP](/docs/roadmap) has the
+phase-by-phase tables).
 
-Bytecode calls into C through a native-function table: `NATIVE_CALL idx` pops
-args, invokes a registered C shim, pushes the result. Shims are generated from
-a YAML binding spec (name, LVGL function, arg marshalling) — adding a widget
-binding is a spec entry, not hand-written C.
+The original design routed rendering through LVGL; the shipping renderer is
+moth_render, and the LVGL binding layer was not built (ADR-008 records the
+trade-offs). moth uses no LVGL code and never touches LVGL's XML format
+(ADR-002).
 
-- LVGL objects surface in Dart as opaque handles owned by the element tree
-  (§5); user code normally never touches them directly.
-- Callbacks: LVGL events carry a closure id; the C event handler enqueues
-  `(closure id, payload)` onto the VM event loop. Native code never re-enters
-  the interpreter.
-- Only the MIT-licensed LVGL C API is used — never the LVGL XML spec (ADR-002).
+## 4. Widget framework (`packages/moth`)
 
-## 4. Widget framework (`package:moth`)
+Pure Dart, compiled into the app blob like user code. Two trees: immutable
+Widgets describing what should exist, and Elements holding state and node
+ids (no RenderObjects — layout lives in the renderer, ADR-005). `setState`
+marks an element dirty; the next `pumpFrame` rebuilds, and the reconciler
+diffs against the scene graph — matching by type and key, updating nodes in
+place, mounting and unmounting as children change.
 
-Flutter's model minus the render layer. Two trees, not three:
+Events flow the other way: the renderer hit-tests a touch, the VM's event
+queue delivers it, and the framework bubbles it from the innermost element
+to the first ancestor with a handler.
 
-- **Widgets** — immutable, throwaway descriptions built by `build()`.
-- **Elements** — retained; each holds its widget, its `State` (if stateful),
-  and the `lv_obj` handle it manages. There are no RenderObjects: LVGL *is*
-  the render tree, and flex/grid layout, painting, and hit-testing are its job.
+## Memory (measured on the verified board)
 
-Reconciliation is the React/Flutter algorithm: `setState` marks the element
-dirty; on the next event-loop tick, dirty subtrees re-run `build()`, children
-are matched by `runtimeType` + `key`, and mismatches create/destroy `lv_obj`s
-while matches diff their properties into `lv_*_set_*` calls.
+| Region | Actual |
+| ------ | ------ |
+| Framebuffer (466x466 ARGB) | ~850KB PSRAM |
+| VM + renderer + bindings, flash | ~32KB on top of ESP-IDF |
+| Bytecode blob | ~11KB for a full widget app; stored programs execute from mapped flash, costing no RAM |
+| VM heap | sized by the host; the S3 host gives the program its PSRAM remainder |
 
-### Performance model — the one rule
+## The simulator (`mothsim`, `mothrun`)
 
-**State changes go through the tree; motion does not.**
-
-- Interaction-driven rebuilds allocate tens of small widget objects and walk a
-  short diff — low milliseconds even interpreted at 400MHz. That is the entire
-  cost of `setState`, and it is paid on taps, not per frame.
-- Continuous animation never rebuilds. Animated widgets (`AnimatedOpacity`-style)
-  configure LVGL's native `lv_anim` engine, which runs at frame rate in C. The
-  VM is not in the frame loop.
-
-## 5. Hot push
-
-The app is data. A device-side listener (TCP, mDNS-advertised) accepts a new
-`.mothb` blob, writes it to a spare flash partition, and restarts the VM with
-the new blob — LVGL and WiFi stay up, so the cycle is edit → `moth run` →
-new UI in ~2 seconds, no reflash, no cable. (In-place stateful hot *reload* is
-a research topic, not v1 — see ROADMAP.)
-
-## 6. Desktop simulator
-
-The same VM compiled for POSIX + LVGL's SDL backend. `moth simulate` opens the
-app in a desktop window — this is the contributor on-ramp (no hardware needed),
-the CI target, and the fast inner loop for framework development.
-
-## Dart subset
-
-v1 supports: classes, single inheritance, interfaces/implicit interfaces,
-closures, `int`/`double`/`bool`/`String`/`List`/`Map`, named & optional params,
-string interpolation, exceptions (`try`/`catch`/`finally`), top-level and
-static members, `const` where the compiler can fold it.
-
-Deferred: `async`/`await` (event-loop lowering, post-v1), mixins, extension
-methods, records/patterns. Out of scope: isolates, mirrors, FFI-from-Dart,
-finalizers, most of `dart:*` beyond a curated `dart:core` slice.
-
-The subset is checked at compile time — unsupported constructs are hard errors
-with clear messages, never silent misbehavior.
+`mothrun` is the headless host: virtual pins and buses against a virtual
+clock, used by the golden tests. `mothsim` adds an SDL window, `--tap`, and
+a push listener, so the full compile → push → verify loop runs with no
+hardware. Everything the board hosts runs through the same code paths.

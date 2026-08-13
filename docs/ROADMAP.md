@@ -115,12 +115,16 @@ Dart program draws in a desktop window and on the board.
 - **Native argument counts are taken from the blob.** `moth_register` does
   not record an arity for the host to cross-check against.
 
-## M4 — Hot push (working on the desktop)
+## M4 — Hot push (shipped)
 
-**Demo: `mothc app.dart --push host:port` replaces the running program.**
+**Demo: `mothc app.dart --push <target>` replaces the running program.**
 
-- [x] Push protocol: "MPSH", a length, the blob. The receiver verifies before
-      running it, so a bad push is refused rather than trusted
+- [x] Push protocol (vm/host/push_proto.h): a framed blob carrying a
+      sender-invented nonce; the reply is a binary verdict (MPOK/MPRJ)
+      echoing that nonce, sent only AFTER the receiver verified the blob —
+      so "pushed" always means "verified and running", and no log line or
+      stale reply can fake it. Paired boards require the authenticated MPH2
+      frame (ADR-010)
 - [x] `moth_request_halt` — a host can stop a running program at the next
       instruction, which is what makes swapping into an endless loop possible
 - [x] `mr_reset` — the outgoing program's nodes go with it, so the new UI
@@ -133,16 +137,10 @@ Dart program draws in a desktop window and on the board.
 - [x] Push over the USB cable: the USB-Serial-JTAG console doubles as a
       push transport (`mothc app.dart --push /dev/cu.usbmodemXXXX`), so
       the out-of-box loop needs no WiFi at all — provisioning is the
-      upgrade, not the prerequisite. "pushed" means the framed,
-      nonce-carrying verdict came back after verification — confirmed
-      on the board: serial push 128ms compile-to-verdict, persistence
-      across reboot, and the return push 180ms, with the triple-sent
-      verdict surviving the shared console — re-confirmed at the
-      merged tip (581c2c0's quiet-window fix included): 125ms push,
-      163ms return. fps re-measured at
-      38.1 with the transport polling on the frame hook, unchanged
-      from the R3 baseline. WiFi verdict push is desktop-verified and
-      awaits one on-board run after re-provisioning.
+      upgrade, not the prerequisite. Measured on the board: 125–180ms
+      compile-to-verdict over serial, persistence across reboot, and fps
+      unchanged at 38 with the transport polling on the frame hook. WiFi
+      pushes verified on-board end to end, paired and unpaired (see M5).
 - [x] Persist across reboot: the blob lands in a dedicated `mothb`
       partition behind a CRC header, and boots run it straight from
       mapped flash — a stored program costs no RAM
@@ -239,14 +237,12 @@ Desktop-first; no Dart dependency until the framework exists.
       floors this was measured against: writing the whole 177-row band costs
       9.5ms in PSRAM, so the remaining fill time is bandwidth, not waste.
 
-- [x] R3b — Tighter damage. The band was twice the changed text's height —
-      and the diagnosis found a real rendering bug, not padding: wrap_hint,
-      the width arrange last handed a label, was applied to the *next* text.
-      A clock that ticked past its first width wrapped against it, measured
-      narrower for wrapping, and shrank the hint to match — locked at two
-      lines from the second frame on, drawn that way on screen. The hint now
-      dies with the text it described (mr_set_str), the label re-measures
-      unconstrained, and the band is the 88 rows the label occupies.
+- [x] R3b — Tighter damage. A label's wrap hint now dies with the text it
+      described (mr_set_str), so changed text re-measures unconstrained —
+      this fixed both a visible premature-wrap bug and a damage band twice
+      the label's height. The lesson that transfers: cached layout hints
+      must be invalidated by the change that made them, not trusted across
+      it. The band is now the 88 rows the label occupies.
 
       Also here: painting starts at the last node in paint order that fills
       every damaged row opaquely (find_band_cover, generalizing the old
@@ -278,8 +274,9 @@ Deliberately out of v0.x scope — meaty, self-contained problems for contributo
 
 - `async`/`await` lowering onto the event loop
 - Stateful in-place hot reload (preserve State across pushes)
-- Virtualized ListView backed by lv_table/lv_list recycling
-- ESP32-S3 target; non-ESP ports (RP2350?) via the portable VM core
+- Virtualized ListView (recycle nodes for long scrolling lists)
+- Local-variable capture in closures (boxed cells or upvalues)
+- ESP32-P4 bring-up; non-ESP ports (RP2350?) via the portable VM core
 - Computed-goto dispatch + interpreter profiling on RISC-V
 - InheritedWidget-style scoped state
 - Debugger wire protocol (breakpoints over the hot-push channel)
