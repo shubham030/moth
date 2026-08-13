@@ -50,6 +50,7 @@ Future<void> main(List<String> args) async {
       ..writeln('created ${args[1]}/')
       ..writeln('  app.dart    — the whole app; start in build()')
       ..writeln('  README.md   — how to run it, desktop and board')
+      ..writeln('  .gitignore  — keeps compiled .mothb files out of git')
       ..writeln()
       ..writeln('next: make ui F=${args[1]}/app.dart');
     exit(0);

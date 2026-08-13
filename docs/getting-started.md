@@ -104,6 +104,7 @@ $ dart run tools/mothc/bin/mothc.dart create my_app
 created my_app/
   app.dart    — the whole app; start in build()
   README.md   — how to run it, desktop and board
+  .gitignore  — keeps compiled .mothb files out of git
 ```
 
 That is the entire project — one Dart file, no pubspec, nothing to
