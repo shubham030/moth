@@ -153,3 +153,47 @@ text quality are multi-year efforts LVGL already has; the P4 vendor
 acceleration path (esp_lcd/PPA) is maintained for LVGL. moth_render graduates
 to primary only if it passes conformance and beats LVGL where it matters on
 hardware; if it stalls, nothing else is blocked.
+
+## ADR-010: Network pushes are HMAC-paired; replay is accepted for v0.1
+
+**Decision:** The WiFi push port authenticates with an HMAC-SHA256 frame
+(`MPH2` in vm/host/push_proto.h): provisioning derives a 32-byte key from a
+pairing phrase with **PBKDF2-HMAC-SHA256** (salt `moth-push-v1`, 600k
+iterations — parameters live in vm/host/hmac_sha256.h and every deriver must
+match), stores the key in NVS, and each push is signed over its nonce and
+blob. A paired board rejects unsigned pushes at the header; a board whose
+stored key exists but cannot be read **fails closed** — network push stays
+off (serial still works) rather than silently reopening. Serial pushes are
+never authenticated — physical possession of the cable is the pairing. An
+unprovisioned board accepts unsigned pushes and warns at boot, because the
+out-of-box path must not demand a secret before the first hello-world.
+
+**Why an HMAC and not a bearer token:** a token crosses the network in the
+clear on every push; one passive observation of one push and any machine on
+the LAN can push arbitrary programs forever. With the HMAC the secret never
+travels.
+
+**Why a KDF and not a bare hash:** one captured frame is a complete offline
+verifier for the phrase — an observer can grind candidate phrases against
+`(nonce, blob, tag)` at hash speed, and a bare SHA-256 makes each guess cost
+one hash with precomputation shared across every moth board. PBKDF2 at 600k
+iterations multiplies the per-guess cost by ~10^6 and the fixed salt kills
+cross-target precomputation; the sender pays the same cost once per push
+(~2s in mothc; scripts cache the derived key in `MOTH_PUSH_KEY`). The
+residual assumption, stated plainly: the phrase must carry real entropy. A
+dictionary word still falls; the KDF buys orders of magnitude, not immunity.
+
+**What is consciously deferred:** an observer can *replay* a signed frame it
+captured — and because pushed programs persist to the `mothb` partition,
+that is a permanent, attacker-timed rollback primitive: any previously
+pushed program, reinstalled at a moment the attacker picks, surviving
+reboot, with no freshness to expire it. Accepted for v0.1 because the
+programs involved are ones the owner chose to run; closing it needs a
+challenge-response round-trip (the receiver contributes freshness), which
+v0.2 revisits deliberately. Also deferred: an unauthenticated peer can make
+a paired board read (and for MPH2, allocate) up to MPSH_MAX_BLOB per
+connection before rejection — a LAN attacker with reach can already flood
+connections, the allocation fails gracefully under pressure, and the same
+challenge-response closes both. TLS was rejected for the same reason mbedtls
+isn't in the desktop build: the sim and the board must speak byte-identical
+protocol from one small implementation.

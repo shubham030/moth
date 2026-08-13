@@ -50,8 +50,9 @@ static volatile bool s_reply_in_flight;
  * decode come from push_proto.h, shared with the TCP receiver; only the
  * resync behavior is this transport's own (see the note there). */
 static struct {
-  size_t header_got; /* 0..MPSH_HEADER_LEN: magic + little-endian length */
-  uint8_t header[MPSH_HEADER_LEN];
+  size_t header_got;  /* bytes of header so far */
+  size_t header_want; /* MPSH_ or MPH2_HEADER_LEN once the magic is known */
+  uint8_t header[MPH2_HEADER_LEN];
   uint8_t *blob;
   size_t blob_len, blob_got;
   uint32_t nonce;
@@ -69,18 +70,38 @@ static void reset_scanner(void) {
  * only because the last body byte completes the frame before reset, and any
  * reordering would have silently sent wrong nonces. */
 static uint8_t *feed(uint8_t b, size_t *len_out, uint32_t *nonce_out) {
-  static const char magic[MPSH_MAGIC_LEN + 1] = MPSH_MAGIC;
   s.last_progress_us = esp_timer_get_time();
 
-  if (s.header_got < MPSH_HEADER_LEN) {
-    if (s.header_got < MPSH_MAGIC_LEN && b != (uint8_t)magic[s.header_got]) {
-      /* Not the frame we hoped for. This byte could still start a new one. */
-      s.header_got = 0;
-      if (b == (uint8_t)magic[0]) s.header[s.header_got++] = b;
+  if (s.header_want == 0 || s.header_got < s.header_want) {
+    if (s.header_got < MPSH_MAGIC_LEN) {
+      /* Either magic is a frame here — "MPSH" or "MPH2". The cable IS the
+       * pairing (whoever holds it could reflash the chip outright), so an
+       * authenticated frame's HMAC is carried but never checked: mothc can
+       * then frame identically for both transports once paired. The two
+       * magics share "MP" and diverge at byte 2, which also picks the
+       * header length. */
+      bool fits;
+      switch (s.header_got) {
+        case 0: fits = b == 'M'; break;
+        case 1: fits = b == 'P'; break;
+        case 2: fits = b == 'S' || b == 'H'; break;
+        default: fits = b == (s.header[2] == 'S' ? 'H' : '2'); break;
+      }
+      if (!fits) {
+        /* Not the frame we hoped for. This byte could still start a new one. */
+        s.header_got = 0;
+        if (b == 'M') s.header[s.header_got++] = b;
+        return NULL;
+      }
+      s.header[s.header_got++] = b;
+      if (s.header_got == MPSH_MAGIC_LEN) {
+        s.header_want =
+            s.header[2] == 'H' ? MPH2_HEADER_LEN : MPSH_HEADER_LEN;
+      }
       return NULL;
     }
     s.header[s.header_got++] = b;
-    if (s.header_got < MPSH_HEADER_LEN) return NULL;
+    if (s.header_got < s.header_want) return NULL;
 
     s.blob_len = mpsh_header_len(s.header);
     s.nonce = mpsh_header_nonce(s.header);

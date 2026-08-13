@@ -16,9 +16,11 @@ Needs the ESP-IDF environment (esptool + nvs_partition_gen ship with it).
 """
 
 import argparse
+import base64
 import csv
 import getpass
 import glob
+import hashlib
 import os
 import subprocess
 import sys
@@ -79,12 +81,39 @@ def main():
     ap.add_argument("--ssid", required=True)
     ap.add_argument("--password", help="prefer the interactive prompt; an "
                                        "empty string means an open network")
+    ap.add_argument("--no-token", action="store_true",
+                    help="leave the push port UNPAIRED: anyone on the "
+                         "network can replace the running program")
+    ap.add_argument("--token", help="pairing phrase; prefer the interactive "
+                                    "prompt — a flag lands in shell history")
     args = ap.parse_args()
 
     password = args.password
     if password is None:
         password = getpass.getpass(f"WiFi password for '{args.ssid}' "
                                    "(empty for an open network): ")
+
+    # Joining a network is the moment the push port becomes reachable by
+    # machines the user does not control, so pairing happens here, in the
+    # same breath — not as a separate step nobody runs. The passphrase never
+    # leaves this process: only its SHA-256 is stored, and mothc derives the
+    # same key from the same phrase at push time.
+    token = None
+    if args.no_token:
+        print("provision: --no-token — the push port will accept programs "
+              "from ANYONE on this network")
+    elif args.token:
+        token = args.token
+    else:
+        while True:
+            token = getpass.getpass(
+                "Pairing phrase for pushes (mothc will ask for the same "
+                "phrase): ")
+            if token:
+                break
+            print("provision: an empty phrase would pair against a "
+                  "well-known key; use --no-token to consciously skip "
+                  "pairing")
     port = find_port(args.port)
     gen = idf_tool("components/nvs_flash/nvs_partition_generator/"
                    "nvs_partition_gen.py")
@@ -100,6 +129,17 @@ def main():
             w.writerow(["moth", "namespace", "", ""])
             w.writerow(["wifi_ssid", "data", "string", args.ssid])
             w.writerow(["wifi_pass", "data", "string", password])
+            if token is not None:
+                # PBKDF2, not a bare hash: one captured push frame is a
+                # complete offline verifier for the phrase, so the KDF's
+                # iteration count is the attacker's per-guess cost. Salt and
+                # count are fixed by vm/host/hmac_sha256.h — every deriver
+                # must match or the pairing silently fails.
+                key = hashlib.pbkdf2_hmac("sha256", token.encode(),
+                                          b"moth-push-v1", 600000)
+                # nvs_partition_gen reads binary blobs from base64.
+                w.writerow(["push_key", "data", "base64",
+                            base64.b64encode(key).decode()])
 
         nvs_offset, nvs_size = nvs_geometry()
         subprocess.run([sys.executable, gen, "generate", creds_csv, image,
