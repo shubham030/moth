@@ -247,7 +247,8 @@ This is what makes [package:moth's hardware API](hardware.md) worth using:
 | Static members, named constructors | planned |
 | `async` / `await`, `Future` | needs an event loop; see below |
 | Networking — WiFi, sockets, HTTP | not started |
-| Mixins, generics, extensions, records | not planned for v1 |
+| Mixins, extensions, records | not planned for v1 |
+| Generics | not planned for v1 — type annotations like `List<int>` are accepted and erased, never enforced |
 
 ## No async, and why
 
@@ -306,6 +307,6 @@ blink.dart:5:3: 'digitalWrite' takes 2 arguments, but got 1
 
 ## How much fits
 
-A blink program is 130 bytes of bytecode. The demo with a user-defined
+A blink program is 136 bytes of bytecode. The demo with a user-defined
 function, arithmetic and a GPIO loop is 185 bytes. The VM itself is roughly
 200 KB of flash and a few KB of RAM, so program size is rarely what limits you.

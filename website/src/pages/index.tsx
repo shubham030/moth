@@ -18,7 +18,7 @@ const BLINK = `void main() {
 }`;
 
 const TRACE = `$ mothc blink.dart
-wrote blink.mothb (130 bytes)
+wrote blink.mothb (136 bytes)
 
 $ mothrun blink.mothb --stop-after 2000
 [     0ms] pin 38 -> output
@@ -77,7 +77,7 @@ function Hero() {
             </Link>
           </div>
           <p className="heroNote">
-            Runs on ESP32-S3 and ESP32-P4 · MIT licensed · v0.x, API unstable
+            Runs on ESP32-S3 · MIT licensed · v0.x, API unstable
           </p>
         </div>
 
@@ -112,7 +112,7 @@ const FEATURES = [
   },
   {
     icon: '📦',
-    title: 'Programs are 130 bytes',
+    title: 'Programs are 136 bytes',
     body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
   },
 ];

@@ -4,8 +4,10 @@
 
 moth lets you write UI and application logic for ESP32-class microcontrollers in
 real Dart — widgets, `setState`, `build()` — and run it on-device via a small
-bytecode VM, drawing through moth's own renderer. The VM, the renderer and the
-bindings together add about 32 KB of flash on top of ESP-IDF.
+bytecode VM, drawing through moth's own renderer. The VM, the renderer, the
+bindings and the bundled fonts together add about 90 KB of flash on top of
+ESP-IDF (`idf.py size-components`: 48 KB code + 42 KB data, half of that
+glyph tables).
 
 ```dart
 import 'package:moth/widgets.dart';
@@ -142,7 +144,7 @@ moth reimplements that model at MCU scale:
 
 ```
 ┌─ your Mac ──────────────────────┐      ┌─ ESP32 ─────────────────────┐
-│  app.dart                       │      │  moth VM (C, ~2k lines)     │
+│  app.dart                       │      │  moth VM (C, ~1.7k lines)   │
 │    │  moth compile              │ WiFi │    │ interprets bytecode    │
 │    ▼                            │ ───► │    ▼                        │
 │  app.mothb  (bytecode blob)     │ /USB │  widget framework (Dart)    │
@@ -160,7 +162,8 @@ moth reimplements that model at MCU scale:
   no `await`, no `Future` — and no WiFi, sockets or HTTP from Dart yet.
 - Not full Dart. The VM runs a practical subset — see
   [language.md](docs/language.md) for exactly what compiles and what is
-  rejected (no async, no generics, closures capture only `this`).
+  rejected (no async, closures capture only `this`, generic type
+  annotations are accepted but erased).
 - Not an LVGL project. An early plan to render through LVGL was dropped for
   moth's own renderer ([ADR-007](docs/DECISIONS.md#adr-007)); moth never reads
   or writes the separately-licensed LVGL XML format
