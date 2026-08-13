@@ -160,7 +160,11 @@ Dart program draws in a desktop window and on the board.
       an unpaired one warns at boot. Serial needs no pairing — the cable is
       possession. Replay consciously deferred to v0.2 (ADR-010 records why)
 - [ ] README demo GIF (simulator + real hardware)
-- [ ] `moth create` project template
+- [x] `mothc create <dir>` project template: one app.dart (a tap counter in
+      Flutter's shape), a README with the run commands, a .gitignore —
+      nothing to install, since the compiler resolves package:moth itself.
+      create_test.dart compiles the template on every make test, so the
+      scaffold can never greet a beginner with a compile error
 - [x] Golden tests wired to CI (simulator, no hardware)
 - [ ] Contributor docs
 - [ ] Publish: GitHub + pub.dev for the CLI and `package:moth`
