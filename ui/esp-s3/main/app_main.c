@@ -210,8 +210,19 @@ static bool accept_push(void) {
     if (esp_timer_get_time() >= next_listen_us) {
       s_push = moth_push_listen(HOTPUSH_PORT);
       if (s_push) {
-        ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
-                 hotpush_net_ip(), HOTPUSH_PORT);
+        uint8_t key[32];
+        if (hotpush_load_push_key(key)) {
+          moth_push_set_key(s_push, key);
+          ESP_LOGI(TAG, "hot push ready (paired): mothc app.dart --push %s:%d",
+                   hotpush_net_ip(), HOTPUSH_PORT);
+        } else {
+          /* Loud on purpose: an unpaired listener accepts programs from
+           * anyone who can reach this port. */
+          ESP_LOGW(TAG, "hot push ready UNPAIRED — anyone on this network "
+                        "can push; re-run tools/provision to set a token");
+          ESP_LOGI(TAG, "hot push ready: mothc app.dart --push %s:%d",
+                   hotpush_net_ip(), HOTPUSH_PORT);
+        }
       } else {
         next_listen_us = esp_timer_get_time() + 2 * 1000 * 1000;
       }

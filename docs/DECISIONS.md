@@ -153,3 +153,28 @@ text quality are multi-year efforts LVGL already has; the P4 vendor
 acceleration path (esp_lcd/PPA) is maintained for LVGL. moth_render graduates
 to primary only if it passes conformance and beats LVGL where it matters on
 hardware; if it stalls, nothing else is blocked.
+
+## ADR-010: Network pushes are HMAC-paired; replay is accepted for v0.1
+
+**Decision:** The WiFi push port authenticates with an HMAC-SHA256 frame
+(`MPH2` in vm/host/push_proto.h): provisioning stores the SHA-256 of a pairing
+phrase, mothc derives the same key from the same phrase, and each push is
+signed over its nonce and blob. A paired board rejects unsigned pushes at the
+header. Serial pushes are never authenticated — physical possession of the
+cable is the pairing. An unprovisioned board accepts unsigned pushes and warns
+at boot, because the out-of-box path must not demand a secret before the first
+hello-world.
+
+**Why an HMAC and not a bearer token:** a token crosses the network in the
+clear on every push; one passive observation of one push and any machine on
+the LAN can push arbitrary programs forever. With the HMAC the secret never
+travels.
+
+**What is consciously deferred:** an observer can *replay* a signed frame it
+captured, re-installing a program the owner already chose to run — annoying,
+not an arbitrary-code channel. Closing it needs a challenge-response
+round-trip (the receiver contributes freshness), which complicates the
+protocol and every sender for a gain that matters only after multi-user
+networks matter. Recorded here so v0.2 revisits it deliberately. TLS was
+rejected for the same reason mbedtls isn't in the desktop build: the sim and
+the board must speak byte-identical protocol from one small implementation.

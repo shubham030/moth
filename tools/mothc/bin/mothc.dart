@@ -17,6 +17,10 @@ usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
           is doing and starts this instead. The display stays up.
           HOST:PORT pushes over the network; a serial device path
           (/dev/cu.usbmodemXXXX) pushes over the USB cable — no WiFi needed.
+  --token ask for the board's pairing phrase and authenticate the push.
+          A board provisioned with a pairing phrase refuses network pushes
+          without it. Scripts can set MOTH_PUSH_TOKEN instead of the prompt.
+          Serial pushes never need it — the cable is the pairing.
 ''';
 
 Future<void> main(List<String> args) async {
@@ -28,6 +32,7 @@ Future<void> main(List<String> args) async {
   String? input;
   String? output;
   String? push;
+  var wantToken = false;
   for (var i = 0; i < args.length; i++) {
     if (args[i] == '-o') {
       if (i + 1 >= args.length) {
@@ -35,6 +40,8 @@ Future<void> main(List<String> args) async {
         exit(64);
       }
       output = args[++i];
+    } else if (args[i] == '--token') {
+      wantToken = true;
     } else if (args[i] == '--push') {
       if (i + 1 >= args.length) {
         stderr.writeln('mothc: --push needs HOST:PORT or a serial device');
@@ -72,7 +79,7 @@ Future<void> main(List<String> args) async {
       // an exit code — unawaited, a missing stty or a yanked cable printed
       // a raw async stack trace, and main could not tell pushed from
       // still-in-flight.
-      await _push(push, result.blob);
+      await _push(push, result.blob, wantToken);
     }
   } on CompileError catch (e) {
     // The error may have come from an imported file, so report it against
@@ -149,8 +156,8 @@ Future<void> _pushSerial(String device, Uint8List blob) async {
 /// One connect + frame + verdict wait. Null when the host closed without a
 /// verdict — which is the receiver's "cannot verify right now, try again"
 /// (moth_push_abandon), not proof of a wrong host.
-Future<bool?> _tcpAttempt(String host, int port, Uint8List frame,
-    VerdictScanner scanner) async {
+Future<bool?> _tcpAttempt(
+    String host, int port, Uint8List frame, VerdictScanner scanner) async {
   final socket =
       await Socket.connect(host, port, timeout: const Duration(seconds: 5));
   socket.add(frame);
@@ -171,10 +178,12 @@ Future<bool?> _tcpAttempt(String host, int port, Uint8List frame,
   return verdict;
 }
 
-Future<void> _pushTcp(String host, int port, Uint8List blob) async {
+Future<void> _pushTcp(
+    String host, int port, Uint8List blob, Uint8List? key) async {
   final started = DateTime.now();
   final nonce = Random.secure().nextInt(0x100000000);
-  final frame = pushFrame(blob, nonce);
+  final frame =
+      key != null ? pushFrameAuthed(blob, nonce, key) : pushFrame(blob, nonce);
   final scanner = VerdictScanner(nonce);
 
   // The framed verdict arrives AFTER the host verified the blob — so
@@ -197,7 +206,9 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
     exit(70);
   }
   if (verdict == false) {
-    stderr.writeln('mothc: the host rejected the program — see its log');
+    stderr.writeln('mothc: the host rejected the push — a bad program, or a '
+        'paired board and a missing/wrong pairing phrase (--token). '
+        'Its log says which.');
     await stderr.flush();
     exit(70);
   }
@@ -214,7 +225,7 @@ Future<void> _pushTcp(String host, int port, Uint8List blob) async {
 /// spelled: a serial device exists on the filesystem, and testing the
 /// spelling routed `COM3:` (a common Windows form, colon included) to the
 /// network branch and rejected `./ttyUSB0` outright.
-Future<void> _push(String target, Uint8List blob) async {
+Future<void> _push(String target, Uint8List blob, bool wantToken) async {
   // A COM port is exactly COM + digits — a bare prefix test swallowed
   // hostnames like com.example.local:7621.
   if (Platform.isWindows &&
@@ -224,6 +235,8 @@ Future<void> _push(String target, Uint8List blob) async {
     exit(74);
   }
   if (File(target).existsSync()) {
+    // No token on serial, ever — the receiver never checks one there, and
+    // prompting would teach people to type the phrase where it isn't needed.
     try {
       await _pushSerial(target, blob);
     } on SerialException catch (e) {
@@ -231,6 +244,29 @@ Future<void> _push(String target, Uint8List blob) async {
       exit(74);
     }
     return;
+  }
+
+  // The phrase comes from the prompt (--token) or the environment; it is
+  // reduced to its SHA-256 immediately and never stored or echoed. A board
+  // that is paired rejects a plain push with MPRJ before reading the blob,
+  // so a forgotten token fails in one round-trip, not a timeout.
+  Uint8List? key;
+  final envToken = Platform.environment['MOTH_PUSH_TOKEN'];
+  if (wantToken) {
+    stderr.write('pairing phrase: ');
+    final hadEcho = stdin.echoMode;
+    stdin.echoMode = false;
+    final phrase = stdin.readLineSync() ?? '';
+    stdin.echoMode = hadEcho;
+    stderr.writeln();
+    if (phrase.isEmpty) {
+      stderr.writeln('mothc: an empty pairing phrase cannot match a paired '
+          'board');
+      exit(64);
+    }
+    key = keyFromPassphrase(phrase);
+  } else if (envToken != null && envToken.isNotEmpty) {
+    key = keyFromPassphrase(envToken);
   }
 
   final colon = target.lastIndexOf(':');
@@ -242,7 +278,7 @@ Future<void> _push(String target, Uint8List blob) async {
   }
   final host = target.substring(0, colon);
   try {
-    await _pushTcp(host, port, blob);
+    await _pushTcp(host, port, blob, key);
   } on SocketException catch (e) {
     stderr.writeln('mothc: could not push to $host:$port — ${e.message}');
     exit(70);
