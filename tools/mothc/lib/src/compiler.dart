@@ -418,7 +418,11 @@ class Compiler {
     // bin/mothc.dart under `dart run` but at a generated harness under
     // `dart test` (which is how the create-template test compiles), and the
     // working directory covers a compiled mothc invoked from anywhere in a
-    // checkout.
+    // checkout. ORDER IS LOAD-BEARING: pub-resolved roots were appended
+    // first and the caller takes the first hit, so what `dart pub get`
+    // wrote always beats the bundled copy, and the bundled copy beats the
+    // cwd guesses (two of which search ABOVE the working directory and
+    // could otherwise pick up an unrelated packages/ tree).
     final here = p.dirname(p.dirname(p.absolute(Platform.script.toFilePath())));
     final cwd = Directory.current.path;
     for (final guess in [

@@ -110,20 +110,59 @@ const gitignoreTemplate = '''
 ''';
 
 /// Creates the project directory and its files. Throws [CreateError] with a
-/// human message when the target cannot be used.
+/// human message when the target cannot be used — for every failure shape,
+/// because this is the first command a beginner runs and a raw Dart stack
+/// trace is not a first impression.
 void createProject(String dir) {
+  // Directory.existsSync() is false for a regular FILE at the path, which
+  // would skip the guard and let createSync throw ENOTDIR — and "I typed a
+  // filename instead of a directory name" is exactly the mistake this
+  // command's audience makes.
+  final kind = FileSystemEntity.typeSync(dir);
+  if (kind == FileSystemEntityType.file || kind == FileSystemEntityType.link) {
+    throw CreateError("'$dir' already exists and is a file — create wants a "
+        'directory name');
+  }
   final target = Directory(dir);
-  if (target.existsSync() && target.listSync().isNotEmpty) {
+  final existed = kind != FileSystemEntityType.notFound;
+  if (existed && target.listSync().isNotEmpty) {
     throw CreateError("'$dir' exists and is not empty — pick a new name, or "
         'an empty directory');
   }
   final name = p.basename(p.normalize(dir));
-  target.createSync(recursive: true);
-  File(p.join(dir, 'app.dart'))
-      .writeAsStringSync(appTemplate.replaceAll('%NAME%', name));
-  File(p.join(dir, 'README.md'))
-      .writeAsStringSync(readmeTemplate.replaceAll('%NAME%', name));
-  File(p.join(dir, '.gitignore')).writeAsStringSync(gitignoreTemplate);
+  // Everything after this point cleans up behind itself: a half-written
+  // scaffold (full disk, revoked permissions) would make every retry hit
+  // the not-empty refusal above with no hint of why.
+  final written = <File>[];
+  try {
+    target.createSync(recursive: true);
+    for (final (fileName, content) in [
+      ('app.dart', appTemplate.replaceAll('%NAME%', name)),
+      ('README.md', readmeTemplate.replaceAll('%NAME%', name)),
+      ('.gitignore', gitignoreTemplate),
+    ]) {
+      final f = File(p.join(dir, fileName));
+      written.add(f);
+      f.writeAsStringSync(content);
+    }
+  } on FileSystemException catch (e) {
+    for (final f in written) {
+      try {
+        f.deleteSync();
+      } on FileSystemException {
+        // Cleanup is best-effort; the original error is the one to report.
+      }
+    }
+    if (!existed) {
+      try {
+        target.deleteSync();
+      } on FileSystemException {
+        // Same: report why the scaffold failed, not why cleanup did.
+      }
+    }
+    throw CreateError(
+        "cannot write into '$dir' — ${e.osError?.message ?? e.message}");
+  }
 }
 
 class CreateError implements Exception {

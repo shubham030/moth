@@ -75,6 +75,20 @@ jobs:
           echo "$out"
           echo "$out" | grep -q 'PASS  one tap fires one handler'
 
+      # The scaffold is created, compiled, and RUN with a tap — a template
+      # that loads but traps on first touch would pass the compile-only test
+      # in create_test.dart and still greet a beginner with a dead screen.
+      # (The tap -> setState -> increment semantics are pinned by tap_check
+      # above; this proves the scaffold is wired into them and survives.)
+      - name: The create scaffold runs and takes a tap
+        env:
+          SDL_VIDEODRIVER: dummy
+        run: |
+          set -e
+          dart run tools/mothc/bin/mothc.dart create /tmp/scaffold
+          dart run tools/mothc/bin/mothc.dart /tmp/scaffold/app.dart
+          ./build/mothsim /tmp/scaffold/app.mothb --frames 80 --tap 233,233
+
   docs:
     runs-on: ubuntu-latest
     steps:
