@@ -257,9 +257,18 @@ Future<void> _push(String target, Uint8List blob, bool wantToken) async {
   // ~2s KDF — for scripts that push in a loop. Deriving it once:
   //   python3 -c "import hashlib; print(hashlib.pbkdf2_hmac('sha256',
   //     b'PHRASE', b'moth-push-v1', 600000).hex())"
+  // An explicit --token beats the ambient environment; and a key that is
+  // set but unusable is a hard error, not a fall-through — silently
+  // pushing unauthenticated because of a stray newline in a keyfile is
+  // the sender-side version of failing open.
   final envKey = Platform.environment['MOTH_PUSH_KEY'];
   final envToken = Platform.environment['MOTH_PUSH_TOKEN'];
-  if (envKey != null && RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(envKey)) {
+  if (!wantToken && envKey != null) {
+    if (!RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(envKey)) {
+      stderr.writeln('mothc: MOTH_PUSH_KEY is set but is not 64 hex '
+          'characters (got ${envKey.length}) — refusing to push without it');
+      exit(64);
+    }
     key = Uint8List.fromList([
       for (var i = 0; i < 64; i += 2)
         int.parse(envKey.substring(i, i + 2), radix: 16),
