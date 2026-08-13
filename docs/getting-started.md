@@ -97,6 +97,22 @@ hello.dart:3:10: 'x' is not defined
   hint: only local variables exist in M1a — declare it with "var x = ...;"
 ```
 
+For an app with a screen, scaffold a project instead:
+
+```console
+$ dart run tools/mothc/bin/mothc.dart create my_app
+created my_app/
+  app.dart    — the whole app; start in build()
+  README.md   — how to run it, desktop and board
+  .gitignore  — keeps compiled .mothb files out of git
+```
+
+That is the entire project — one Dart file, no pubspec, nothing to
+install: the compiler resolves `package:moth/...` by itself. The starter is
+a tap counter in Flutter's shape (`Component`, `build()`, `setState`);
+run it in a window with `make ui F=my_app/app.dart`, and every push
+command below works on it unchanged.
+
 ## 4. Put it on a board
 
 You need [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/)
