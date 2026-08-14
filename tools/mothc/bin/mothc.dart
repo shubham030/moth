@@ -14,9 +14,12 @@ mothc — compile Dart to moth bytecode
 
 usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
        mothc create <dir>
+       mothc check <input.dart>
 
-  create  scaffold a new moth project: one app.dart, a README, nothing else
-          to install.
+  create  scaffold a new moth project: app.dart plus the pubspec and editor
+          config that make it resolve in an IDE.
+  check   compile and report errors without writing a blob — what the
+          generated editor build task runs.
 
   --push  send the compiled program to a running host, which stops what it
           is doing and starts this instead. The display stays up.
@@ -46,13 +49,55 @@ Future<void> main(List<String> args) async {
       stderr.writeln('mothc: $e');
       exit(73);
     }
+    final resolved = resolveProject(args[1]);
     stdout
       ..writeln('created ${args[1]}/')
-      ..writeln('  app.dart    — the whole app; start in build()')
-      ..writeln('  README.md   — how to run it, desktop and board')
-      ..writeln('  .gitignore  — keeps compiled .mothb files out of git')
+      ..writeln('  app.dart              — the whole app; start in build()')
+      ..writeln('  README.md             — how to run it, desktop and board')
+      ..writeln(
+          '  pubspec.yaml          — so your editor resolves package:moth')
+      ..writeln('  analysis_options.yaml — standard Dart lints')
+      ..writeln('  .vscode/tasks.json    — build task runs "mothc check"')
+      ..writeln('  .gitignore            — keeps build output out of git');
+    if (!resolved) {
+      stdout.writeln('\nnote: "dart pub get" did not run here — run it in '
+          '${args[1]}/ so your editor can resolve package:moth');
+    }
+    stdout
       ..writeln()
       ..writeln('next: make ui F=${args[1]}/app.dart');
+    exit(0);
+  }
+
+  // `check` compiles and throws the blob away: the subset's rejections
+  // arrive with a source location, fast enough to run on every save, which
+  // is what the generated VS Code build task does. The editor's analyzer
+  // covers ordinary Dart; only mothc knows what moth refuses.
+  if (args.first == 'check') {
+    if (args.length != 2) {
+      stderr.writeln('mothc: check needs exactly one argument, the program');
+      exit(64);
+    }
+    final file = File(args[1]);
+    if (!file.existsSync()) {
+      stderr.writeln('mothc: no such file: ${args[1]}');
+      exit(66);
+    }
+    final source = file.readAsStringSync();
+    final compiler = Compiler(args[1], source);
+    try {
+      compiler.compile();
+    } on CompileError catch (e) {
+      final unit = compiler.currentUnit;
+      if (unit != null) {
+        stderr.write(e.format(unit.path, unit.source, unit.lineInfo));
+      } else {
+        stderr.write(e.format(args[1], source, LineInfo.fromContent(source)));
+      }
+      await stderr.flush();
+      exit(65);
+    }
+    stdout.writeln('${args[1]}: ok');
     exit(0);
   }
 

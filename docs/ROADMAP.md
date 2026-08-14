@@ -163,6 +163,13 @@ Dart program draws in a desktop window and on the board.
       at provision time (ADR-010); a paired board refuses unsigned pushes,
       an unpaired one warns at boot. Serial needs no pairing — the cable is
       possession. Replay consciously deferred to v0.2 (ADR-010 records why)
+- [x] Editor support: every built-in is declared `external` in
+      package:moth, so the Dart analyser resolves moth programs and offers
+      autocomplete and type checking (it reported 112 errors before, and
+      the missing declarations were hiding a real bug in `Uart`).
+      `mothc create` writes the pubspec and analysis options an editor
+      needs, and `mothc check` reports the subset's rejections without
+      writing a blob. CI holds both clean
 - [ ] README demo GIF (simulator + real hardware)
 - [x] `mothc create <dir>` project template: one app.dart (a tap counter in
       Flutter's shape), a README with the run commands, a .gitignore —

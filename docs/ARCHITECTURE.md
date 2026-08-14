@@ -33,7 +33,7 @@ app source ──► package:analyzer (AST) ──► lowering ──► moth by
   concatenation. What the subset excludes is rejected at compile time — see
   [language.md](/docs/language).
 - **Output:** one self-contained blob — constant pool, native-import table,
-  bytecode per function. Blink is 136 bytes; a full widget app is ~11KB.
+  bytecode per function. Blink is 138 bytes; a full widget app is ~11KB.
   Format in [BYTECODE.md](/docs/bytecode).
 
 Commands: `mothc app.dart` (compile), `mothc app.dart --push <target>`

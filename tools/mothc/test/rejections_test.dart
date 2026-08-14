@@ -125,6 +125,28 @@ void main() { var c = C()..log.add(1); print(c.log); }
     expect(out, contains('not available on a microcontroller'));
   });
 
+  test('an external method is refused — only top-level built-ins are', () {
+    // Accepted, it compiled to a method whose declared int quietly
+    // evaluated to null — the analyzer/compiler agreement broken from the
+    // other side.
+    for (final member in [
+      'external int foo(int a);',
+      'external int get x;',
+      'external set x(int v);',
+      'external int x;',
+      'external A();',
+    ]) {
+      final out = compile('''
+class A {
+  $member
+}
+void main() { print(A()); }
+''');
+      expect(out, contains('cannot be external'),
+          reason: 'a class with "$member" must be refused');
+    }
+  });
+
   test('a closure capturing an enclosing local is refused, with the idiom', () {
     // The docs' headline constraint — closures capture only `this` — rests
     // on this rejection. Silently compiling it would read the wrong
