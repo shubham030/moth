@@ -18,7 +18,7 @@ const BLINK = `void main() {
 }`;
 
 const TRACE = `$ mothc blink.dart
-wrote blink.mothb (136 bytes)
+wrote blink.mothb (138 bytes)
 
 $ mothrun blink.mothb --stop-after 2000
 [     0ms] pin 38 -> output
@@ -112,7 +112,7 @@ const FEATURES = [
   },
   {
     icon: '📦',
-    title: 'Programs are 136 bytes',
+    title: 'Programs are 138 bytes',
     body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
   },
 ];

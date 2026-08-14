@@ -69,7 +69,7 @@ void main() {
 
 ```
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
-wrote examples/blink.mothb (136 bytes)
+wrote examples/blink.mothb (138 bytes)
 
 $ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
 [     0ms] pin 38 -> output
@@ -79,7 +79,7 @@ $ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
 [  1500ms] pin 38 = low
 ```
 
-The same blob runs unchanged on the board. And because a program is 136 bytes
+The same blob runs unchanged on the board. And because a program is 138 bytes
 of bytecode rather than a firmware image, updating it later means pushing those
 bytes — not reflashing.
 

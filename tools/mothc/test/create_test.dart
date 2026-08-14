@@ -2,6 +2,7 @@
 // A starter that greets a beginner with a compile error is worse than no
 // starter, and the widget API the template leans on is still settling —
 // this is the tripwire that keeps the two in step.
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:mothc/src/compiler.dart';
@@ -28,11 +29,45 @@ void main() {
         .listSync()
         .map((e) => e.uri.pathSegments.lastWhere((s) => s.isNotEmpty))
         .toSet();
-    expect(names, {'app.dart', 'README.md', '.gitignore'});
+    expect(names, {
+      'app.dart',
+      'README.md',
+      '.gitignore',
+      'pubspec.yaml',
+      'analysis_options.yaml',
+      '.vscode',
+    });
+    expect(File('$dir/.vscode/tasks.json').existsSync(), isTrue);
     // The README names the project, not a placeholder.
     expect(File('$dir/README.md').readAsStringSync(), contains('# glow'));
     expect(
         File('$dir/README.md').readAsStringSync(), isNot(contains('%NAME%')));
+  });
+
+  test('the pubspec points at a resolvable package:moth', () {
+    final dir = '${tmp.path}/glow';
+    createProject(dir);
+    final spec = File('$dir/pubspec.yaml').readAsStringSync();
+    expect(spec, contains('name: glow'));
+    expect(spec, contains('moth:'));
+    // A path dependency must actually exist, or the editor resolves nothing
+    // — the entire reason the pubspec is generated.
+    final m = RegExp(r'path: (.+)').firstMatch(spec);
+    if (m != null) {
+      final dep = m.group(1)!.trim();
+      final resolved = dep.startsWith('/') ? dep : '$dir/$dep';
+      expect(File('$resolved/lib/widgets.dart').existsSync(), isTrue,
+          reason:
+              'the generated path dependency should point at packages/moth');
+    }
+  });
+
+  test('the editor task file is valid JSON', () {
+    final dir = '${tmp.path}/glow';
+    createProject(dir);
+    final task = File('$dir/.vscode/tasks.json').readAsStringSync();
+    final parsed = jsonDecode(task) as Map<String, dynamic>;
+    expect((parsed['tasks'] as List).first['command'], contains('mothc check'));
   });
 
   test('a non-empty target is refused, and left untouched', () {
