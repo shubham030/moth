@@ -135,7 +135,14 @@ internal clock (keeps the core deterministic and testable).
 
 ## 7. Conformance suite
 
-Lives in `conformance/` (host-run, no hardware):
+What exists today (host-run, no hardware): contract tests in
+`moth_render/test/` — control gestures, events and painted pixels
+(`controls_test.cpp`) and per-frame paint-cost budgets (`perf_test.cpp`) —
+plus reconciler, wrapping and tap checks driven through the simulator in CI.
+These gate every commit via `make test`.
+
+The full suite this section originally specified is still planned, and a
+second backend cannot be accepted without it:
 
 1. **Layout goldens** — scene scripts (JSON: build tree, set props, commit)
    with expected `frame_of(node)` rects for every node. Numeric, exact to

@@ -138,6 +138,13 @@ requirements. The spelling is not.
 
 ## ADR-008: moth_render is a parallel native backend; pixels stay native
 
+**Status update (Aug 2026):** events overtook the caution below — every
+shipped milestone (M2 through M5) runs on `moth_render`, and the LVGL
+binding layer was never built. moth_render is the de facto primary backend;
+the graduation review this ADR asks for should formalize that against the
+conformance suite. The original decision and its reasoning stand unchanged
+below.
+
 **Decision:** A second backend, `moth_render` (scene graph + moth flex layout +
 ThorVG rasterization + damage tracking), is developed as **track two** —
 desktop/SDL-first, best-effort, never blocking the LVGL-path milestones M1–M4.

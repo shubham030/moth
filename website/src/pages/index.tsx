@@ -18,7 +18,7 @@ const BLINK = `void main() {
 }`;
 
 const TRACE = `$ mothc blink.dart
-wrote blink.mothb (130 bytes)
+wrote blink.mothb (136 bytes)
 
 $ mothrun blink.mothb --stop-after 2000
 [     0ms] pin 38 -> output
@@ -77,7 +77,7 @@ function Hero() {
             </Link>
           </div>
           <p className="heroNote">
-            Runs on ESP32-S3 and ESP32-P4 · MIT licensed · v0.x, API unstable
+            Runs on ESP32-S3 · MIT licensed · v0.x, API unstable
           </p>
         </div>
 
@@ -112,7 +112,7 @@ const FEATURES = [
   },
   {
     icon: '📦',
-    title: 'Programs are 130 bytes',
+    title: 'Programs are 136 bytes',
     body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
   },
 ];
@@ -155,10 +155,10 @@ function Status() {
             <ul className="statusList">
               <li className="tick">Strings, lists, classes, closures, garbage collection</li>
               <li className="tick">Flutter-named widgets, setState, sliders and switches — 38fps on a round AMOLED</li>
-              <li className="tick">Hot push over the USB cable or WiFi — no reflashing</li>
+              <li className="tick">Hot push over the USB cable or paired WiFi — no reflashing</li>
               <li className="tick">Digital and analog I/O, PWM, tone, I2C, UART</li>
               <li className="tick">Desktop simulator, golden tests, paint-cost budgets</li>
-              <li className="tick">ESP32-S3 and ESP32-P4</li>
+              <li className="tick">ESP32-S3 with the Waveshare 1.75&quot; round AMOLED — the verified board</li>
             </ul>
           </div>
           <div className="statusCol">
@@ -169,6 +169,7 @@ function Status() {
               <li className="pending">Images</li>
               <li className="pending">Scalable text and gradients</li>
               <li className="pending">State-preserving hot reload (push restarts the program)</li>
+              <li className="pending">Boards beyond the one above (ESP32-P4 builds, unverified)</li>
             </ul>
           </div>
         </div>

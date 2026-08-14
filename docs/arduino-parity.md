@@ -105,38 +105,33 @@ library work:
 | `Wire.requestFrom(n)` | ❌ | I2C bulk-read library work |
 | `Servo`, `EEPROM`, `SPI` | ❌ | library work |
 
-## The API this is heading toward
+## The API you should actually write
 
 Everything above is the **native boundary** — deliberately flat and C-shaped,
 because that is what a bytecode VM calls efficiently. It is not meant to be
-what you write.
-
-Once classes land in M1b, `package:moth` wraps that boundary in ordinary Dart:
+what you write. `package:moth` wraps it in ordinary Dart, and that layer is
+shipped — [hardware.md](hardware.md) documents it in full:
 
 ```dart
-final led = DigitalPin(38, mode: PinMode.output);
+import 'package:moth/hardware.dart';
+
+final led = OutputPin(38);
 led.toggle();
 
 final knob = AnalogPin(4);
 print(knob.read());
 
-final buzzer = PwmPin(6);
-buzzer.tone(440);
-
-final bus = I2c(sda: 15, scl: 14);
-for (final addr in bus.scan()) {
-  print('found 0x${addr.toRadixString(16)}');
+final bus = I2c(15, 14);           // sda, scl
+final sensor = I2cDevice(bus, 0x5a);
+if (sensor.isPresent) {
+  sensor.write(0x01, 200);
 }
-bus.device(0x5a).writeRegister(0x01, 200);
 ```
 
-Named parameters, enums instead of magic booleans, real objects you can pass
-around and test. The same reason MicroPython gives you `machine.Pin` instead of
-a pile of loose functions: the low-level surface is an implementation detail,
-not the language you should have to think in.
-
-The flat functions will keep working underneath — but the tutorials, examples
-and this page will all be rewritten around the class API when it exists.
+Real objects you can pass around and test — the same reason MicroPython gives
+you `machine.Pin` instead of a pile of loose functions. The flat functions
+keep working underneath, and they remain the right vocabulary for this page,
+because they are what Arduino tutorials translate into line for line.
 
 ## What moth already does that Arduino cannot
 
