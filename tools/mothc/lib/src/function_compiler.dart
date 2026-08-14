@@ -755,7 +755,8 @@ class FunctionCompiler {
     // A bare name inside a method can be a field or a getter on this object.
     // Both read the same way — OP_GET_PROP tries the field first and falls
     // back to the getter — so one path covers them.
-    if (slot == null && (_isField(id.name) || _enclosingMethods.contains(id.name))) {
+    if (slot == null &&
+        (_isField(id.name) || _enclosingMethods.contains(id.name))) {
       _emitThis();
       _emit(Op.getProp);
       _emitU16(unit.constants.addString(id.name));
@@ -1054,7 +1055,8 @@ class FunctionCompiler {
       name = operand.identifier.name;
     } else if (operand is SimpleIdentifier &&
         _resolve(operand.name) == null &&
-        (_isField(operand.name) || _enclosingMethods.contains(operand.name) ||
+        (_isField(operand.name) ||
+            _enclosingMethods.contains(operand.name) ||
             _enclosingSetters.contains(operand.name))) {
       // Accessors as well as fields: GET_PROP and SET_PROP both fall back to
       // them, so `value++` in a method works the same way `value = value + 1`
@@ -1269,6 +1271,25 @@ class FunctionCompiler {
     _rejectNullAware(call.operator, call.offset);
     final name = call.methodName.name;
     final args = call.argumentList.arguments;
+
+    // Image('path.png') is also a compile-time request to embed the file —
+    // the board has no filesystem to load it from later. Only a literal can
+    // be embedded, and catching a computed path here beats a blank square
+    // at run time.
+    if (name == 'Image' && call.target == null && args.isNotEmpty) {
+      final first = args.first;
+      if (first is SimpleStringLiteral) {
+        unit.imageRefs.putIfAbsent(first.value, () => first.offset);
+      } else if (first is! NamedExpression) {
+        throw CompileError(
+          "Image needs a literal path (like Image('logo.png')) so the "
+          'compiler can embed the file in the program',
+          first.offset,
+          hint: 'the board has no filesystem — images travel inside the '
+              '.mothb blob, which means the compiler must see the path',
+        );
+      }
+    }
 
     // Method call: the receiver and its class are only known at run time, so
     // there is no declaration to match names against. Constructors and

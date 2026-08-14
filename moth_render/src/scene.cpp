@@ -76,6 +76,13 @@ static void switch_toggle(Scene &s, mr_node_id id, float px, float py) {
   s.emit({id, MR_EV_VALUE_CHANGED, v, px, py});
 }
 
+const Asset *find_asset(Scene &s, const std::string &key) {
+  for (const Asset &a : s.assets) {
+    if (a.key == key) return &a;
+  }
+  return nullptr;
+}
+
 static mr_node_id hit_test(Scene &s, mr_node_id id, float px, float py) {
   Node *n = s.get(id);
   if (!n || n->f[MR_PROP_OPACITY] <= 0.0f) return MR_NODE_NONE;
@@ -294,6 +301,24 @@ void mr_set_str(mr_node_id node, mr_prop prop, const char *utf8) {
   }
   n->touched = true;
   scene().dirty = true;
+}
+
+void mr_asset_set(const char *key, size_t key_len, int w, int h,
+                  const uint32_t *pixels) {
+  if (!key || key_len == 0 || w <= 0 || h <= 0 || !pixels) return;
+  Scene &s = scene();
+  std::string k(key, key_len);
+  for (Asset &a : s.assets) {
+    if (a.key == k) {
+      a.w = w;
+      a.h = h;
+      a.pixels = pixels;
+      s.dirty = true;
+      return;
+    }
+  }
+  s.assets.push_back(Asset{std::move(k), w, h, pixels});
+  s.dirty = true;
 }
 
 void mr_set_event_sink(mr_event_cb cb, void *user) {

@@ -255,6 +255,51 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
     }
   }
 
+  /* assets — raster images the compiler embedded. Pixels are borrowed from
+   * the blob, never copied: on a flash-mapped blob an image costs no RAM.
+   * Every count and offset is validated here, because this section arrives
+   * over the network like the rest of the blob. */
+  vm->nassets = rd_u16(&r);
+  if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated asset table");
+  if (vm->nassets > 0) {
+    vm->assets = calloc(vm->nassets, sizeof *vm->assets);
+    if (!vm->assets) return fail(vm, MOTH_ERR_OOM, "out of memory");
+    for (uint16_t i = 0; i < vm->nassets; i++) {
+      moth_asset_rec *a = &vm->assets[i];
+      a->key_const = rd_u16(&r);
+      a->w = rd_u16(&r);
+      a->h = rd_u16(&r);
+      if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated asset %u", i);
+      /* The size clamp is load-bearing for overflow, not just sanity:
+       * 2048*2048*4 stays far inside 32-bit size_t, which is what makes
+       * the pixel bound below meaningful on the ESP32. It runs before the
+       * key check so a hostile size is refused without needing any valid
+       * constant to name. */
+      if (a->w == 0 || a->h == 0 || a->w > 2048 || a->h > 2048) {
+        return fail(vm, MOTH_ERR_FORMAT, "asset %u: %ux%u is not a sane size", i,
+                    a->w, a->h);
+      }
+      if (a->key_const >= vm->nconsts || vm->const_strs[a->key_const].len == 0) {
+        return fail(vm, MOTH_ERR_FORMAT, "asset %u: key is not a string constant", i);
+      }
+      /* Pixels are 4-byte aligned FROM THE BLOB START (the writer pads),
+       * so a host that maps or allocates the blob 4-aligned — both do —
+       * can read u32s directly. */
+      size_t off = (size_t)(r.p - blob);
+      size_t pad = (4 - (off & 3)) & 3;
+      if ((size_t)(r.end - r.p) < pad) {
+        return fail(vm, MOTH_ERR_FORMAT, "truncated asset %u", i);
+      }
+      r.p += pad;
+      size_t npix = (size_t)a->w * a->h;
+      if ((size_t)(r.end - r.p) < npix * 4) {
+        return fail(vm, MOTH_ERR_FORMAT, "asset %u: pixel data truncated", i);
+      }
+      a->pixels = (const uint32_t *)r.p;
+      r.p += npix * 4;
+    }
+  }
+
   /* Cache the built-in member names so property access compares integers.
    * 0xFFFF means the program never mentions that name, which can never match. */
   vm->k_length = find_string_const(vm, "length");
@@ -277,6 +322,21 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
   return MOTH_OK;
 }
 
+int moth_asset_count(const moth_vm *vm) { return vm && vm->loaded ? vm->nassets : 0; }
+
+bool moth_asset_info(const moth_vm *vm, int i, const char **key, size_t *key_len,
+                     int *w, int *h, const uint32_t **pixels) {
+  if (!vm || !vm->loaded || i < 0 || i >= vm->nassets) return false;
+  const moth_asset_rec *a = &vm->assets[i];
+  const moth_str *k = &vm->const_strs[a->key_const];
+  if (key) *key = k->chars;
+  if (key_len) *key_len = k->len;
+  if (w) *w = a->w;
+  if (h) *h = a->h;
+  if (pixels) *pixels = a->pixels;
+  return true;
+}
+
 moth_vm *moth_new(void) {
   moth_vm *vm = calloc(1, sizeof *vm);
   if (vm) {
@@ -296,6 +356,7 @@ void moth_free(moth_vm *vm) {
   free(vm->natives);
   free(vm->funcs);
   free(vm->globals);
+  free(vm->assets);
   for (uint16_t i = 0; i < vm->nclasses; i++) {
     free(vm->classes[i].field_names);
     free(vm->classes[i].methods);
