@@ -12,9 +12,9 @@ Four pieces. Your Dart never runs on your Mac — it is compiled there and
 ```
 your Mac                                   the microcontroller
 ┌───────────────────────────┐              ┌────────────────────────────┐
-│ blink.dart                │              │  moth VM  (C, ~1500 lines) │
+│ blink.dart                │              │  moth VM  (C, ~1700 lines) │
 │    │                      │              │     │ interprets bytecode  │
-│    ▼  mothc (Dart)        │   130 bytes  │     ▼                      │
+│    ▼  mothc (Dart)        │   136 bytes  │     ▼                      │
 │  parse → lower → emit     │ ───────────► │  natives: gpio, i2c, uart  │
 │    │                      │   .mothb     │     │                      │
 │    ▼                      │              │     ▼                      │
@@ -38,12 +38,13 @@ than failing mysteriously on the device.
 ## 2. The blob (`.mothb`)
 
 A small self-contained file: a constant pool, a table of the built-ins the
-program needs, and the bytecode for each function. Blink is 130 bytes.
+program needs, and the bytecode for each function. Blink is 136 bytes.
 
 Because a program is *data*, not a firmware image, updating it later means
 sending a few hundred bytes rather than reflashing — that is what makes hot
 push practical: `mothc app.dart --push` replaces the running program over the
-USB cable or WiFi in well under a second. The full format is in
+USB cable in well under a second, or over paired WiFi (the pairing key
+derivation adds about two seconds). The full format is in
 [BYTECODE](/docs/bytecode).
 
 ## 3. The VM (`vm/`)
@@ -79,12 +80,15 @@ your laptop, then run the identical bytes on hardware.
 
 ## The other half: rendering
 
-moth's longer goal is Flutter's programming model — widgets and `setState` —
-on these chips. That work is a separate track: a
-[backend contract](/docs/backend) that a renderer implements, with
-a working scene graph, flex layout and software rasterizer already running on
-desktop and on two ESP32 boards.
+The same VM also drives a display. moth's renderer (`moth_render`) implements
+a documented [backend contract](/docs/backend) — a scene graph with flex
+layout, an antialiased software rasterizer with damage tracking, native
+animations and touch hit-testing. On top of it, `package:moth` provides
+Flutter-shaped widgets: `Component`, `build()`, `setState`, and the names you
+expect (`Container`, `Column`, `Text`, `Slider`, `Switch`).
 
-The two halves have not met yet. Connecting them — Dart code driving pixels —
-is the milestone that makes moth what it is meant to be. See the
-[roadmap](/docs/roadmap).
+A tap rebuilds the widget tree, the reconciler patches only the changed
+nodes, and the renderer repaints only the changed rows — 38 fps on a
+466x466 panel, measured. The same app runs unchanged in the desktop
+simulator (`mothsim`) and on the board. See the [roadmap](/docs/roadmap) for
+what is built and what is next.

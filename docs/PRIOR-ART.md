@@ -73,7 +73,7 @@ tree, `setState`, Element reconciliation — on an MCU, in any language.
 
 https://github.com/toitlang/toit — LGPL-2.1 VM/compiler, MIT stdlib. Very
 active (v2.0.0-alpha, releases roughly monthly), and **added ESP32-P4 support
-in May 2026** — moth's exact target silicon.
+in May 2026** — silicon on moth's own roadmap.
 
 **Read the founders carefully: Kasper Lund and Erik Corry, from V8 and Dart.**
 The people who built Dart concluded that the right move for microcontrollers
