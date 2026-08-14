@@ -36,7 +36,7 @@ $ dart pub get --directory tools/mothc
 
 ```console
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
-wrote examples/blink.mothb (136 bytes)
+wrote examples/blink.mothb (138 bytes)
 
 $ ./vm/build/mothrun examples/blink.mothb --stop-after 3000
 [     0ms] pin 38 -> output
@@ -102,16 +102,38 @@ For an app with a screen, scaffold a project instead:
 ```console
 $ dart run tools/mothc/bin/mothc.dart create my_app
 created my_app/
-  app.dart    — the whole app; start in build()
-  README.md   — how to run it, desktop and board
-  .gitignore  — keeps compiled .mothb files out of git
+  app.dart              — the whole app; start in build()
+  README.md             — how to run it, desktop and board
+  pubspec.yaml          — so your editor resolves package:moth
+  analysis_options.yaml — standard Dart lints
+  .vscode/tasks.json    — build task runs "mothc check"
+  .gitignore            — keeps build output out of git
 ```
 
-That is the entire project — one Dart file, no pubspec, nothing to
-install: the compiler resolves `package:moth/...` by itself. The starter is
-a tap counter in Flutter's shape (`Component`, `build()`, `setState`);
-run it in a window with `make ui F=my_app/app.dart`, and every push
-command below works on it unchanged.
+You only ever edit `app.dart`. The rest is for your editor: mothc resolves
+`package:moth` by itself and never reads a pubspec, but the Dart analyser
+needs one — with it, `my_app` opens with autocomplete, go-to-definition and
+type checking on every built-in, because moth's host functions are declared
+as `external` for exactly that purpose.
+
+The starter is a tap counter in Flutter's shape (`Component`, `build()`,
+`setState`); run it in a window with `make ui F=my_app/app.dart`, and every
+push command below works on it unchanged.
+
+## What your editor cannot know
+
+The analyser checks ordinary Dart. It does not know which parts of Dart
+moth runs — `async`, generics and capturing a local in a closure all look
+fine to it and are refused by the compiler. That is what `check` is for:
+
+```console
+$ mothc check app.dart
+app.dart: ok
+```
+
+It compiles and throws the result away, so it is fast enough to run on
+every save; in VS Code it is the default build task (Cmd/Ctrl-Shift-B), and
+errors land on the right line with the compiler's own hint.
 
 ## 4. Put it on a board
 
@@ -132,7 +154,7 @@ $ idf.py -p /dev/cu.usbmodem2101 -b 115200 flash monitor
 You should see your Dart program running on the chip:
 
 ```
-I (257) moth: loading 185 bytes of Dart bytecode
+I (257) moth: loading 193 bytes of Dart bytecode
 I (262) moth: running Dart on the VM
 I (273) moth: pin 21 -> output
 I (276) moth: 0

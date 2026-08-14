@@ -14,6 +14,12 @@
 // constructor, so there is no separate setup step to forget.
 
 /// A pin the program drives.
+// The host functions underneath. Imported for this file's own use and
+// re-exported so a program importing this library sees them too — the Dart
+// analyzer's imports are not transitive, even though moth's global scope is.
+import 'natives.dart';
+export 'natives.dart';
+
 class OutputPin {
   final int number;
 
@@ -184,12 +190,22 @@ class Uart {
     uartBegin(port, tx, rx, baud);
   }
 
-  void write(String text) {
-    uartWrite(port, text);
+  /// Sends one byte.
+  void writeByte(int byte) {
+    uartWrite(port, byte);
   }
 
-  /// Everything received since the last read, or an empty string.
-  String read() => uartRead(port);
+  /// Sends [text] one byte at a time. Characters outside ASCII are sent as
+  /// their UTF-16 code units truncated to a byte, which is what the wire
+  /// can carry — send bytes yourself if that matters.
+  void write(String text) {
+    for (var i = 0; i < text.length; i++) {
+      uartWrite(port, text.codeUnitAt(i) & 0xFF);
+    }
+  }
+
+  /// The next byte, or -1 when nothing is waiting.
+  int read() => uartRead(port);
 
   /// How many bytes are waiting.
   int get available => uartAvailable(port);

@@ -7,6 +7,12 @@
 // This is the beginning of package:moth — for now it is a plain file that
 // programs import.
 
+// The host functions underneath. Imported for this file's own use and
+// re-exported so a program importing this library sees them too — the Dart
+// analyzer's imports are not transitive, even though moth's global scope is.
+import 'natives.dart';
+export 'natives.dart';
+
 // ---- contract numbering --------------------------------------------------
 
 final kBox = 0;

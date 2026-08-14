@@ -32,6 +32,26 @@ jobs:
           dart pub get --directory tools/mothc
           cd tools/mothc && dart test
 
+      # package:moth must analyze clean, or every editor opening a moth
+      # program shows errors in the library it imports. It was 112 errors
+      # before the natives were declared; nothing structural stops that
+      # coming back except this step.
+      - name: package:moth analyzes clean
+        run: |
+          dart pub get --directory packages/moth
+          cd packages/moth && dart analyze
+
+      # The promise `mothc create` makes: the project it writes opens in an
+      # editor with working resolution. Checked the way a user would — make
+      # one, fetch its deps, analyze it.
+      - name: A created project analyzes clean
+        run: |
+          set -e
+          dart run tools/mothc/bin/mothc.dart create /tmp/ci_scaffold
+          cd /tmp/ci_scaffold
+          dart pub get
+          dart analyze
+
       # The goldens cover the language; these cover that every example still
       # compiles, which is what breaks when the framework or the package moves.
       - name: Compile every example
