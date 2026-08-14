@@ -14,7 +14,7 @@ your Mac                                   the microcontroller
 ┌───────────────────────────┐              ┌────────────────────────────┐
 │ blink.dart                │              │  moth VM  (C, ~1700 lines) │
 │    │                      │              │     │ interprets bytecode  │
-│    ▼  mothc (Dart)        │   136 bytes  │     ▼                      │
+│    ▼  mothc (Dart)        │   138 bytes  │     ▼                      │
 │  parse → lower → emit     │ ───────────► │  natives: gpio, i2c, uart  │
 │    │                      │   .mothb     │     │                      │
 │    ▼                      │              │     ▼                      │
@@ -38,7 +38,7 @@ than failing mysteriously on the device.
 ## 2. The blob (`.mothb`)
 
 A small self-contained file: a constant pool, a table of the built-ins the
-program needs, and the bytecode for each function. Blink is 136 bytes.
+program needs, and the bytecode for each function. Blink is 138 bytes.
 
 Because a program is *data*, not a firmware image, updating it later means
 sending a few hundred bytes rather than reflashing — that is what makes hot

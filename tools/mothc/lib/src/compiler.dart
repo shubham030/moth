@@ -132,8 +132,18 @@ class Compiler {
     // Imports first, so a superclass or function from another file is known
     // before this file's declarations are collected.
     for (final directive in parsed.unit.directives) {
-      if (directive is ImportDirective) {
-        final target = directive.uri.stringValue;
+      // `export` is loaded exactly like `import`: moth has one global scope,
+      // so re-exporting and importing amount to the same thing here. It is
+      // supported because the Dart ANALYZER is stricter than moth — its
+      // imports are not transitive, so package:moth must re-export the
+      // native declarations for an editor to see them in user code.
+      if (directive is ImportDirective || directive is ExportDirective) {
+        final target = directive is ImportDirective
+            ? directive.uri.stringValue
+            : (directive as ExportDirective).uri.stringValue;
+        final uriOffset = directive is ImportDirective
+            ? directive.uri.offset
+            : (directive as ExportDirective).uri.offset;
         if (target == null) {
           throw CompileError(
               'this import is not a plain string', directive.offset);
@@ -149,7 +159,7 @@ class Compiler {
 
         final String resolved;
         if (target.startsWith('package:')) {
-          resolved = _resolvePackageUri(target, directive.uri.offset);
+          resolved = _resolvePackageUri(target, uriOffset);
         } else if (target.contains(':')) {
           throw CompileError(
             "'$target' is not a kind of import moth understands",
@@ -162,13 +172,13 @@ class Compiler {
 
         final file = File(resolved);
         if (!file.existsSync()) {
-          throw CompileError("cannot find '$target'", directive.uri.offset);
+          throw CompileError("cannot find '$target'", uriOffset);
         }
         _loadUnit(resolved, file.readAsStringSync(), directive.offset);
         currentUnit = unit; // restore after the nested load
       } else if (directive is! LibraryDirective) {
         throw CompileError(
-          'only import directives are supported',
+          'only import and export directives are supported',
           directive.offset,
         );
       }
@@ -262,6 +272,22 @@ class Compiler {
         );
       }
       final name = decl.name.lexeme;
+      // `external` says "implemented outside Dart", which is exactly what a
+      // built-in is. package:moth declares every native that way so the
+      // analyzer knows their signatures — an editor can then complete them
+      // and type-check calls. They are skipped here rather than compiled:
+      // the call site resolves against kNatives as it always has.
+      if (decl.externalKeyword != null) {
+        if (!kNatives.containsKey(name)) {
+          throw CompileError(
+            "'$name' is declared external but is not a built-in",
+            decl.offset,
+            hint: 'external declares a host function; moth cannot supply a '
+                'body for one it does not have',
+          );
+        }
+        continue;
+      }
       if (kNatives.containsKey(name)) {
         throw CompileError(
           "'$name' is a built-in, so it can't also be defined here",
@@ -561,6 +587,25 @@ class Compiler {
       }
       final slots = <(String, int)>[];
       for (final member in decl.members) {
+        // Only top-level functions may be external (that is where the
+        // built-ins are declared). An external MEMBER of any kind — method,
+        // getter, setter, field, constructor — has no built-in to resolve
+        // to and no body to compile; accepting one produced a member whose
+        // declared int quietly evaluated to null. The three declaration
+        // shapes put the keyword in three places, so each is checked.
+        final externalKw = switch (member) {
+          MethodDeclaration m => m.externalKeyword,
+          FieldDeclaration f => f.externalKeyword,
+          ConstructorDeclaration c => c.externalKeyword,
+        };
+        if (externalKw != null) {
+          throw CompileError(
+            'class members cannot be external — only top-level built-ins are',
+            member.offset,
+            hint: 'a member needs a body; the host has nothing to supply '
+                'for it',
+          );
+        }
         if (member is MethodDeclaration) {
           final key = _memberKey(member);
           if (member.isGetter) _getterKeys.add(key);

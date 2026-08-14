@@ -250,6 +250,20 @@ This is what makes [package:moth's hardware API](hardware.md) worth using:
 | Mixins, extensions, records | not planned for v1 |
 | Generics | not planned for v1 — type annotations like `List<int>` are accepted and erased, never enforced |
 
+## Built-ins are `external`
+
+`package:moth` declares every host function the way Dart declares anything
+implemented elsewhere:
+
+```dart
+external int analogRead(int pin);
+```
+
+That is what lets your editor complete them and check their arguments.
+mothc skips these declarations and resolves the call against its own table;
+declaring `external` for a name that is not a built-in is an error, because
+moth has no body to supply for it.
+
 ## No async, and why
 
 There is no event loop on the device, so there is nothing for a `Future` to
@@ -307,6 +321,6 @@ blink.dart:5:3: 'digitalWrite' takes 2 arguments, but got 1
 
 ## How much fits
 
-A blink program is 136 bytes of bytecode. The demo with a user-defined
-function, arithmetic and a GPIO loop is 185 bytes. The VM itself is roughly
+A blink program is 138 bytes of bytecode. The demo with a user-defined
+function, arithmetic and a GPIO loop is 193 bytes. The VM itself is roughly
 200 KB of flash and a few KB of RAM, so program size is rarely what limits you.
