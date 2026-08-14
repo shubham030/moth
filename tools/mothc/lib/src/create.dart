@@ -269,7 +269,17 @@ String _pubName(String dirName) {
 /// will want once moth is published.
 String _mothDependency(String projectDir) {
   final found = _findMothPackage();
-  if (found == null) return '  moth: ^0.1.0';
+  if (found == null) {
+    // No hosted fallback on purpose: package:moth is not on pub.dev, so
+    // `moth: ^0.1.0` would either fail pub get today or — worse — resolve
+    // to whoever claims the name first. mothc itself needs no pubspec, so
+    // the project still compiles; the editor just needs the path filled in.
+    return '''
+  # moth is not yet on pub.dev. Point this at your moth checkout so your
+  # editor can resolve the import (mothc compiles fine without it):
+  # moth:
+  #   path: /path/to/moth/packages/moth''';
+  }
   // Relative when the project sits near the checkout, so moving the pair
   // together keeps working. A project created somewhere unrelated would
   // otherwise get a ../../../../.. chain that is unreadable and no more

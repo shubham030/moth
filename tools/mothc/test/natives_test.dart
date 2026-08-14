@@ -47,6 +47,34 @@ void main() {
     }
   });
 
+  test('the load-bearing signatures read exactly as the C implements them',
+      () {
+    // Arity alone cannot catch a num->double or int->bool drift, and those
+    // are the changes that silently break valid programs: double would
+    // reject the integer literals want_num accepts, bool would hide
+    // uartRead's -1 sentinel. Pin the exact lines for the ones with a
+    // wrong-type failure mode; a deliberate change updates both sides.
+    final text = File('$repoRoot/packages/moth/lib/natives.dart')
+        .readAsStringSync();
+    for (final line in [
+      'external void uiSetNum(int node, int prop, num value);',
+      'external int uiAnimate(',
+      'external int uartRead(int port);',
+      'external void uartWrite(int port, int byte);',
+      'external void digitalWrite(int pin, bool value);',
+      'external bool digitalRead(int pin);',
+      'external bool i2cPing(int addr);',
+      'external int i2cReadReg(int addr, int reg);',
+      'external double uiEventValue();',
+      'external bool uiCommit();',
+    ]) {
+      expect(text, contains(line),
+          reason: 'natives.dart no longer declares "$line" — if the change '
+              'is deliberate, verify it against the C implementation and '
+              'update this pin');
+    }
+  });
+
   test('the byte counts quoted in the docs are the real ones', () {
     // Every small program the docs quote a size for. A three-digit "N
     // bytes" claim in those pages must equal one of these; the v6 assets
