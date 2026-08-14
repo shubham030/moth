@@ -58,6 +58,27 @@ int main(void) {
         "scaling repeats source pixels, no filtering");
   check(pixel(5, 1) == 0xFF00FF00u, "right quadrant is the green source");
 
+  /* Radius clipping: a solid asset with heavily rounded corners must leave
+   * the corner pixel as backdrop while the centre is the source color.
+   * Deleting draw_image's coverage block fails this. */
+  static const uint32_t solid[1] = {0xFFFF00FFu};
+  mr_asset_set("dot", 3, 1, 1, solid);
+  mr_node_id round_img = mr_node_create(MR_NODE_IMAGE);
+  mr_set_str(round_img, MR_PROP_IMAGE_SRC, "dot");
+  mr_set_f32(round_img, MR_PROP_WIDTH, 16);
+  mr_set_f32(round_img, MR_PROP_HEIGHT, 16);
+  mr_set_f32(round_img, MR_PROP_RADIUS, 8);
+  mr_attach(mr_root(), round_img, -1);
+  mr_commit();
+  float ry = 0, rx = 0, rw = 0, rh = 0;
+  mr_frame_of(round_img, &rx, &ry, &rw, &rh);
+  check(pixel((int)rx, (int)ry) == 0xFF000000u,
+        "radius clips the corner to backdrop");
+  check(pixel((int)rx + 8, (int)ry + 8) == 0xFFFF00FFu,
+        "radius leaves the centre as source");
+  mr_node_destroy(round_img);
+  mr_commit();
+
   /* A key nobody registered: a placeholder box in layout, no paint. */
   mr_node_id ghost = mr_node_create(MR_NODE_IMAGE);
   mr_set_str(ghost, MR_PROP_IMAGE_SRC, "nope");

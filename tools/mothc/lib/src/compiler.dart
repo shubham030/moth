@@ -385,6 +385,18 @@ class Compiler {
             offset);
       }
       final w = decoded.width, h = decoded.height;
+      // The budget check runs BEFORE the pixel walk: a 2048x2048 file
+      // should fail in milliseconds, not after four million getPixel calls
+      // and a 16MB allocation whose only purpose is to be thrown away.
+      total += w * h * 4;
+      if (total > 512 * 1024) {
+        throw CompileError(
+            'embedded images total \${(total / 1024).round()}KB — the budget '
+            'is 512KB',
+            offset,
+            hint: 'pixels are stored raw (width x height x 4 bytes); resize '
+                'the image to what the panel actually shows');
+      }
       final px = Uint8List(w * h * 4);
       var i = 0;
       for (var y = 0; y < h; y++) {

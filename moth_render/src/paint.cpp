@@ -13,8 +13,9 @@
 #if MR_PROFILE
 extern "C" {
 int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us, mr_prof_arc_us,
-    mr_prof_text_us;
-int64_t mr_prof_clear_px, mr_prof_rect_px, mr_prof_arc_px, mr_prof_text_px;
+    mr_prof_text_us, mr_prof_image_us;
+int64_t mr_prof_clear_px, mr_prof_rect_px, mr_prof_arc_px, mr_prof_text_px,
+    mr_prof_image_px;
 }
 #endif
 
@@ -422,7 +423,7 @@ static void draw_image(Scene &s, const Node &n, float opacity) {
   int x1 = std::min(s.cfg.width, (int)std::ceil(n.x + n.w));
   int y1 = std::min(s.clip_y1, (int)std::ceil(n.y + n.h));
   if (x1 <= x0 || y1 <= y0) return;
-  MR_PROF_PX(mr_prof_rect_px, (int64_t)(x1 - x0) * (y1 - y0));
+  MR_PROF_PX(mr_prof_image_px, (int64_t)(x1 - x0) * (y1 - y0));
 
   const float radius = n.f[MR_PROP_RADIUS];
   const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
@@ -532,9 +533,12 @@ static void paint_node(Scene &s, mr_node_id id, float opacity,
     draw_arc(s, *n, opacity);
     MR_PROF_ADD(t_arc, mr_prof_arc_us);
   } else if (n->kind == MR_NODE_IMAGE) {
+    /* Its own bucket: PERF_REVIEW's SPLIT localises a regression to a
+     * primitive, and an image blit hiding inside "rect" sends the next
+     * investigation to the wrong function. */
     MR_PROF_START(t_image);
     draw_image(s, *n, opacity);
-    MR_PROF_ADD(t_image, mr_prof_rect_us);
+    MR_PROF_ADD(t_image, mr_prof_image_us);
   } else if (n->kind == MR_NODE_SLIDER) {
     /* Controls own their whole box; the generic background fill would
      * paint bg_color as a rectangle when it means the accent. */
