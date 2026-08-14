@@ -22,7 +22,15 @@ static void leaf_auto_size(Node &n, float &w, float &h) {
       layout_text(n, limit, w, h);
       break;
     }
-    case MR_NODE_IMAGE:  w = 32; h = 32; break; /* TODO(R2): intrinsic size */
+    case MR_NODE_IMAGE: {
+      /* Intrinsic size is the asset's pixels; a key that is not registered
+       * (yet) gets a small placeholder box rather than zero, so the layout
+       * does not collapse and the gap is visible. */
+      const Asset *a = find_asset(scene(), n.image_src);
+      if (a) { w = (float)a->w; h = (float)a->h; }
+      else { w = 32; h = 32; }
+      break;
+    }
     case MR_NODE_SLIDER: w = 160; h = 24; break;
     case MR_NODE_SWITCH: w = 40; h = 24; break;
     default:             w = 0; h = 0; break;

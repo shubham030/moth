@@ -99,7 +99,13 @@ Dart program draws in a desktop window and on the board.
       grey the control (Flutter's semantics). Today the renderer still drags
       the thumb and the next rebuild snaps it back; needs an enabled prop in
       the backend contract, so it rides the next contract bump
-- [ ] Image widget
+- [x] Image widget: `Image('logo.png')` — the compiler decodes the PNG/JPEG
+      at compile time and embeds raw ARGB in the blob's assets section
+      (bytecode v6), so the board needs no filesystem and blits straight
+      from mapped flash at zero RAM cost. Intrinsic or scaled
+      (nearest-neighbour) sizing, alpha blending, rounded-corner clipping;
+      assets die with their program on swap (render_image_test pins the
+      lifetime). 512KB budget with a human error
 - [ ] Golden tests: widget tree in → sequence of ui* calls out
 
 ## Known limitations to close

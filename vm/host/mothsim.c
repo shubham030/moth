@@ -347,6 +347,10 @@ int main(int argc, char **argv) {
       fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));
       if (!g_sim.pending) return 65;
     } else {
+      /* After every load, including swaps: mr_reset dropped the previous
+       * program's assets with its blob; this program's images exist only
+       * once registered. */
+      moth_ui_register_assets(vm);
       st = moth_run(vm);
       if (st != MOTH_OK && st != MOTH_HALTED) {
         fprintf(stderr, "mothsim: %s: %s\n", status_text(st), moth_error(vm));

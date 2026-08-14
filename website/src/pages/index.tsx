@@ -154,7 +154,7 @@ function Status() {
             <h3>Working today</h3>
             <ul className="statusList">
               <li className="tick">Strings, lists, classes, closures, garbage collection</li>
-              <li className="tick">Flutter-named widgets, setState, sliders and switches — 38fps on a round AMOLED</li>
+              <li className="tick">Flutter-named widgets, setState, sliders, switches, and embedded images — 38fps on a round AMOLED</li>
               <li className="tick">Hot push over the USB cable or paired WiFi — no reflashing</li>
               <li className="tick">Digital and analog I/O, PWM, tone, I2C, UART</li>
               <li className="tick">Desktop simulator, golden tests, paint-cost budgets</li>
@@ -166,7 +166,6 @@ function Status() {
             <ul className="statusList">
               <li className="pending">Interrupts and async</li>
               <li className="pending">Enums, local captures, method tear-offs</li>
-              <li className="pending">Images</li>
               <li className="pending">Scalable text and gradients</li>
               <li className="pending">State-preserving hot reload (push restarts the program)</li>
               <li className="pending">Boards beyond the one above (ESP32-P4 builds, unverified)</li>

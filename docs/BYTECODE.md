@@ -39,6 +39,13 @@ functions    u16 count, then each:
                code        code_len bytes
 entry        u16       index of the function to call at start (must be arity 0)
 init         u16       initializer function index, or 0xFFFF for none
+assets       u16 count, then each:
+               key_const  u16   constant index of the string key
+               width      u16   1..2048
+               height     u16   1..2048
+               pad        0..3 bytes so pixels start 4-byte aligned
+                          from the blob's first byte
+               pixels     width × height u32 ARGB8888, rows top to bottom
 ```
 
 Global slots start as `null` and are filled by the `init` function, which the
@@ -50,6 +57,13 @@ Constant tags: `0 = int` (i64), `1 = double` (f64), `2 = string`
 
 Strings appear in the pool for names even when the VM has no string *values*
 yet (M1a) — they are used for native resolution and diagnostics.
+
+Assets are how images travel: the board has no filesystem for user files, so
+the compiler embeds decoded pixels and the VM lends them out by reference
+(`moth_asset_info`). Nothing is copied — on a flash-mapped blob an image
+costs no RAM. The alignment padding exists for exactly that pointer: hosts
+map or allocate blobs at least 4-aligned, so aligning pixels to the blob
+start makes them directly readable as `u32`s.
 
 ## Values
 

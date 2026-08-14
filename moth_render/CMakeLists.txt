@@ -43,6 +43,17 @@ add_executable(render_controls_test
 target_include_directories(render_controls_test PRIVATE include src)
 target_compile_options(render_controls_test PRIVATE -Wall -Wextra)
 
+# Image nodes at the contract: blit, blend, scale, and the reset lifetime.
+add_executable(render_image_test
+  test/image_test.cpp
+  src/scene.cpp
+  src/layout.cpp
+  src/paint.cpp
+  src/text.cpp
+)
+target_include_directories(render_image_test PRIVATE include src)
+target_compile_options(render_image_test PRIVATE -Wall -Wextra)
+
 # Desktop harness — built only when SDL2 is available.
 find_package(SDL2 QUIET)
 if(SDL2_FOUND)

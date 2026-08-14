@@ -125,6 +125,13 @@ typedef struct {
   uint16_t len;
 } moth_str;
 
+/* One embedded raster asset (see BYTECODE.md "assets"). */
+typedef struct {
+  uint16_t key_const; /* constant index of the string key */
+  uint16_t w, h;
+  const uint32_t *pixels; /* w*h ARGB8888, borrowed from the blob */
+} moth_asset_rec;
+
 /* ---- heap objects ------------------------------------------------------ */
 
 typedef enum { OBJ_STRING, OBJ_LIST, OBJ_INSTANCE, OBJ_CLOSURE } obj_type;
@@ -265,6 +272,10 @@ struct moth_vm {
   uint16_t k_length, k_add, k_remove_last, k_clear;
   uint16_t entry;
   uint16_t init; /* MOTH_NO_INIT when the program has no top-level initializers */
+  /* embedded raster assets — pixels point INTO the blob (4-byte aligned by
+   * the writer), so on a flash-mapped blob an image costs no RAM at all */
+  moth_asset_rec *assets;
+  uint16_t nassets;
   bool loaded;
 
   moth_value stack[MOTH_STACK_MAX];

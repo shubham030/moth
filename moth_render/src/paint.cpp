@@ -1,10 +1,8 @@
 /* Software rasterizer over s.framebuffer: flat fills, rounded rects and arcs
- * with signed-distance antialiasing, 4bpp alpha text. Painting is clamped to
- * the damage band mr_commit computed — y through clip_y0/clip_y1; x is not
- * clipped, which is why damage is tracked as full-width row bands.
- *
- * TODO(R2): slider/switch composite rendering (track + knob from VALUE).
- * TODO: MR_NODE_IMAGE is in the contract but not painted yet.
+ * with signed-distance antialiasing, 4bpp alpha text, and asset blits for
+ * image nodes. Painting is clamped to the damage band mr_commit computed —
+ * y through clip_y0/clip_y1; x is not clipped, which is why damage is
+ * tracked as full-width row bands.
  */
 #include "scene_internal.hpp"
 
@@ -409,6 +407,49 @@ void slider_geometry(const Node &n, float *x0, float *x1, float *radius) {
   *x1 = n.x + n.w - r;
 }
 
+/* Blits a registered asset into the node's box: 1:1 when the box matches
+ * the pixels, nearest-neighbour scaled when it doesn't, alpha-blended per
+ * pixel, and radius-clipped with the same antialiased coverage rounded
+ * rects use. A key with no registration draws nothing — a commit can run
+ * before the host has registered the program's assets, and a misspelled
+ * key must not paint garbage. */
+static void draw_image(Scene &s, const Node &n, float opacity) {
+  if (opacity <= 0.0f || n.w <= 0.0f || n.h <= 0.0f) return;
+  const Asset *a = find_asset(s, n.image_src);
+  if (!a) return;
+  int x0 = std::max(0, (int)std::floor(n.x));
+  int y0 = std::max(s.clip_y0, (int)std::floor(n.y));
+  int x1 = std::min(s.cfg.width, (int)std::ceil(n.x + n.w));
+  int y1 = std::min(s.clip_y1, (int)std::ceil(n.y + n.h));
+  if (x1 <= x0 || y1 <= y0) return;
+  MR_PROF_PX(mr_prof_rect_px, (int64_t)(x1 - x0) * (y1 - y0));
+
+  const float radius = n.f[MR_PROP_RADIUS];
+  const float cx = n.x + n.w * 0.5f, cy = n.y + n.h * 0.5f;
+  const float sx = (float)a->w / n.w, sy = (float)a->h / n.h;
+  for (int y = y0; y < y1; y++) {
+    int sy_i = (int)(((float)y + 0.5f - n.y) * sy);
+    if (sy_i < 0) sy_i = 0;
+    if (sy_i >= a->h) sy_i = a->h - 1;
+    const uint32_t *srow = a->pixels + (size_t)sy_i * a->w;
+    uint32_t *row = s.framebuffer.data() + (size_t)y * s.cfg.width;
+    for (int x = x0; x < x1; x++) {
+      int sx_i = (int)(((float)x + 0.5f - n.x) * sx);
+      if (sx_i < 0) sx_i = 0;
+      if (sx_i >= a->w) sx_i = a->w - 1;
+      float op = opacity;
+      if (radius > 0.5f) {
+        float d = sd_round_rect((float)x + 0.5f, (float)y + 0.5f, cx, cy,
+                                n.w * 0.5f, n.h * 0.5f, radius);
+        float cov = clamp01(0.5f - d);
+        if (cov <= 0.0f) continue;
+        op *= cov;
+      }
+      row[x] = blend(row[x], srow[sx_i], op);
+    }
+  }
+}
+
 /* Track, filled portion, thumb — bg_color is the accent, per the contract's
  * single style slot for controls. A square with full corner radius is a
  * circle, so the thumb needs no new primitive. */
@@ -490,6 +531,10 @@ static void paint_node(Scene &s, mr_node_id id, float opacity,
     MR_PROF_START(t_arc);
     draw_arc(s, *n, opacity);
     MR_PROF_ADD(t_arc, mr_prof_arc_us);
+  } else if (n->kind == MR_NODE_IMAGE) {
+    MR_PROF_START(t_image);
+    draw_image(s, *n, opacity);
+    MR_PROF_ADD(t_image, mr_prof_rect_us);
   } else if (n->kind == MR_NODE_SLIDER) {
     /* Controls own their whole box; the generic background fill would
      * paint bg_color as a rectangle when it means the accent. */

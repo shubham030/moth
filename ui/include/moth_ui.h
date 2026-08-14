@@ -18,6 +18,12 @@ extern "C" {
  * the display fails at load on a board without one. */
 void moth_ui_register(moth_vm *vm);
 
+/* Hands the loaded program's embedded images to the renderer. Call after
+ * moth_load and after mr_reset on a swap — the renderer's registry died
+ * with the old program (its pixels lived in the freed blob), and the new
+ * program's images do not exist until this runs. */
+void moth_ui_register_assets(moth_vm *vm);
+
 /* Registers the ui* natives only, touching no shared state. For probe VMs:
  * verifying a pushed blob means loading it against the same native names,
  * and the full register on a throwaway VM was resetting the live program's

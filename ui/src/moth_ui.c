@@ -228,6 +228,19 @@ static moth_value n_ui_event_value(moth_vm *vm, int c, const moth_value *v, void
   return moth_double(g_events.last_value);
 }
 
+void moth_ui_register_assets(moth_vm *vm) {
+  const int n = moth_asset_count(vm);
+  for (int i = 0; i < n; i++) {
+    const char *key;
+    size_t key_len;
+    int w, h;
+    const uint32_t *pixels;
+    if (moth_asset_info(vm, i, &key, &key_len, &w, &h, &pixels)) {
+      mr_asset_set(key, key_len, w, h, pixels);
+    }
+  }
+}
+
 void moth_ui_register(moth_vm *vm) {
   g_events.head = 0;
   g_events.count = 0;

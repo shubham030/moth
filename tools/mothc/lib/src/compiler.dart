@@ -7,6 +7,8 @@ import 'package:analyzer/dart/ast/ast.dart';
 import 'package:analyzer/source/line_info.dart';
 import 'package:path/path.dart' as p;
 
+import 'package:image/image.dart' as img;
+
 import 'errors.dart';
 import 'function_compiler.dart';
 import 'opcodes.dart';
@@ -44,6 +46,12 @@ class Compiler {
   /// Top-level variables get one slot each, initialized before `main` runs.
   final Map<String, int> globalIndex = {};
   final List<(int, Expression)> globalInits = [];
+
+  /// Image paths seen as `Image('...')` literals, mapped to the offset of
+  /// their first use (for error reporting). The compiler embeds each file's
+  /// decoded pixels in the blob's assets section; the widget sets the same
+  /// literal as the node's asset key, which is what ties them together.
+  final Map<String, int> imageRefs = {};
 
   /// Classes, in declaration order. `classIndex` maps name to position.
   final Map<String, int> classIndex = {};
@@ -231,6 +239,7 @@ class Compiler {
       globalCount: globalIndex.length,
       init: init,
       classes: classes,
+      assets: _embedImages(),
     );
     return CompileResult(blob, lineInfo);
   }
@@ -347,6 +356,59 @@ class Compiler {
         ? <(String, Expression)>[]
         : effectiveFieldInits(superIdx);
     return [...inherited, ...classFieldInits[index]];
+  }
+
+  /// Decodes every `Image('...')` file into raw ARGB8888 for the blob's
+  /// assets section. Pixels are stored uncompressed — the board draws them
+  /// straight from mapped flash, so decode cost is paid here, once, and
+  /// never on-device. The price is size, so there is a budget with a
+  /// human-readable failure instead of a mysterious push rejection later.
+  List<AssetBlob> _embedImages() {
+    if (imageRefs.isEmpty) return const [];
+    final assets = <AssetBlob>[];
+    var total = 0;
+    for (final MapEntry(key: rel, value: offset) in imageRefs.entries) {
+      final file = File(p.join(p.dirname(p.absolute(path)), rel));
+      if (!file.existsSync()) {
+        throw CompileError("Image file not found: '$rel'", offset,
+            hint: 'the path is relative to ${p.basename(path)}');
+      }
+      final decoded = img.decodeImage(file.readAsBytesSync());
+      if (decoded == null) {
+        throw CompileError("cannot decode '$rel' as an image", offset,
+            hint: 'PNG and JPEG both work');
+      }
+      if (decoded.width > 2048 || decoded.height > 2048) {
+        throw CompileError(
+            "'$rel' is ${decoded.width}x${decoded.height} — the limit is "
+            '2048 on each side',
+            offset);
+      }
+      final w = decoded.width, h = decoded.height;
+      final px = Uint8List(w * h * 4);
+      var i = 0;
+      for (var y = 0; y < h; y++) {
+        for (var x = 0; x < w; x++) {
+          final c = decoded.getPixel(x, y);
+          // u32 ARGB little-endian on the wire: B, G, R, A.
+          px[i++] = c.b.toInt();
+          px[i++] = c.g.toInt();
+          px[i++] = c.r.toInt();
+          px[i++] = c.a.toInt();
+        }
+      }
+      total += px.length;
+      if (total > 512 * 1024) {
+        throw CompileError(
+            'embedded images total ${(total / 1024).round()}KB — the budget '
+            'is 512KB',
+            offset,
+            hint: 'pixels are stored raw (width x height x 4 bytes); resize '
+                'the image to what the panel actually shows');
+      }
+      assets.add(AssetBlob(constants.addString(rel), w, h, px));
+    }
+    return assets;
   }
 
   /// Turns `package:moth/widgets.dart` into a path on disk.
