@@ -270,19 +270,26 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len) {
       a->w = rd_u16(&r);
       a->h = rd_u16(&r);
       if (!r.ok) return fail(vm, MOTH_ERR_FORMAT, "truncated asset %u", i);
-      if (a->key_const >= vm->nconsts || vm->const_strs[a->key_const].len == 0) {
-        return fail(vm, MOTH_ERR_FORMAT, "asset %u: key is not a string constant", i);
-      }
+      /* The size clamp is load-bearing for overflow, not just sanity:
+       * 2048*2048*4 stays far inside 32-bit size_t, which is what makes
+       * the pixel bound below meaningful on the ESP32. It runs before the
+       * key check so a hostile size is refused without needing any valid
+       * constant to name. */
       if (a->w == 0 || a->h == 0 || a->w > 2048 || a->h > 2048) {
         return fail(vm, MOTH_ERR_FORMAT, "asset %u: %ux%u is not a sane size", i,
                     a->w, a->h);
+      }
+      if (a->key_const >= vm->nconsts || vm->const_strs[a->key_const].len == 0) {
+        return fail(vm, MOTH_ERR_FORMAT, "asset %u: key is not a string constant", i);
       }
       /* Pixels are 4-byte aligned FROM THE BLOB START (the writer pads),
        * so a host that maps or allocates the blob 4-aligned — both do —
        * can read u32s directly. */
       size_t off = (size_t)(r.p - blob);
       size_t pad = (4 - (off & 3)) & 3;
-      if (r.p + pad > r.end) return fail(vm, MOTH_ERR_FORMAT, "truncated asset %u", i);
+      if ((size_t)(r.end - r.p) < pad) {
+        return fail(vm, MOTH_ERR_FORMAT, "truncated asset %u", i);
+      }
       r.p += pad;
       size_t npix = (size_t)a->w * a->h;
       if ((size_t)(r.end - r.p) < npix * 4) {
