@@ -20,9 +20,11 @@ extern "C" {
  * and OP_CALL_VALUE, which a version-3 VM would reach at run time and trap on,
  * halfway through whatever the program had already done. Version 5 added a
  * kind byte to each class member, which changes the table's layout — an older
- * VM would misread every entry after the first. The check is exact, so an old
- * board refuses a new blob at load instead. */
-#define MOTH_BYTECODE_VERSION 5
+ * VM would misread every entry after the first. Version 6 added the assets
+ * section after `init`; an older VM would load such a blob and silently
+ * ignore its images. The check is exact, so an old board refuses a new blob
+ * at load instead. */
+#define MOTH_BYTECODE_VERSION 6
 
 #ifndef MOTH_STACK_MAX
 #define MOTH_STACK_MAX 256
@@ -102,6 +104,15 @@ moth_status moth_load(moth_vm *vm, const uint8_t *blob, size_t len);
 
 /* Runs the entry function to completion. */
 moth_status moth_run(moth_vm *vm);
+
+/* Embedded raster assets, for hosts to hand to a renderer after load. The
+ * key is NOT NUL-terminated (it borrows a constant-pool string) and pixels
+ * borrow the blob — both live exactly as long as the blob does, which is
+ * why a renderer must drop its registrations before a program swap frees
+ * the old blob. */
+int moth_asset_count(const moth_vm *vm);
+bool moth_asset_info(const moth_vm *vm, int i, const char **key,
+                     size_t *key_len, int *w, int *h, const uint32_t **pixels);
 
 /* Asks the running program to stop at the next instruction, returning
  * MOTH_HALTED from moth_run. Safe to call from a native — that is the point:

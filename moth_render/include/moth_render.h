@@ -6,6 +6,7 @@
 #define MOTH_RENDER_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -125,6 +126,15 @@ void mr_detach(mr_node_id child);
 void mr_set_f32(mr_node_id node, mr_prop prop, float v);
 void mr_set_u32(mr_node_id node, mr_prop prop, uint32_t v);
 void mr_set_str(mr_node_id node, mr_prop prop, const char *utf8);
+
+/* Registers (or replaces) a raster asset that `image` nodes reference by
+ * key via MR_PROP_IMAGE_SRC. Pixels are ARGB8888, row-major, and BORROWED —
+ * the caller keeps them alive until mr_reset/mr_shutdown clears the
+ * registry. Hosts call this after loading a program, from the program's own
+ * blob, so a swap can never leave a node pointing at freed pixels. The key
+ * need not be NUL-terminated. */
+void mr_asset_set(const char *key, size_t key_len, int w, int h,
+                  const uint32_t *pixels);
 
 /* ---- events ----------------------------------------------------------- */
 

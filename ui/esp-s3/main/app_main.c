@@ -524,6 +524,10 @@ static moth_status run_program(const program_src *p, moth_vm **vm_out) {
     ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
     return st;
   }
+  /* The program's embedded images: pixels are blitted straight from this
+   * blob — mapped flash for a stored program — so an image costs no RAM.
+   * mr_reset on a swap dropped the old program's registrations. */
+  moth_ui_register_assets(vm);
   ESP_LOGI(TAG, "running Dart UI");
   return moth_run(vm);
 }
