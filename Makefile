@@ -42,6 +42,7 @@ serial-test: deps
 render-test: vm
 	./build/moth_render/render_perf_test
 	./build/moth_render/render_controls_test
+	./build/moth_render/render_image_test
 	./build/vm/hmac_test
 	./build/vm/push_policy_test
 

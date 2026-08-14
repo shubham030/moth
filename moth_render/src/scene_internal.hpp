@@ -96,10 +96,21 @@ struct Anim {
   mr_easing easing = MR_EASE_LINEAR;
 };
 
+/* One registered raster asset. Pixels are BORROWED — they belong to the
+ * host's program blob and stay valid only while that program is loaded,
+ * which is why the registry dies with the Scene on mr_reset: a swap frees
+ * the old blob, and a surviving registration would be a dangling blit. */
+struct Asset {
+  std::string key;
+  int w = 0, h = 0;
+  const uint32_t *pixels = nullptr;
+};
+
 struct Scene {
   mr_config cfg{};
   std::vector<Node> nodes;     /* index == id; slot 0 unused */
   std::vector<Anim> anims;
+  std::vector<Asset> assets;
   uint32_t next_anim_id = 1;
   bool dirty = true;
 
@@ -179,6 +190,9 @@ bool arc_hit(const Node &n, float px, float py);
  * pixel, or the thumb lands beside the finger — which is why both read it
  * from one function. */
 void slider_geometry(const Node &n, float *x0, float *x1, float *radius);
+
+/* nullptr when no asset with that key is registered. */
+const Asset *find_asset(Scene &s, const std::string &key);
 
 /* layout.cpp — implements docs/BACKEND.md §4 against the node tree */
 void layout_run(Scene &s);

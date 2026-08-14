@@ -43,7 +43,7 @@ extern const uint8_t program_end[] asm("_binary_program_mothb_end");
 /* moth_render's MR_PROFILE clock, and its per-primitive accumulators. */
 int64_t mr_prof_now_us(void) { return esp_timer_get_time(); }
 extern int64_t mr_prof_layout_us, mr_prof_clear_us, mr_prof_rect_us,
-    mr_prof_arc_us, mr_prof_text_us;
+    mr_prof_arc_us, mr_prof_text_us, mr_prof_image_us;
 
 /* ---- boot microbench: what touching the damage band's pixels costs at all.
  * 177 rows is the band frame_bench damages, so these numbers subtract
@@ -323,7 +323,8 @@ static void on_frame(bool repainted, void *user) {
     extern int g_moth_ui_commits;
 
     static int64_t base_convert, base_push, base_commit;
-    static int64_t base_layout, base_clear, base_rect, base_arc, base_text;
+    static int64_t base_layout, base_clear, base_rect, base_arc, base_text,
+        base_image;
     static int base_commits;
     static int frames;
 
@@ -353,12 +354,13 @@ static void on_frame(bool repainted, void *user) {
         const int64_t rect = (mr_prof_rect_us - base_rect) / n;
         const int64_t arc = (mr_prof_arc_us - base_arc) / n;
         const int64_t text = (mr_prof_text_us - base_text) / n;
+        const int64_t image = (mr_prof_image_us - base_image) / n;
         const int64_t other = (g_moth_ui_commit_us - base_commit) / n - layout -
-                              clear - rect - arc - text;
+                              clear - rect - arc - text - image;
         ESP_LOGI("moth",
                  "SPLIT, us per repaint: layout %lld  clear %lld  rect %lld  "
-                 "arc %lld  text %lld  other %lld",
-                 layout, clear, rect, arc, text, other);
+                 "arc %lld  text %lld  image %lld  other %lld",
+                 layout, clear, rect, arc, text, image, other);
       }
       base_convert = panel_convert_us;
       base_push = panel_push_us;
@@ -368,6 +370,7 @@ static void on_frame(bool repainted, void *user) {
       base_rect = mr_prof_rect_us;
       base_arc = mr_prof_arc_us;
       base_text = mr_prof_text_us;
+      base_image = mr_prof_image_us;
       base_commits = g_moth_ui_commits;
     }
 #else
@@ -524,6 +527,10 @@ static moth_status run_program(const program_src *p, moth_vm **vm_out) {
     ESP_LOGE(TAG, "load failed (%d): %s", st, moth_error(vm));
     return st;
   }
+  /* The program's embedded images: pixels are blitted straight from this
+   * blob — mapped flash for a stored program — so an image costs no RAM.
+   * mr_reset on a swap dropped the old program's registrations. */
+  moth_ui_register_assets(vm);
   ESP_LOGI(TAG, "running Dart UI");
   return moth_run(vm);
 }

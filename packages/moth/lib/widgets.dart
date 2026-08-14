@@ -11,6 +11,7 @@
 
 final kBox = 0;
 final kLabel = 1;
+final kImage = 2;
 final kSlider = 3;
 final kSwitch = 4;
 final kArc = 5;
@@ -31,6 +32,7 @@ final propRadius = 12;
 final propBorderWidth = 13;
 final propBorderColor = 14;
 final propText = 16;
+final propImageSrc = 19;
 final propValue = 20;
 final propMin = 21;
 final propMax = 22;
@@ -675,6 +677,32 @@ class Switch extends Widget {
     uiSetInt(node, propBgColor, activeColor);
     uiSetNum(node, propWidth, width);
     uiSetNum(node, propHeight, height);
+  }
+}
+
+/// A raster image, embedded by the compiler.
+///
+/// The path must be a string literal relative to the program's main file —
+/// the board has no filesystem, so `mothc` decodes the file at compile time
+/// and ships the pixels inside the program. Sizing follows Flutter: the
+/// image's own pixels by default, scaled (nearest-neighbour) when width or
+/// height is given. [borderRadius] clips the corners.
+class Image extends Widget {
+  String src;
+  int width;
+  int height;
+  int borderRadius;
+
+  Image(this.src, {this.width = -1, this.height = -1, this.borderRadius = 0});
+
+  String typeName() => 'Image';
+  int kind() => kImage;
+
+  void apply(int node) {
+    uiSetText(node, propImageSrc, src);
+    uiSetNum(node, propWidth, width >= 0 ? width : -1);
+    uiSetNum(node, propHeight, height >= 0 ? height : -1);
+    uiSetNum(node, propRadius, borderRadius);
   }
 }
 

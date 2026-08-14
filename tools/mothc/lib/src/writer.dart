@@ -4,7 +4,16 @@ import 'dart:typed_data';
 /// Must match MOTH_BYTECODE_VERSION in vm/include/moth_vm.h. The loader
 /// compares exactly, so a mismatch is refused at load rather than trapping
 /// partway through the program.
-const int bytecodeVersion = 5;
+const int bytecodeVersion = 6;
+
+/// One embedded raster asset: a constant-pool key plus raw ARGB8888 pixels.
+class AssetBlob {
+  final int keyConst;
+  final int width;
+  final int height;
+  final Uint8List pixels; // width*height*4 bytes, ARGB rows top to bottom
+  AssetBlob(this.keyConst, this.width, this.height, this.pixels);
+}
 
 /// Sentinel for "this program has no top-level initializers to run".
 const int noInit = 0xFFFF;
@@ -90,6 +99,7 @@ Uint8List writeBlob({
   int globalCount = 0,
   int init = noInit,
   List<ClassBlob> classes = const [],
+  List<AssetBlob> assets = const [],
 }) {
   final out = BytesBuilder();
   void u8(int v) => out.addByte(v & 0xFF);
@@ -173,5 +183,20 @@ Uint8List writeBlob({
 
   u16(entry);
   u16(init);
+
+  // assets — pixel data is padded so it sits 4-byte aligned from the blob
+  // start, letting the VM hand out directly readable u32 pointers (on the
+  // board, straight out of mapped flash).
+  u16(assets.length);
+  for (final a in assets) {
+    u16(a.keyConst);
+    u16(a.width);
+    u16(a.height);
+    final pad = (4 - (out.length & 3)) & 3;
+    for (var i = 0; i < pad; i++) {
+      u8(0);
+    }
+    out.add(a.pixels);
+  }
   return out.toBytes();
 }
