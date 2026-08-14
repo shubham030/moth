@@ -129,13 +129,22 @@ void main() { var c = C()..log.add(1); print(c.log); }
     // Accepted, it compiled to a method whose declared int quietly
     // evaluated to null — the analyzer/compiler agreement broken from the
     // other side.
-    final out = compile('''
+    for (final member in [
+      'external int foo(int a);',
+      'external int get x;',
+      'external set x(int v);',
+      'external int x;',
+      'external A();',
+    ]) {
+      final out = compile('''
 class A {
-  external int foo(int a);
+  $member
 }
-void main() { print(A().foo(3)); }
+void main() { print(A()); }
 ''');
-    expect(out, contains('cannot be external'));
+      expect(out, contains('cannot be external'),
+          reason: 'a class with "$member" must be refused');
+    }
   });
 
   test('a closure capturing an enclosing local is refused, with the idiom', () {
