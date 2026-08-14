@@ -185,7 +185,10 @@ Desktop-first; no Dart dependency until the framework exists.
       antialiasing, and antialiased bitmap text with real metrics and
       wrapping (tools/fontgen generates the faces)
 - [ ] R2b — ThorVG: scalable text at any size (faces are fixed sizes today),
-      gradients, images
+      gradients, and true vector images (SVG rendered on device, crisp at
+      any scale — compile-time SVG rasterization in mothc is the cheaper
+      interim if wanted, but needs a rasterizer Dart does not have or an
+      optional system tool)
 - [x] R3 — Damage tracking: repaint only the rows that changed.
 
       **Measured on an ESP32-S3 at 466x466**, `examples/ui/frame_bench.dart`
@@ -279,6 +282,10 @@ Desktop-first; no Dart dependency until the framework exists.
 Deliberately out of v0.x scope — meaty, self-contained problems for contributors:
 
 - `async`/`await` lowering onto the event loop
+- Network images (`Image.network`) — gated on the event loop and Dart
+  networking above, plus an on-device PNG decoder and PSRAM for decoded
+  pixels; today decode deliberately happens at compile time so the board
+  never pays for it. Until then, hot-push re-embeds new images in ~300ms
 - Stateful in-place hot reload (preserve State across pushes)
 - Virtualized ListView (recycle nodes for long scrolling lists)
 - Local-variable capture in closures (boxed cells or upvalues)
