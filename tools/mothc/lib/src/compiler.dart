@@ -587,20 +587,26 @@ class Compiler {
       }
       final slots = <(String, int)>[];
       for (final member in decl.members) {
+        // Only top-level functions may be external (that is where the
+        // built-ins are declared). An external MEMBER of any kind — method,
+        // getter, setter, field, constructor — has no built-in to resolve
+        // to and no body to compile; accepting one produced a member whose
+        // declared int quietly evaluated to null. The three declaration
+        // shapes put the keyword in three places, so each is checked.
+        final externalKw = switch (member) {
+          MethodDeclaration m => m.externalKeyword,
+          FieldDeclaration f => f.externalKeyword,
+          ConstructorDeclaration c => c.externalKeyword,
+        };
+        if (externalKw != null) {
+          throw CompileError(
+            'class members cannot be external — only top-level built-ins are',
+            member.offset,
+            hint: 'a member needs a body; the host has nothing to supply '
+                'for it',
+          );
+        }
         if (member is MethodDeclaration) {
-          // Only top-level functions may be external (that is where the
-          // built-ins are declared). An external METHOD has no built-in to
-          // resolve to and no body to compile — accepting it produced a
-          // method whose declared int quietly evaluated to null.
-          if (member.externalKeyword != null) {
-            throw CompileError(
-              "'${member.name.lexeme}' cannot be external — only top-level "
-              'built-ins are',
-              member.offset,
-              hint: 'a method needs a body; the host has nothing to supply '
-                  'for it',
-            );
-          }
           final key = _memberKey(member);
           if (member.isGetter) _getterKeys.add(key);
           slots.add((key, next++));

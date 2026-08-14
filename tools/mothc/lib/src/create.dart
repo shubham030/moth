@@ -188,7 +188,11 @@ const vscodeTasksTemplate = r'''
 /// human message when the target cannot be used — for every failure shape,
 /// because this is the first command a beginner runs and a raw Dart stack
 /// trace is not a first impression.
-void createProject(String dir) {
+///
+/// Returns true when the pubspec's moth dependency points at a real
+/// checkout — false means the placeholder was written and the CLI should
+/// say so instead of promising resolution.
+bool createProject(String dir) {
   // Directory.existsSync() is false for a regular FILE at the path, which
   // would skip the guard and let createSync throw ENOTDIR — and "I typed a
   // filename instead of a directory name" is exactly the mistake this
@@ -232,6 +236,7 @@ void createProject(String dir) {
       written.add(f);
       f.writeAsStringSync(content);
     }
+    return _findMothPackage() != null;
   } on FileSystemException catch (e) {
     for (final f in written) {
       try {
