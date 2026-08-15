@@ -80,10 +80,11 @@ const readmeTemplate = '''
 A [moth](https://github.com/shubham030/moth) app — Dart and Flutter's
 programming model, running on a \$6 microcontroller.
 
-Everything you write lives in `app.dart`. The `pubspec.yaml` beside it is
-for your editor's benefit — mothc resolves `package:moth` by itself and
-never reads it, but the Dart analyser needs it to offer autocomplete and
-flag mistakes as you type.
+Everything you write lives in `app.dart`. Keep the `pubspec.yaml` beside
+it: it is how `package:moth` gets resolved — by your editor for
+autocomplete and error-checking, and by the compiler itself whenever you
+are outside a moth checkout (`pub get` writes the package config mothc
+reads).
 
 ## Run it
 

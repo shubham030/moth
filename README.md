@@ -42,9 +42,8 @@ change to the board over the USB cable takes one command and well under a
 second, no reflash. See [ROADMAP](docs/ROADMAP.md).
 
 This is what that feels like — one unedited take: `moth run`, a device
-picker because two boards are plugged in (the launch push prints its
-174 ms on screen), a color edit in the editor, and `r` — the panel is
-orange before the logs settle:
+picker because two boards are plugged in, a color edit in the editor,
+and `r` — the panel is orange before the logs settle:
 
 ![moth run on a real board: edit Dart, press r, the display changes](docs/img/moth-run.gif)
 
@@ -55,7 +54,7 @@ pushed over the same running session:
 ![a slider and switch tracking a finger on the round panel](docs/img/moth-touch.gif)
 
 Run the clips yourself from a checkout: the first is
-[`examples/ui/hello.dart`](examples/ui/hello.dart) (also exactly what
+[`examples/ui/hello.dart`](examples/ui/hello.dart) (the same program
 `mothc create` scaffolds), the second `examples/ui/controls.dart` —
 `moth run <file>` picks up a connected board, or opens the desktop
 simulator if there is none.
