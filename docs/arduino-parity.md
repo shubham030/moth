@@ -57,17 +57,53 @@ On ESP32 `analogWrite` and `tone` are backed by LEDC hardware PWM, and
 | device probe | `i2cPing(addr)` → `bool` | `i2c_scan` on hardware |
 | register write | `i2cWriteReg(addr, reg, value)` → `bool` | `peripherals` |
 | register read | `i2cReadReg(addr, reg)` → `int` (−1 = no answer) | `peripherals` |
+| `Wire.requestFrom(n)` | `i2cReadBytes(addr, reg, n)` → `List<int>` (empty = no answer) | `hw_parity` |
+| bulk register write | `i2cWriteBytes(addr, reg, bytes)` → `bool` | `hw_parity` |
 | `Serial1.begin(baud)` | `uartBegin(port, tx, rx, baud)` | `peripherals` |
 | `Serial1.write(b)` | `uartWrite(port, byte)` | `peripherals` |
 | `Serial1.available()` | `uartAvailable(port)` → `int` | `peripherals` |
 | `Serial1.read()` | `uartRead(port)` → `int` (−1 = empty) | `peripherals` |
 
 Single-register I2C access covers the majority of sensors and needs no heap,
-which is why it lands in v1. Multi-byte transfers arrive with lists.
+which is why it landed first. Multi-byte transfers arrived with lists, and they
+matter for more than convenience: a sensor that spreads one reading across
+several registers keeps updating between single-register reads, so fetching
+them one at a time can hand you half of one measurement and half of the next.
+`i2cReadBytes` is one transaction. It reports failure by returning an **empty
+list** rather than a sentinel — once every byte in the result is a legal value,
+there is no −1 left to spare. `n` is clamped to 1..64 by the host.
 
 Verified on hardware: `examples/i2c_scan.dart` finds all eight devices on a
 Waveshare ESP32-S3-Touch-AMOLED board (0x18, 0x20, 0x34, 0x40, 0x50, 0x51,
 0x5A, 0x6B).
+
+## Storage — done
+
+| Arduino | moth | Test |
+| --- | --- | --- |
+| `EEPROM.read(addr)` | `prefsGetInt(key, fallback)` → `int` | `hw_parity` |
+| `EEPROM.write(addr, v)` | `prefsSetInt(key, value)` → `bool` | `hw_parity` |
+
+Arduino addresses EEPROM by byte offset, so every program that uses it also
+keeps a private map of which byte means what — and two programs sharing a board
+can silently overwrite each other. moth stores *named* ints instead: NVS flash
+on a board, memory in the simulator, so a program that remembers something
+still runs on a desk. Keys are 1 to 15 characters; that limit is NVS's, not a
+choice made here, and an over-long key reads back as the fallback rather than
+failing.
+
+## Servo — done
+
+| Arduino | moth | Test |
+| --- | --- | --- |
+| `servo.attach(pin)` | `servoAttach(pin)` | `hw_parity` |
+| `servo.writeMicroseconds(us)` | `servoMicroseconds(pin, us)` → clamped 500..2500 | `hw_parity` |
+| `servo.write(degrees)` | `Servo(pin).write(degrees)` | `hw_parity` |
+
+A servo is never actually told an angle — it is told a pulse width, repeated at
+50Hz, and holds whatever position that width means to *it*. So the pulse width
+is the native, and the 0..180 mapping is ordinary arithmetic in `package:moth`
+where you can read it and disagree with it.
 
 ## Randomness and math — done
 
@@ -96,14 +132,19 @@ int map(int v, int inMin, int inMax, int outMin, int outMax) {
 
 The language blockers are gone: strings, lists, classes, closures and the
 garbage collector all shipped with M1b, so `print('text $value')`, list
-literals and custom classes work today. What remains is event plumbing and
-library work:
+literals and custom classes work today. Lists also unblocked the last of the
+library work — bulk I2C, storage and servos are above. Two things are left:
 
 | Arduino | moth status | Blocked on |
 | --- | --- | --- |
 | `attachInterrupt(pin, fn, mode)` | ❌ | interrupts + event loop |
-| `Wire.requestFrom(n)` | ❌ | I2C bulk-read library work |
-| `Servo`, `EEPROM`, `SPI` | ❌ | library work |
+| `SPI` | ❌ | no board to verify it on — see below |
+
+`SPI` is not waiting on the language, and saying so plainly is the point of
+this page. On the board this project verifies against, the SPI bus belongs to
+the display controller, so an `SPI` API could be written but not run against
+real hardware. A ✅ nobody can check is worse than a ❌ — it lands when there is
+a board to prove it on.
 
 ## The API you should actually write
 
@@ -126,6 +167,23 @@ final sensor = I2cDevice(bus, 0x5a);
 if (sensor.isPresent) {
   sensor.write(0x01, 200);
 }
+
+// One reading spread over six registers, fetched in one transaction.
+final raw = sensor.readBytes(0x02, 6);
+if (raw.length == 0) {
+  print('sensor did not answer');
+} else {
+  print(raw[0] * 256 + raw[1]);
+}
+
+// Settings that are still there after a power cut.
+final prefs = Prefs();
+final volume = prefs.getInt('volume', 20);
+prefs.setInt('volume', volume + 1);
+
+final arm = Servo(5);
+arm.write(90);                // degrees, mapped onto 1000..2000us
+arm.writeMicroseconds(1500);  // or the pulse width itself, when it matters
 ```
 
 Real objects you can pass around and test — the same reason MicroPython gives
