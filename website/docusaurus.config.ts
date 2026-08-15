@@ -13,7 +13,8 @@ const config: Config = {
   projectName: 'moth',
   trailingSlash: false,
 
-  onBrokenLinks: 'warn',
+  onBrokenLinks: 'throw',
+  onBrokenAnchors: 'throw',
 
   i18n: {defaultLocale: 'en', locales: ['en']},
 
@@ -32,7 +33,10 @@ const config: Config = {
           path: '../docs',
           routeBasePath: 'docs',
           sidebarPath: './sidebars.ts',
-          editUrl: 'https://github.com/shubham030/moth/tree/main/',
+          // PERF_REVIEW is the internal render-review checklist, not a doc.
+          exclude: ['PERF_REVIEW.md'],
+          editUrl: ({docPath}) =>
+            `https://github.com/shubham030/moth/tree/main/docs/${docPath}`,
         },
         blog: false,
         theme: {customCss: './src/css/custom.css'},
@@ -49,7 +53,7 @@ const config: Config = {
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
         {to: '/docs/getting-started', label: 'Get started', position: 'left'},
-        {to: '/docs/arduino-parity', label: 'Capabilities', position: 'left'},
+        {to: '/docs/arduino-parity', label: 'Hardware', position: 'left'},
         {
           href: 'https://github.com/shubham030/moth',
           label: 'GitHub',
@@ -71,7 +75,7 @@ const config: Config = {
         {
           title: 'Reference',
           items: [
-            {label: 'Hardware capabilities', to: '/docs/arduino-parity'},
+            {label: 'Hardware', to: '/docs/arduino-parity'},
             {label: 'How it works', to: '/docs/how-it-works'},
             {label: 'Bytecode format', to: '/docs/bytecode'},
           ],
@@ -86,7 +90,7 @@ const config: Config = {
         },
       ],
       copyright:
-        'moth is MIT licensed. The API is unstable until v0.1 — build things, expect changes.',
+        'moth is MIT licensed. v0.1 — the API will still move; pin your version.',
     },
     prism: {
       theme: prismThemes.github,

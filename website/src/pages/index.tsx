@@ -17,15 +17,13 @@ const BLINK = `void main() {
   }
 }`;
 
-const TRACE = `$ mothc blink.dart
-wrote blink.mothb (138 bytes)
+const TRACE = `$ dart pub global activate mothc
+$ moth run blink.dart
+Launching blink.dart on /dev/cu.usbmodem21201
 
-$ mothrun blink.mothb --stop-after 2000
-[     0ms] pin 38 -> output
-[     0ms] pin 38 = HIGH
-[   500ms] pin 38 = low
-[  1000ms] pin 38 = HIGH
-[  1500ms] pin 38 = low`;
+pushed in 174ms
+r  hot restart (recompile + push; state resets)
+h  this help   q  quit`;
 
 function Pane({
   label,
@@ -72,7 +70,7 @@ function Hero() {
             </Link>
             <Link
               className="button button--secondary button--lg"
-              to="/docs/arduino-parity">
+              to="/docs/roadmap">
               What works today
             </Link>
           </div>
@@ -85,7 +83,7 @@ function Hero() {
           <Pane label="blink.dart" language="dart" dotColor="#7aa2f7">
             {BLINK}
           </Pane>
-          <Pane label="your terminal — no hardware attached" language="bash" dotColor="#9ece6a">
+          <Pane label="your terminal — with no board it opens the simulator" language="bash" dotColor="#9ece6a">
             {TRACE}
           </Pane>
         </div>
@@ -108,12 +106,12 @@ const FEATURES = [
   {
     icon: '🔌',
     title: 'Arduino parity',
-    body: 'digitalWrite, analogRead, PWM, tone, millis, I2C, UART — the names match Arduino, so any tutorial translates line for line.',
+    body: 'digitalWrite, analogRead, PWM, tone, millis, servos, I2C with bulk reads, UART, and preferences that survive a reboot — the names match Arduino, so any tutorial translates line for line.',
   },
   {
     icon: '📦',
-    title: 'Programs are 138 bytes',
-    body: 'Your app is bytecode, not a firmware image. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
+    title: 'A program, not a firmware image',
+    body: 'Blink is 138 bytes of bytecode. Push a change over the USB cable and it is on the screen in well under a second — no reflashing. Paired WiFi pushes add ~2s deriving the pairing key (or cache it in MOTH_PUSH_KEY).',
   },
 ];
 
@@ -140,23 +138,53 @@ function Features() {
   );
 }
 
+function Demo() {
+  const run = useBaseUrl('video/moth-run.mp4');
+  const touch = useBaseUrl('video/moth-touch.mp4');
+  const videoStyle = {width: '100%', borderRadius: 12, display: 'block'};
+  return (
+    <section className="section">
+      <div className="container">
+        <h2 className="sectionTitle">See it run</h2>
+        <p className="sectionLede">
+          One unedited take: <code>moth run</code>, a device picker because two
+          boards are plugged in, a color edit in the editor, and <code>r</code> —
+          the panel is orange before the logs settle.
+        </p>
+        <video style={videoStyle} src={run} autoPlay loop muted playsInline />
+        <p className="sectionLede" style={{marginTop: '2rem'}}>
+          Touch is renderer-owned, so controls track a finger without the VM in
+          the frame loop — a slider and a switch from{' '}
+          <code>examples/ui/controls.dart</code>, pushed over the same running
+          session:
+        </p>
+        <video style={videoStyle} src={touch} autoPlay loop muted playsInline />
+      </div>
+    </section>
+  );
+}
+
 function Status() {
   return (
-    <section className="section sectionAlt">
+    <section className="section sectionAlt" id="status">
       <div className="container">
         <h2 className="sectionTitle">Honest status</h2>
         <p className="sectionLede">
-          moth is early. Everything in the left column has an executable test
-          behind it; everything on the right is genuinely not built yet.
+          moth is early. Everything in the left column either runs in CI or was
+          measured on the board; everything on the right is genuinely not built
+          yet.
         </p>
         <div className="statusGrid">
           <div className="statusCol">
             <h3>Working today</h3>
             <ul className="statusList">
               <li className="tick">Strings, lists, classes, closures, garbage collection</li>
-              <li className="tick">Flutter-named widgets, setState, sliders, switches, and embedded images — 38fps on a round AMOLED</li>
+              <li className="tick">Flutter-named widgets, setState, sliders, switches, and embedded images — 38fps at 466x466, measured on the board</li>
+              <li className="tick"><code>moth run</code> — picks up a connected board (or opens the simulator), streams its console, and <code>r</code> hot-restarts in ~173ms</li>
+              <li className="tick"><code>moth create</code> scaffolds a project your editor understands — autocomplete and error-checking on every built-in</li>
               <li className="tick">Hot push over the USB cable or paired WiFi — no reflashing</li>
-              <li className="tick">Digital and analog I/O, PWM, tone, I2C, UART</li>
+              <li className="tick">Digital and analog I/O, PWM, tone, servos, I2C with bulk reads and writes, UART, NVS-backed preferences</li>
+              <li className="tick">Installs from pub: <code>dart pub global activate mothc</code></li>
               <li className="tick">Desktop simulator, golden tests, paint-cost budgets</li>
               <li className="tick">ESP32-S3 with the Waveshare 1.75&quot; round AMOLED — the verified board</li>
             </ul>
@@ -165,10 +193,12 @@ function Status() {
             <h3>Not yet</h3>
             <ul className="statusList">
               <li className="pending">Interrupts and async</li>
-              <li className="pending">Enums, local captures, method tear-offs</li>
+              <li className="pending">SPI</li>
+              <li className="pending">Enums, mixins, extensions, and capturing locals in closures</li>
               <li className="pending">Scalable text and gradients</li>
-              <li className="pending">State-preserving hot reload (push restarts the program)</li>
-              <li className="pending">Boards beyond the one above (ESP32-P4 builds, unverified)</li>
+              <li className="pending">Network and vector images — <code>Image</code> embeds PNG/JPEG at compile time only</li>
+              <li className="pending">State-preserving hot reload — <code>r</code> is a hot restart (~173ms) and your state resets</li>
+              <li className="pending">Boards beyond the one above — other ESP-IDF targets are ports, not rewrites, but none is built or verified</li>
             </ul>
           </div>
         </div>
@@ -183,8 +213,9 @@ function Closer() {
       <div className="container" style={{textAlign: 'center'}}>
         <h2 className="sectionTitle">Blink something in five minutes</h2>
         <p className="sectionLede">
-          Clone it, build the VM, and run a program — the first three steps need
-          no board at all.
+          <code>dart pub global activate mothc</code>, then{' '}
+          <code>moth create</code> and <code>moth run</code> — a board is
+          optional; without one it opens the simulator.
         </p>
         <div className="heroButtons">
           <Link className="button button--primary button--lg" to="/docs/getting-started">
@@ -208,6 +239,7 @@ export default function Home(): ReactNode {
       <Hero />
       <main>
         <Features />
+        <Demo />
         <Status />
         <Closer />
       </main>

@@ -12,13 +12,13 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Understand',
       collapsed: false,
-      items: ['how-it-works', 'ARCHITECTURE', 'BYTECODE', 'BACKEND'],
+      items: ['how-it-works', 'lvgl-comparison', 'ARCHITECTURE', 'BYTECODE', 'BACKEND'],
     },
     {
       type: 'category',
       label: 'Project',
       collapsed: false,
-      items: ['ROADMAP', 'PRIOR-ART', 'DECISIONS'],
+      items: ['ROADMAP', 'PRIOR-ART', 'DECISIONS', 'release-notes-v0.1.0'],
     },
   ],
 };

@@ -1,43 +1,31 @@
-# Website
+# moth website
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+The Docusaurus site behind [the moth docs](https://shubham030.github.io/moth/).
 
-## Installation
+The one surprising thing about this setup: **the docs source lives in
+`../docs`, not in `website/docs`** — the site serves the repo's `docs/`
+directory directly (`docusaurus.config.ts`, `path: '../docs'`), so a doc fix
+in the repo is a site fix with no copying. `PERF_REVIEW.md` is excluded — it
+is the internal render-review checklist, not a doc.
 
-```bash
+## Working on it
+
+```
 npm install
+npm start        # local dev server with hot reload
+npm run build    # what CI runs; broken links and anchors fail the build
 ```
 
-**Note**: feel free to use the package manager of your choice.
+CI builds the site on every PR (the `docs` job in
+`.github/workflows/ci.yml`), so a stale link fails before it merges.
 
-## Local Development
+## Publishing
 
-```bash
-npm run start
+There is no automated deploy yet. To publish by hand to GitHub Pages:
+
+```
+GIT_USER=<your-github-username> npm run deploy
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
-
-## Build
-
-```bash
-npm run build
-```
-
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
-
-## Deployment
-
-Using SSH:
-
-```bash
-USE_SSH=true npm run deploy
-```
-
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> npm run deploy
-```
-
-If you are using GitHub Pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+which builds and pushes to the `gh-pages` branch. The served URL and base
+path are set in `docusaurus.config.ts` (`url` + `baseUrl`).

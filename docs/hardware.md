@@ -1,3 +1,8 @@
+---
+title: Hardware
+slug: /hardware
+---
+
 # Hardware
 
 ```dart
