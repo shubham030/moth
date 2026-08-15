@@ -22,18 +22,13 @@ import 'package:path/path.dart' as p;
 const appTemplate = '''
 // A moth app: Flutter's programming model on a microcontroller.
 //
-// Run it in a desktop window (from a moth checkout):
+// Run it:
 //
-//   make ui F=%NAME%/app.dart
+//   moth run
 //
-// Push it to a board over the USB cable — the display updates in under a
-// second, no reflashing:
-//
-//   mothc app.dart --push /dev/cu.usbmodemXXXX
-//
-// Or over WiFi once the board is provisioned (see docs/getting-started.md):
-//
-//   mothc app.dart --push 192.168.x.x:7621 --token
+// A connected board is picked up automatically (the simulator if there is
+// none); press r after an edit and the display updates in well under a
+// second — no reflashing. See docs/getting-started.md for WiFi pushes.
 
 import 'package:moth/widgets.dart';
 
@@ -90,22 +85,13 @@ for your editor's benefit — mothc resolves `package:moth` by itself and
 never reads it, but the Dart analyser needs it to offer autocomplete and
 flag mistakes as you type.
 
-## Check it as you type
-
-    mothc check app.dart
-
-moth runs a subset of Dart, and the compiler is what knows the difference.
-In VS Code this is the default build task (Cmd/Ctrl-Shift-B).
-
 ## Run it
 
-In a desktop window (from a moth checkout):
+    moth run
 
-    make ui F=path/to/%NAME%/app.dart
-
-On a board over the USB cable:
-
-    mothc app.dart --push /dev/cu.usbmodemXXXX
+A connected board is picked up automatically; with no board it opens the
+desktop simulator. While it runs, press `r` to push your latest edit to the
+display — a hot restart, well under a second, no reflashing.
 
 Over WiFi, once the board is provisioned with `tools/provision`:
 
@@ -113,6 +99,13 @@ Over WiFi, once the board is provisioned with `tools/provision`:
 
 `--token` asks for the board's pairing phrase. Serial pushes never need it —
 the cable is the pairing.
+
+## Check it as you type
+
+    moth check app.dart
+
+moth runs a subset of Dart, and the compiler is what knows the difference.
+In VS Code this is the default build task (Cmd/Ctrl-Shift-B).
 ''';
 
 const gitignoreTemplate = '''
