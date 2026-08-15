@@ -1,10 +1,21 @@
 name: mothc
-description: Compiles a Dart subset to moth bytecode for microcontrollers.
+description: >-
+  Compiles a Dart subset to moth bytecode for microcontrollers, scaffolds
+  projects, and hot-pushes programs to a running board over USB or WiFi.
 version: 0.1.0
-publish_to: none
+homepage: https://github.com/shubham030/moth
+repository: https://github.com/shubham030/moth
+issue_tracker: https://github.com/shubham030/moth/issues
 
 environment:
   sdk: ^3.6.0
+
+executables:
+  # One tool, two names: `moth` is the friendly entry (moth run, moth
+  # create — reads like flutter run); `mothc` keeps every existing doc and
+  # script true. Same binary.
+  moth: mothc
+  mothc:
 
 dependencies:
   analyzer: ^7.0.0

@@ -22,18 +22,13 @@ import 'package:path/path.dart' as p;
 const appTemplate = '''
 // A moth app: Flutter's programming model on a microcontroller.
 //
-// Run it in a desktop window (from a moth checkout):
+// Run it:
 //
-//   make ui F=%NAME%/app.dart
+//   moth run
 //
-// Push it to a board over the USB cable — the display updates in under a
-// second, no reflashing:
-//
-//   mothc app.dart --push /dev/cu.usbmodemXXXX
-//
-// Or over WiFi once the board is provisioned (see docs/getting-started.md):
-//
-//   mothc app.dart --push 192.168.x.x:7621 --token
+// A connected board is picked up automatically (the simulator if there is
+// none); press r after an edit and the display updates in well under a
+// second — no reflashing. See docs/getting-started.md for WiFi pushes.
 
 import 'package:moth/widgets.dart';
 
@@ -85,27 +80,19 @@ const readmeTemplate = '''
 A [moth](https://github.com/shubham030/moth) app — Dart and Flutter's
 programming model, running on a \$6 microcontroller.
 
-Everything you write lives in `app.dart`. The `pubspec.yaml` beside it is
-for your editor's benefit — mothc resolves `package:moth` by itself and
-never reads it, but the Dart analyser needs it to offer autocomplete and
-flag mistakes as you type.
-
-## Check it as you type
-
-    mothc check app.dart
-
-moth runs a subset of Dart, and the compiler is what knows the difference.
-In VS Code this is the default build task (Cmd/Ctrl-Shift-B).
+Everything you write lives in `app.dart`. Keep the `pubspec.yaml` beside
+it: it is how `package:moth` gets resolved — by your editor for
+autocomplete and error-checking, and by the compiler itself whenever you
+are outside a moth checkout (`pub get` writes the package config mothc
+reads).
 
 ## Run it
 
-In a desktop window (from a moth checkout):
+    moth run
 
-    make ui F=path/to/%NAME%/app.dart
-
-On a board over the USB cable:
-
-    mothc app.dart --push /dev/cu.usbmodemXXXX
+A connected board is picked up automatically; with no board it opens the
+desktop simulator. While it runs, press `r` to push your latest edit to the
+display — a hot restart, well under a second, no reflashing.
 
 Over WiFi, once the board is provisioned with `tools/provision`:
 
@@ -113,6 +100,13 @@ Over WiFi, once the board is provisioned with `tools/provision`:
 
 `--token` asks for the board's pairing phrase. Serial pushes never need it —
 the cable is the pairing.
+
+## Check it as you type
+
+    moth check app.dart
+
+moth runs a subset of Dart, and the compiler is what knows the difference.
+In VS Code this is the default build task (Cmd/Ctrl-Shift-B).
 ''';
 
 const gitignoreTemplate = '''
@@ -274,17 +268,11 @@ String _pubName(String dirName) {
 /// will want once moth is published.
 String _mothDependency(String projectDir) {
   final found = _findMothPackage();
-  if (found == null) {
-    // No hosted fallback on purpose: package:moth is not on pub.dev, so
-    // `moth: ^0.1.0` would either fail pub get today or — worse — resolve
-    // to whoever claims the name first. mothc itself needs no pubspec, so
-    // the project still compiles; the editor just needs the path filled in.
-    return '''
-  # moth is not yet on pub.dev. Point this at your moth checkout so your
-  # editor can resolve the import (mothc compiles fine without it):
-  # moth:
-  #   path: /path/to/moth/packages/moth''';
-  }
+  // A pub-global mothc has no checkout beside it; the hosted package is
+  // the published one and pub verifies its integrity. Inside a checkout
+  // the path dependency wins, so hacking on package:moth is reflected
+  // immediately.
+  if (found == null) return '  moth: ^0.1.0';
   // Relative when the project sits near the checkout, so moving the pair
   // together keeps working. A project created somewhere unrelated would
   // otherwise get a ../../../../.. chain that is unreadable and no more

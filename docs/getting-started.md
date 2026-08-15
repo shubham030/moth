@@ -11,8 +11,19 @@ board, because the loop is faster.
 
 ## 1. Install
 
-You need the [Dart SDK](https://dart.dev/get-dart) (3.6+) for the compiler and
-CMake plus a C compiler for the VM.
+The quickest taste needs only the [Dart SDK](https://dart.dev/get-dart)
+(3.6+):
+
+```console
+$ dart pub global activate mothc
+$ mothc create hello && cd hello
+```
+
+That project opens in any Dart-aware editor with autocomplete working, and
+compiles with `mothc app.dart`. To *run* what you compile — the desktop
+simulator, the golden tests, or a board — clone the repository; the VM and
+renderer are C and build in a minute. You also need CMake plus a C
+compiler for that:
 
 ```console
 $ brew install dart-sdk cmake      # macOS; use your package manager elsewhere
@@ -131,7 +142,7 @@ streaming your program's output:
 $ mothc run app.dart
 Launching app.dart on /dev/cu.usbmodem2101
 
-pushed in 162ms
+pushed in 178ms
 r  hot restart (recompile + push; state resets)   h  this help   q  quit
 ```
 
