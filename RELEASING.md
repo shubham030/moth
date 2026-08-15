@@ -12,8 +12,11 @@ fallback assumes `moth` on pub.dev is ours.
 3. **Dry-runs pass** — `dart pub publish --dry-run` in `packages/moth`
    and in `tools/mothc`; the only acceptable warning is uncommitted state
    before the release commit lands.
-4. **Publish `moth` first, then `mothc`** (mothc's README links the moth
-   package): `dart pub publish` in each directory. This claims both names.
+4. **Publish `moth` first, then `mothc`.** The order is load-bearing: the
+   moment `mothc` is installable, its scaffold writes `moth: ^0.1.0` into
+   every project it creates — that name must already be ours, or those
+   projects resolve to whoever claimed it. `dart pub publish` in each
+   directory.
 5. **Tag**: `git tag -a v0.1.0 -m "v0.1.0"` && `git push origin v0.1.0`.
    Create the GitHub release from the tag with the notes below.
 6. **Repo public** (first release only): GitHub → Settings → change

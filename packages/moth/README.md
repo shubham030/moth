@@ -33,8 +33,9 @@ go-to-definition all work, because every host function is declared
 
 moth runs a practical subset of Dart (no `async`, closures capture only
 `this`, generic annotations are erased). The compiler reports anything
-outside the subset with a source location and a hint; `mothc check
-app.dart` runs those checks on every save.
+outside the subset with a source location and a hint; `mothc check app.dart` is fast
+enough to run on every save — the scaffold wires it as the default VS Code
+build task (Ctrl/Cmd-Shift-B).
 
 Start at the [getting started guide](https://github.com/shubham030/moth/blob/main/docs/getting-started.md).
 `mothc create my_app` scaffolds a project with this package wired up.

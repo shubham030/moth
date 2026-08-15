@@ -10,5 +10,6 @@ First public release.
   (`--token`), programs persist across reboots.
 - `mothc create <dir>` — scaffold an editor-ready project.
 - `mothc check app.dart` — fast subset validation for on-save use.
-- `Image('logo.png')` embeds decoded pixels in the program; the board
-  blits them from flash with no filesystem and no RAM cost.
+- `Image('logo.png')` embeds decoded pixels in the program — no
+  filesystem needed; a stored program blits them straight from mapped
+  flash at no RAM cost.
