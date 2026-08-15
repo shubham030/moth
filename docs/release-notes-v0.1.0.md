@@ -14,9 +14,11 @@ renderer. No RTOS knowledge, no C, no second language.
 - **The widget layer**: 18 Flutter-named widgets reconciled against a
   native scene graph with row-band damage tracking — 38 fps at 466×466 on
   an ESP32-S3, measured by `make fps`, budget-tested in CI.
-- **Hot push**: `mothc app.dart --push` swaps the running program over USB
-  (~130–180 ms) or HMAC-paired WiFi. Verified before swap; persists across
-  reboots; three crashes fall back to the built-in program.
+- **The flutter-run loop**: `moth run` auto-selects your board, pushes,
+  and stays attached — `r` restarts your edited program on hardware in
+  ~150ms. Under it, hot push over USB or HMAC-paired WiFi: verified
+  before swap, persists across reboots, three crashes fall back to the
+  built-in program.
 - **Images**: `Image('logo.png')` decodes at compile time and blits from
   flash — no filesystem, no RAM cost.
 - **Editor support**: every built-in is declared with real signatures, so
@@ -24,12 +26,15 @@ renderer. No RTOS knowledge, no C, no second language.
   `mothc create` scaffolds a project that resolves out of the box;
   `mothc check` runs the subset rules on every save.
 - **Hardware API**: pins and buses as objects (`OutputPin`, `AnalogPin`,
-  `I2c`, `Uart`) over Arduino-named built-ins, simulated on the desktop so
-  programs test in CI without a board.
+  `I2c` with bulk reads, `Uart`, `Prefs`, `Servo`) over Arduino-named
+  built-ins — identical on the screen firmware and the headless one, and
+  simulated on the desktop so programs test in CI without a board. On the
+  verified board, sensors share the panel's I2C bus and just work.
 
 ## Honest limits
 
-No `async`/networking from Dart yet, no local-variable capture in
+No `async`/networking from Dart yet (and so no `attachInterrupt` — the
+polling idiom is documented), no SPI, no local-variable capture in
 closures, fixed-size bitmap fonts, one verified board (ESP32-S3 +
 Waveshare 1.75" round AMOLED — ESP32-P4 builds, unverified). Push
 pairing accepts replay of previously-pushed programs (ADR-010 records
@@ -38,6 +43,6 @@ why, and what v0.2 does about it). The API is unstable until 1.0.
 ## Install
 
     dart pub global activate mothc
-    mothc create hello
+    moth create hello && cd hello && moth run
 
 Full guide: docs/getting-started.md

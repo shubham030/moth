@@ -11,6 +11,10 @@ environment:
   sdk: ^3.6.0
 
 executables:
+  # One tool, two names: `moth` is the friendly entry (moth run, moth
+  # create — reads like flutter run); `mothc` keeps every existing doc and
+  # script true. Same binary.
+  moth: mothc
   mothc:
 
 dependencies:

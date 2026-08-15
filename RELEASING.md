@@ -22,8 +22,9 @@ fallback assumes `moth` on pub.dev is ours.
 6. **Repo public** (first release only): GitHub → Settings → change
    visibility. The docs site and README links assume the repo is readable.
 7. **Sanity loop, as a stranger**: `dart pub global activate mothc`,
-   `mothc create /tmp/hello`, open it in an editor (no red squiggles),
-   `mothc /tmp/hello/app.dart`.
+   `moth create /tmp/hello`, open it in an editor (no red squiggles),
+   then `moth run` in the project — the loop the README promises, under
+   the `moth` name specifically, since the alias only exists installed.
 
 Publishing uses the pub.dev account of whoever runs it; both packages
 should end up under the same publisher.
