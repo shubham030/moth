@@ -41,6 +41,23 @@ void main() {
     });
   });
 
+  group('parseDeviceChoice', () {
+    final devices = [board('/dev/a'), board('/dev/b'), sim()];
+
+    test('a 1-based index picks the listed device', () {
+      expect(parseDeviceChoice(devices, '1')?.id, '/dev/a');
+      expect(parseDeviceChoice(devices, ' 3 ')?.kind, DeviceKind.simulator);
+    });
+
+    test('out-of-range, junk and EOF re-prompt rather than crash', () {
+      expect(parseDeviceChoice(devices, '0'), isNull);
+      expect(parseDeviceChoice(devices, '4'), isNull);
+      expect(parseDeviceChoice(devices, 'sim'), isNull);
+      expect(parseDeviceChoice(devices, ''), isNull);
+      expect(parseDeviceChoice(devices, null), isNull);
+    });
+  });
+
   group('VerdictDisplayFilter', () {
     Uint8List verdict(String cc, int nonce) => Uint8List.fromList([
           ...cc.codeUnits,

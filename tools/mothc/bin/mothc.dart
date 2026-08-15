@@ -23,7 +23,8 @@ usage: moth run [app.dart] [-d DEVICE]     run on a board or the simulator,
                                            compile (and optionally push once)
 
   run picks the device the way flutter run does: -d wins, one connected
-  board auto-selects, otherwise the simulator when it is built. r is a hot
+  board auto-selects, several prompt you to choose, and the simulator is
+  the fallback when no board is attached. r is a hot
   RESTART — the program is recompiled and pushed in ~150ms and starts
   fresh; state-preserving reload is on the roadmap.
 
@@ -116,7 +117,16 @@ Future<void> main(List<String> args) async {
       exit(66);
     }
     final devices = discoverDevices();
-    final device = selectDevice(devices, deviceFlag);
+    var device = selectDevice(devices, deviceFlag);
+    // Ambiguity with no -d and a human at the keyboard becomes a choice,
+    // not an error — flutter run's behavior. An explicit -d that matches
+    // nothing stays an error: the user asked for something specific.
+    if (device == null &&
+        deviceFlag == null &&
+        devices.length > 1 &&
+        stdin.hasTerminal) {
+      device = promptForDevice(devices);
+    }
     if (device == null) {
       if (devices.isEmpty) {
         stderr.writeln('mothc: nothing to run on — connect a board, or '

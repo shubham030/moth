@@ -123,8 +123,9 @@ push command below works on it unchanged.
 ## Run it like Flutter
 
 `mothc run` is the loop you know from `flutter run`: it picks the device —
-one connected board auto-selects, otherwise the simulator — compiles,
-pushes, and stays attached streaming your program's output:
+one connected board auto-selects, several prompt you to choose, no board
+falls back to the simulator — compiles, pushes, and stays attached
+streaming your program's output:
 
 ```console
 $ mothc run app.dart
