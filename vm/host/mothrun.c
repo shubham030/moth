@@ -275,6 +275,116 @@ static moth_value n_i2c_read_reg(moth_vm *vm, int argc, const moth_value *argv, 
   return moth_int(v);
 }
 
+static moth_value n_i2c_read_bytes(moth_vm *vm, int argc, const moth_value *argv,
+                                   void *user) {
+  (void)argc; (void)user;
+  if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
+  int64_t addr = want_int(argv[0], "an I2C address");
+  int64_t reg = want_int(argv[1], "a register number");
+  int64_t n = want_int(argv[2], "a byte count");
+  if (n < 1) n = 1;
+  if (n > 64) n = 64;
+  moth_value list = moth_new_list(vm);
+  int slot = i2c_slot((uint8_t)addr);
+  if (slot < 0) return list; /* empty list means "no answer" */
+  for (int64_t i = 0; i < n; i++) {
+    moth_list_append(vm, list, moth_int(g_sim.i2c_regs[slot][(reg + i) & 0xFF]));
+  }
+  trace("i2c 0x%02" PRIx64 " read %" PRId64 " bytes from reg 0x%02" PRIx64, addr,
+        n, reg);
+  return list;
+}
+
+static moth_value n_i2c_write_bytes(moth_vm *vm, int argc, const moth_value *argv,
+                                    void *user) {
+  (void)vm; (void)argc; (void)user;
+  if (!g_sim.i2c_started) die("call i2cBegin(sda, scl) before using I2C");
+  int64_t addr = want_int(argv[0], "an I2C address");
+  int64_t reg = want_int(argv[1], "a register number");
+  if (!moth_is_list(argv[2])) die("i2cWriteBytes wants a List<int> of bytes");
+  int slot = i2c_slot((uint8_t)addr);
+  if (slot < 0) return moth_bool(false);
+  int count = moth_list_length(argv[2]);
+  for (int i = 0; i < count; i++) {
+    moth_value item = moth_list_at(argv[2], i);
+    g_sim.i2c_regs[slot][(reg + i) & 0xFF] =
+        (uint8_t)want_int(item, "a byte in the list");
+  }
+  trace("i2c 0x%02" PRIx64 " wrote %d bytes at reg 0x%02" PRIx64, addr, count, reg);
+  return moth_bool(true);
+}
+
+/* ---- prefs — in-memory here; NVS on a board -------------------------- */
+
+#define MAX_PREFS 64
+static struct { char key[16]; int64_t value; bool used; } g_prefs[MAX_PREFS];
+
+static int prefs_find(const char *key, size_t len) {
+  if (len == 0 || len > 15) return -2; /* NVS's own key limit */
+  for (int i = 0; i < MAX_PREFS; i++) {
+    if (g_prefs[i].used && strncmp(g_prefs[i].key, key, len) == 0 &&
+        g_prefs[i].key[len] == '\0') {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static moth_value n_prefs_get_int(moth_vm *vm, int argc, const moth_value *argv,
+                                  void *user) {
+  (void)vm; (void)argc; (void)user;
+  int len = 0;
+  const char *key = moth_string_chars(argv[0], &len);
+  if (!key) die("prefsGetInt wants a string key");
+  int slot = prefs_find(key, (size_t)len);
+  if (slot < 0) return argv[1]; /* absent or invalid key -> the fallback */
+  trace("prefs '%.*s' -> %" PRId64, len, key, g_prefs[slot].value);
+  return moth_int(g_prefs[slot].value);
+}
+
+static moth_value n_prefs_set_int(moth_vm *vm, int argc, const moth_value *argv,
+                                  void *user) {
+  (void)vm; (void)argc; (void)user;
+  int len = 0;
+  const char *key = moth_string_chars(argv[0], &len);
+  if (!key) die("prefsSetInt wants a string key");
+  if (len == 0 || len > 15) return moth_bool(false);
+  int64_t value = want_int(argv[1], "an int value");
+  int slot = prefs_find(key, (size_t)len);
+  if (slot == -1) {
+    for (int i = 0; i < MAX_PREFS; i++) {
+      if (!g_prefs[i].used) { slot = i; break; }
+    }
+    if (slot < 0) return moth_bool(false);
+    memcpy(g_prefs[slot].key, key, (size_t)len);
+    g_prefs[slot].key[len] = '\0';
+    g_prefs[slot].used = true;
+  }
+  g_prefs[slot].value = value;
+  trace("prefs '%.*s' = %" PRId64, len, key, value);
+  return moth_bool(true);
+}
+
+/* ---- servo — a trace here; 50Hz LEDC on a board ----------------------- */
+
+static moth_value n_servo_attach(moth_vm *vm, int argc, const moth_value *argv,
+                                 void *user) {
+  (void)vm; (void)argc; (void)user;
+  trace("pin %d servo attached (50Hz)", check_pin(argv[0]));
+  return moth_null();
+}
+
+static moth_value n_servo_us(moth_vm *vm, int argc, const moth_value *argv,
+                             void *user) {
+  (void)vm; (void)argc; (void)user;
+  int pin = check_pin(argv[0]);
+  int64_t us = want_int(argv[1], "a pulse width in microseconds");
+  if (us < 500) us = 500;
+  if (us > 2500) us = 2500;
+  trace("pin %d servo %" PRId64 "us", pin, us);
+  return moth_null();
+}
+
 /* ---- UART ------------------------------------------------------------- */
 
 static int check_uart(moth_value v) {
@@ -351,6 +461,12 @@ static void register_all(moth_vm *vm) {
   moth_register(vm, "i2cPing", n_i2c_ping, NULL);
   moth_register(vm, "i2cWriteReg", n_i2c_write_reg, NULL);
   moth_register(vm, "i2cReadReg", n_i2c_read_reg, NULL);
+  moth_register(vm, "i2cReadBytes", n_i2c_read_bytes, NULL);
+  moth_register(vm, "i2cWriteBytes", n_i2c_write_bytes, NULL);
+  moth_register(vm, "prefsGetInt", n_prefs_get_int, NULL);
+  moth_register(vm, "prefsSetInt", n_prefs_set_int, NULL);
+  moth_register(vm, "servoAttach", n_servo_attach, NULL);
+  moth_register(vm, "servoMicroseconds", n_servo_us, NULL);
   moth_register(vm, "uartBegin", n_uart_begin, NULL);
   moth_register(vm, "uartWrite", n_uart_write, NULL);
   moth_register(vm, "uartAvailable", n_uart_available, NULL);

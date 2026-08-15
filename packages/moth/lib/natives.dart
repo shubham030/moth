@@ -74,6 +74,17 @@ external bool i2cWriteReg(int addr, int reg, int value);
 /// The register's value, or -1 when the device did not answer.
 external int i2cReadReg(int addr, int reg);
 
+/// [n] bytes read from consecutive registers starting at [reg], in one
+/// transaction — the shape a sensor's multi-byte reading arrives in. The list
+/// is **empty** when the device did not answer: once every byte is a legal
+/// value there is no -1 left to spare as a sentinel. [n] is clamped to 1..64
+/// by the host.
+external List<int> i2cReadBytes(int addr, int reg, int n);
+
+/// Writes [bytes] to consecutive registers starting at [reg], each item
+/// truncated to a byte. False when the device did not answer.
+external bool i2cWriteBytes(int addr, int reg, List<int> bytes);
+
 // ---- UART -----------------------------------------------------------------
 
 external void uartBegin(int port, int tx, int rx, int baud);
@@ -86,6 +97,29 @@ external int uartAvailable(int port);
 
 /// The next byte, or -1 when nothing is waiting.
 external int uartRead(int port);
+
+// ---- persistent storage ---------------------------------------------------
+// Named ints that outlive the program: NVS flash on a board, memory in the
+// simulator. Keys are NVS keys — 1 to 15 characters, and that limit is the
+// hardware's, not a choice made here.
+
+/// The int stored under [key], or [fallback] when there is none. A key longer
+/// than 15 characters cannot have been stored, so it too reads as [fallback].
+external int prefsGetInt(String key, int fallback);
+
+/// Stores [value] under [key]. False when the key is invalid or the store is
+/// full — worth checking, because a save that failed is indistinguishable
+/// afterwards from one that never happened.
+external bool prefsSetInt(String key, int value);
+
+// ---- servo ----------------------------------------------------------------
+
+/// Configures [pin] for 50Hz servo PWM. Call once, before any pulse.
+external void servoAttach(int pin);
+
+/// The pulse width that positions the horn, clamped to 500..2500 by the host
+/// because a servo driven past its stop grinds against it.
+external void servoMicroseconds(int pin, int us);
 
 // ---- display --------------------------------------------------------------
 // The moth_render backend contract (docs/BACKEND.md), flat and numeric
