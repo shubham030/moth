@@ -13,7 +13,7 @@ behind it, and every ❌ says what it is waiting on.
 The Arduino column is a translation aid, not a design target. moth copies
 Arduino's *capabilities*, not its spelling — see
 [the API you should actually write](#the-api-you-should-actually-write) below, and
-[ADR-009](/docs/decisions) for why.
+[ADR-009](DECISIONS.md) for why.
 
 ## Digital I/O — done
 

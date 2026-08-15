@@ -16,7 +16,7 @@
 #define PIN_RST  27
 #define PIN_BL   28
 
-/* Landscape mirror combo — combo 0 from the mapcast bring-up notes; if the
+/* Landscape mirror combo — the one this panel verified against; if the
  * picture is flipped on your unit, adjust these two. */
 #define MIRROR_X false
 #define MIRROR_Y true

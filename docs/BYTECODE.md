@@ -18,7 +18,7 @@ All multi-byte integers are little-endian.
 
 ```
 magic        4 bytes   "MOTH"
-version      u16       MOTH_BYTECODE_VERSION (currently 5)
+version      u16       MOTH_BYTECODE_VERSION (currently 6)
 flags        u16       reserved, 0
 constants    u16 count, then each: tag u8 + payload
 natives      u16 count, then each: name_const u16 + argc u8
@@ -189,7 +189,8 @@ unbalanced jumps; the same walk checks for underflow and overflow, operand
 indices, call arities, jumps that land outside the code or off an
 instruction boundary, and unknown opcodes.
 
-Fuzzing 500 byte-mutated blobs: 457 are refused at load, 9 trap during the
+A one-off run of 500 byte-mutated blobs (not yet a committed harness):
+457 are refused at load, 9 trap during the
 run, 34 are harmless (mutations inside constant data), and none crash.
 
 What verification still does not check is types — a program can put text
@@ -217,3 +218,4 @@ firmware are updated separately and can drift apart.
 | 3       | heap, strings, lists, classes            |
 | 4       | `OP_CLOSURE`, `OP_CALL_VALUE`            |
 | 5       | `member_kind` byte per class method — a getter and a zero-argument method have identical arity, so the kind is explicit |
+| 6       | assets section — compile-time decoded image pixels, 4-byte aligned to the blob start |

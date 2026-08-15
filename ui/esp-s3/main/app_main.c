@@ -637,8 +637,8 @@ static bool take_pending(program_src *out) {
 }
 
 /* Swaps to the pending push when it is accepted; keeps *cur otherwise. The
- * two call sites previously carried diverging copies of this block — which
- * is the exact drift that produced the teardown-order bug in round two. */
+ * two call sites previously carried diverging copies of this block — the
+ * exact drift that once produced a teardown-order bug. */
 static bool swap_to_pending(program_src *cur) {
   program_src next;
   if (!take_pending(&next)) return false;

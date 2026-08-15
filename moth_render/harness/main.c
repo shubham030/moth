@@ -18,7 +18,7 @@ static void on_event(const mr_event *ev, void *user) {
 /* A demo scene exercising column/row, gap, padding, grow, and animation. */
 static void build_scene(void) {
   mr_node_id root = mr_root();
-  mr_set_u32(root, MR_PROP_BG_COLOR, 0xFF1A1B26); /* tokyo night, obviously */
+  mr_set_u32(root, MR_PROP_BG_COLOR, 0xFF1A1B26); /* Tokyo Night background */
   mr_set_f32(root, MR_PROP_PADDING, 16);
   mr_set_f32(root, MR_PROP_GAP, 12);
 

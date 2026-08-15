@@ -6,15 +6,15 @@ slug: /testing
 
 # Testing
 
-Every capability claimed on the [parity page](/docs/arduino-parity) has an executable
+Every capability claimed on the [parity page](arduino-parity.md) has an executable
 test. None of them need hardware.
 
 ## Run the suite
 
 ```console
-$ cmake --build vm/build              # the tests drive the real VM binary
+$ cmake -B build . && cmake --build build   # the tests drive the real VM binary
 $ cd tools/mothc && dart test
-00:02 +7: All tests passed!
+01:18 +84: All tests passed!
 ```
 
 ## How it works
@@ -49,7 +49,7 @@ since it is only as correct as the run that produced it:
 
 ```console
 $ dart run tools/mothc/bin/mothc.dart test/cases/mycase.dart
-$ ./vm/build/mothrun test/cases/mycase.mothb --quiet > test/cases/mycase.out
+$ ./build/vm/mothrun test/cases/mycase.mothb --quiet > test/cases/mycase.out
 ```
 
 ## Testing peripherals
@@ -86,4 +86,4 @@ touch controller.
 - The ESP host's natives are exercised by hand, not in CI — there is no
   hardware-in-the-loop runner.
 - `moth_render` has no conformance suite yet (see the
-  [backend contract](/docs/backend), §7).
+  [backend contract](BACKEND.md), §7).

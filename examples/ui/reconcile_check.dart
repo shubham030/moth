@@ -3,11 +3,11 @@
 //
 //   ./build/mothsim examples/ui/reconcile_check.mothb --frames 40
 //
-// The cases are the ones a review found broken: a child changing widget kind,
-// elements lingering after unmount, a nested Component losing its setState
-// binding when its parent rebuilds, and runApp leaving the old tree attached.
-// The fifth finding — one tap firing twice — needs a real tap, so it lives in
-// tap_check.dart.
+// The cases are reconciler bugs this repo has actually had: a child
+// changing widget kind, elements lingering after unmount, a nested
+// Component losing its setState binding when its parent rebuilds, and
+// runApp leaving the old tree attached. One more — a tap firing twice —
+// needs a real tap, so it lives in tap_check.dart.
 
 import 'package:moth/widgets.dart';
 

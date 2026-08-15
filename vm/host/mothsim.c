@@ -33,7 +33,7 @@ static struct {
   long quit_after; /* 0 = run until the window closes */
 
   /* Hot push: a newly arrived program waiting to replace the running one. */
-  const char *shot_path; /* write the last frame here, for docs and review */
+  const char *shot_path; /* write the last frame here, for docs */
 
   moth_push *push;
   uint8_t *pending;
@@ -66,9 +66,8 @@ static void pump_input(void) {
 static void register_host_natives(moth_vm *vm);
 
 /* What verification concluded. "Could not run the verifier" is not "the
- * blob is bad" — the distinction the board learned in round two and this
- * file did not, until a review caught the host answering MPRJ with a blank
- * reason for a blob it never examined. */
+ * blob is bad" — without the distinction, the host answers MPRJ with a
+ * blank reason for a blob it never examined. */
 typedef enum { BLOB_OK, BLOB_BAD, BLOB_UNVERIFIABLE } blob_verdict;
 
 /* Loads a blob into a throwaway VM to find out whether it would run, without

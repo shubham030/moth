@@ -13,7 +13,7 @@ each half separately, and they are worth learning from rather than ignoring.
 
 ## Dart on microcontrollers: nothing exists, durably
 
-- **Dartino** (https://github.com/dart-archive/sdk) — Google's Dart VM for
+- **Dartino** (https://github.com/dartino/sdk) — Google's Dart VM for
   embedded, ran on STM32F746 and FRDM-K64F. **Archived since January 2020.**
 - **The Dart team has declined the space on the record.** On
   dart-lang/sdk#52105, a Dart VM engineer: *"We have no current plans of

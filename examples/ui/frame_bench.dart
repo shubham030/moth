@@ -1,6 +1,6 @@
-// What a frame costs, so R3 is designed against measurements rather than
-// guesses. Set MOTH_FRAME_PROFILE to 1 in ui/esp-s3/main/app_main.c, embed
-// this, and read the serial log.
+// What a frame costs, so rendering work is designed against measurements
+// rather than guesses. Run it with `make fps PORT=<port>` — that flashes a
+// profiling build, streams the numbers, and restores your program.
 //
 // Two scenes: a watch-face-shaped one, and a nearly empty one. The second is
 // the floor — whatever it costs is what a frame costs before anything is

@@ -177,7 +177,7 @@ void pomodoro_create(void) {
 | Fonts | `fontSize: 72`, faces subsetted offline by `fontgen` | `lv_conf.h` edit + rebuild; stock ceiling is 48px |
 | Round panel | `uiSafeArea()` | inscribed square computed by hand (329px) |
 | Edit-to-screen | `mothc --push`: **175ms** over the cable, program only | full firmware flash — the UI is compiled into it |
-| Line count | ~115 with comments | ~120 **plus** bring-up and `lv_conf.h` |
+| Line count | 113 with comments | 123, excluding bring-up and `lv_conf.h` |
 
 The pitch is not "less code" — the counts are nearly equal. It is *which*
 code: describing the UI versus plumbing state into it, and a 175ms push

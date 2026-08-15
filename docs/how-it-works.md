@@ -45,7 +45,7 @@ sending a few hundred bytes rather than reflashing — that is what makes hot
 push practical: `mothc app.dart --push` replaces the running program over the
 USB cable in well under a second, or over paired WiFi (the pairing key
 derivation adds about two seconds). The full format is in
-[BYTECODE](/docs/bytecode).
+[BYTECODE](BYTECODE.md).
 
 ## 3. The VM (`vm/`)
 
@@ -72,8 +72,10 @@ The layer that supplies the built-ins. There are two:
   `delay(500)` costs nothing and a blink program finishes instantly. Fake analog
   values and fake I2C devices are command-line flags, which is what makes
   peripheral behavior testable in CI.
-- **`vm/esp`** on the board wires the same names to real GPIO, ADC, LEDC PWM,
-  I2C and UART.
+- **`vm/esp`** on the board wires the same names to real GPIO, ADC, LEDC
+  PWM, I2C, UART, servos, tone and NVS-backed preferences. Both ESP hosts
+  compile the same `hw_natives.c`, so the headless and display firmwares
+  cannot drift apart.
 
 The program cannot tell the difference. That is the point: develop and test on
 your laptop, then run the identical bytes on hardware.
@@ -81,7 +83,7 @@ your laptop, then run the identical bytes on hardware.
 ## The other half: rendering
 
 The same VM also drives a display. moth's renderer (`moth_render`) implements
-a documented [backend contract](/docs/backend) — a scene graph with flex
+a documented [backend contract](BACKEND.md) — a scene graph with flex
 layout, an antialiased software rasterizer with damage tracking, native
 animations and touch hit-testing. On top of it, `package:moth` provides
 Flutter-shaped widgets: `Component`, `build()`, `setState`, and the names you
@@ -90,5 +92,5 @@ expect (`Container`, `Column`, `Text`, `Slider`, `Switch`).
 A tap rebuilds the widget tree, the reconciler patches only the changed
 nodes, and the renderer repaints only the changed rows — 38 fps on a
 466x466 panel, measured. The same app runs unchanged in the desktop
-simulator (`mothsim`) and on the board. See the [roadmap](/docs/roadmap) for
+simulator (`mothsim`) and on the board. See the [roadmap](ROADMAP.md) for
 what is built and what is next.

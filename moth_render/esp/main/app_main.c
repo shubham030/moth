@@ -1,4 +1,4 @@
-/* moth_render on the carplay ESP32-P4: the same demo scene as the SDL
+/* moth_render on an ESP32-P4 dev board: the same demo scene as the SDL
  * harness, presented over SPI. No touch on this board — the BOOT button
  * (GPIO35) drives scene mutations instead of mr_pointer.
  */

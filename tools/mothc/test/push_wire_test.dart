@@ -1,6 +1,6 @@
-// The push wire format and the verdict scanner — the parts of hot push that
-// broke four review rounds running. Every failure mode a round found is a
-// case here, so it cannot come back quietly.
+// The push wire format and the verdict scanner — the parts of hot push
+// that kept breaking in new ways. Every failure mode found is a case here,
+// so it cannot come back quietly.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -47,7 +47,7 @@ void main() {
     final s = VerdictScanner(1);
     expect(s.feed(verdictReply('MPOK', 2)), null);
     expect(s.feed(verdictReply('MPRJ', 2)), null);
-    // A program printing the ack text was round three's false ack.
+    // A program printing the ack text once produced a false ack.
     expect(s.feed(ascii.encode('moth: push: 2209 bytes received')), null);
   });
 

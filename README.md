@@ -89,7 +89,7 @@ void main() {
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
 wrote examples/blink.mothb (138 bytes)
 
-$ mothrun examples/blink.mothb --stop-after 2000    # no hardware needed
+$ ./build/vm/mothrun examples/blink.mothb --stop-after 2000   # no hardware needed
 [     0ms] pin 38 -> output
 [     0ms] pin 38 = HIGH
 [   500ms] pin 38 = low
@@ -110,7 +110,8 @@ their simulators (moth left, LVGL right):
 
 ![the same pomodoro in moth and LVGL](docs/img/pomodoro-side-by-side.png)
 
-The line counts are nearly equal (~115 vs ~120 plus LVGL's bring-up). The
+The line counts are nearly equal (113 vs 123, and the LVGL figure excludes
+`lv_conf.h` and display bring-up). The
 difference is *which* lines. moth describes the UI and the reconciler keeps
 it true:
 
@@ -183,7 +184,7 @@ moth reimplements that model at MCU scale:
   rejected (no async, closures capture only `this`, generic type
   annotations are accepted but erased).
 - Not an LVGL project. An early plan to render through LVGL was dropped for
-  moth's own renderer ([ADR-007](docs/DECISIONS.md#adr-007)); moth never reads
+  moth's own renderer ([ADR-008](docs/DECISIONS.md#adr-008)); moth never reads
   or writes the separately-licensed LVGL XML format
   ([ADR-002](docs/DECISIONS.md#adr-002)).
 
@@ -216,4 +217,4 @@ of scope. Headless (no display) use works on anything ESP-IDF supports.
 ## License
 
 MIT. moth is maintained first for the author's own hardware projects; the API
-is unstable until v0.1 ships.
+is unstable through v0.x.

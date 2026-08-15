@@ -7,9 +7,10 @@ slug: /backend
 # The backend contract
 
 A **backend** turns moth's semantic node tree into pixels and input events.
-Two implementations: `moth_render` (the native renderer — built, and what the
-ESP32-S3 firmware ships today) and `lvgl` (planned, wraps LVGL 9; see
-ADR-008). Dart code — the widget framework and apps — sees only this
+One implementation today: `moth_render` — the native renderer the ESP32-S3
+firmware ships. An LVGL backend was the original plan and was never built
+(ADR-008); the contract stays backend-neutral so a second one remains
+possible. Dart code — the widget framework and apps — sees only this
 contract, never a backend's internals.
 
 The C header `moth_render/include/moth_render.h` is the normative API; this
@@ -41,9 +42,10 @@ conformance suite (§7).
 | `image`  | raster asset by key              | asset resolution is backend-supplied |
 | `slider` | horizontal value control         | emits `value_changed` |
 | `switch` | boolean toggle                   | emits `value_changed` (0/1) |
+| `arc`    | stroked ring segment             | gauges, progress; no children (contract v2) |
 
-v1 deliberately small; `arc`, `textinput`, `canvas` are post-v1 additions and
-require a contract version bump (§8).
+Deliberately small; `textinput` and `canvas` are still post-v1 additions and
+require a contract version bump (§8). `arc` landed in contract v2.
 
 ## 2.5 Display shape
 
@@ -71,7 +73,9 @@ created by `init` and spans the display.
 
 Every `box` lays out children on one axis. Properties and exact meaning:
 
-- `flex_direction`: `row` | `column` (default `column`)
+- `flex_direction`: `row` | `column` | `stack` (default `column`). `stack`
+  places every child at the container's origin rather than in sequence, so
+  they overlap.
 - `width`, `height`: px, or `auto` (default). Auto = content size: sum of
   children (+ gaps) on the main axis, max child on the cross axis, plus padding.
   Leaf auto sizes: label = measured text; image = intrinsic; slider = 160×24;
@@ -105,6 +109,12 @@ but must report unsnapped frames in `frame_of` (§7).
 | `text`, `font_size`, `text_color` | utf8 / px / ARGB | label | "", 14, opaque black |
 | `image_src` | asset key | image | — |
 | `value`, `min`, `max` | float | slider, switch | 0, 0, 100 |
+| `arc_start` | degrees, 0 at twelve o'clock, clockwise | arc | 0 |
+| `arc_sweep` | degrees; >= 360 draws a closed ring | arc | 0 (nothing drawn) |
+| `thickness` | stroke width, px | arc | 0, painted as 4 |
+| `stroke_align` | -1 inside / 0 centred / 1 outside (Flutter's strokeAlign) | arc | 0 |
+| `stroke_cap` | `butt` \| `round` | arc | butt |
+| `arc_track_color` | ARGB8888, the unswept remainder; zero alpha leaves it undrawn | arc | transparent |
 
 Setters are typed (`set_f32`, `set_u32`, `set_str`); setting a property a node
 kind doesn't support is a no-op (logged in debug builds, never a crash).
@@ -137,8 +147,9 @@ internal clock (keeps the core deterministic and testable).
 
 What exists today (host-run, no hardware): contract tests in
 `moth_render/test/` — control gestures, events and painted pixels
-(`controls_test.cpp`) and per-frame paint-cost budgets (`perf_test.cpp`) —
-plus reconciler, wrapping and tap checks driven through the simulator in CI.
+(`controls_test.cpp`), per-frame paint-cost budgets (`perf_test.cpp`), and
+asset blitting plus lifetime-across-swap (`image_test.cpp`) — plus
+reconciler, wrapping and tap checks driven through the simulator in CI.
 These gate every commit via `make test`.
 
 The full suite this section originally specified is still planned, and a

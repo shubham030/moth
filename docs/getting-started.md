@@ -177,7 +177,7 @@ errors land on the right line with the compiler's own hint.
 ## 4. Put it on a board
 
 You need [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/)
-5.3 or newer. The firmware embeds your compiled program, so compile it first:
+5.4 or newer. The firmware embeds your compiled program, so compile it first:
 
 ```console
 $ dart run tools/mothc/bin/mothc.dart examples/board_demo.dart \
@@ -254,7 +254,8 @@ $ mothc app.dart --push 192.168.x.x:7621 --token
 ```
 
 works from anywhere on your network: `--token` asks for the same phrase and
-signs the push with it (scripts can set `MOTH_PUSH_TOKEN` instead). A paired
+signs the push with it (scripts can set `MOTH_PUSH_TOKEN` to the phrase,
+or `MOTH_PUSH_KEY` to the derived key to skip the ~2s derivation). A paired
 board refuses network pushes that aren't signed — otherwise anyone on your
 WiFi could replace what the board is running. Serial pushes never need the
 phrase: holding the cable is proof enough. Pairing can be skipped with
@@ -289,6 +290,6 @@ controller at 0x5A shows as 90, because `print` writes decimal.
 
 ## Next
 
-- [Arduino parity](/docs/arduino-parity) — the full list of what works
-- [Built-ins](/docs/builtins) — every function you can call
-- [Testing](/docs/testing) — how to prove your change didn't break anything
+- [Arduino parity](arduino-parity.md) — the full list of what works
+- [Built-ins](builtins.md) — every function you can call
+- [Testing](testing.md) — how to prove your change didn't break anything

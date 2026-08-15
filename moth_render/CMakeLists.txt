@@ -15,7 +15,6 @@ target_include_directories(moth_render PUBLIC include PRIVATE src)
 target_compile_options(moth_render PRIVATE -Wall -Wextra)
 
 # TODO(R2): ThorVG via pkg-config (brew install thorvg) or vendored subdir.
-# find_package(PkgConfig); pkg_check_modules(THORVG thorvg)
 
 # Paint-cost regression suite: budgets on pixels visited per frame. Compiled
 # separately from the library so MR_PROFILE's counters exist here and cost

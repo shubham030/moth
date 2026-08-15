@@ -44,8 +44,10 @@ print('avg ${total ~/ window.length}');
 
 **Imports** — `import 'other.dart';` with a relative path. Declarations from
 every imported file share one namespace, so a class can extend one declared
-elsewhere. Import cycles are fine; each file is loaded once. `package:` and
-`dart:` imports are not supported.
+elsewhere. Import cycles are fine; each file is loaded once.
+`import 'package:moth/widgets.dart';` resolves against the packages shipped
+with the compiler — no `pub get` needed. Other `package:` names and all
+`dart:` imports are rejected, with a hint saying why.
 
 **Closures** — function values, lambdas, and functions passed around or kept
 in lists. A lambda written inside a method captures `this`, so it can reach
@@ -207,7 +209,8 @@ Box()
 
 Assignments and method calls both work as sections. This is what gives a
 `build()` method the shape a Flutter developer expects; named parameters,
-which would let it read `Box(color: black, kids: [...])`, are still to come.
+let a widget tree read as `Container(color: …, child: …)` — cascades
+remain for objects that are configured rather than composed.
 
 ## Getters and setters
 
@@ -247,6 +250,8 @@ This is what makes [package:moth's hardware API](hardware.md) worth using:
 | Static members, named constructors | planned |
 | `async` / `await`, `Future` | needs an event loop; see below |
 | Networking — WiFi, sockets, HTTP | not started |
+| Enums | planned |
+| Exceptions — `try` / `catch` / `throw` | planned |
 | Mixins, extensions, records | not planned for v1 |
 | Generics | not planned for v1 — type annotations like `List<int>` are accepted and erased, never enforced |
 
@@ -322,5 +327,7 @@ blink.dart:5:3: 'digitalWrite' takes 2 arguments, but got 1
 ## How much fits
 
 A blink program is 138 bytes of bytecode. The demo with a user-defined
-function, arithmetic and a GPIO loop is 193 bytes. The VM itself is roughly
-200 KB of flash and a few KB of RAM, so program size is rarely what limits you.
+function, arithmetic and a GPIO loop is 193 bytes. The VM, renderer, bindings and bundled fonts together are
+about 90 KB of flash (measured: 48 KB code + 42 KB data) and a few KB of
+RAM, so program size is rarely what limits
+you.

@@ -248,7 +248,7 @@ Future<void> main(List<String> args) async {
 ///
 /// The verdict is a framed binary reply carrying this push's nonce, so no
 /// draining, no log-line grepping, and no ambiguity about which push a
-/// reply answers — text acks lost that game three review rounds running.
+/// reply answers — text acks kept losing that game (see push_proto.h).
 /// No reply can mean the board was resetting when the port opened — some
 /// adapters toggle the reset lines on open — so the frame is sent again
 /// after a boot's worth of waiting before giving up; the nonce makes the

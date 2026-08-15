@@ -9,8 +9,8 @@ slug: /builtins
 :::warning
 These are the **low-level native boundary** — flat and C-shaped because that
 is what a bytecode VM calls efficiently. `package:moth` already wraps them in
-ordinary Dart — `OutputPin(38).toggle()` — and [hardware.md](/docs/hardware) is
-the layer you should write against. See [ADR-009](/docs/decisions).
+ordinary Dart — `OutputPin(38).toggle()` — and [hardware.md](hardware.md) is
+the layer you should write against. See [ADR-009](DECISIONS.md).
 :::
 
 Every function below is available to any moth program without an import.
@@ -153,7 +153,7 @@ that means to it. `package:moth`'s `Servo(pin).write(degrees)` maps 0..180 onto
 
 ## Display
 
-The display natives are the [backend contract](/docs/backend) — the flat,
+The display natives are the [backend contract](BACKEND.md) — the flat,
 numeric boundary the widget layer in `package:moth` is built on. You will
 normally never call them: write widgets (`Container`, `Text`, `Slider`, …)
 and let `runApp`/`pumpFrame` drive this layer for you. They are listed here

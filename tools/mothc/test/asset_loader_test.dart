@@ -101,7 +101,7 @@ void main() {
     expect(out, contains('truncated asset 0'));
   });
 
-  test('an insane size is refused — the overflow guard', () {
+  test('an absurd size is refused — the overflow guard', () {
     // 0 wide, and (separately) far past the 2048 clamp.
     var out = runWithAssetTail(
         [...u16(1), ...u16(stringConst), ...u16(0), ...u16(1)]);

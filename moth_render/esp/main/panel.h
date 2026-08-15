@@ -1,5 +1,5 @@
-/* ST7796 SPI panel for the carplay ESP32-P4 board, landscape addressing.
- * Wiring and init sequence lifted from the working mapcast bring-up.
+/* ST7796 SPI panel on an ESP32-P4 dev board, landscape addressing.
+ * Wiring and init sequence verified against a working bring-up of this panel.
  */
 #pragma once
 

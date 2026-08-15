@@ -4,8 +4,8 @@
 // renderer node. setState marks an element dirty, and the next frame rebuilds
 // just that subtree and diffs the result into ui* calls.
 //
-// This is the beginning of package:moth — for now it is a plain file that
-// programs import.
+// This is package:moth's widget layer — what `import
+// 'package:moth/widgets.dart'` gives a program.
 
 // The host functions underneath. Imported for this file's own use and
 // re-exported so a program importing this library sees them too — the Dart

@@ -4,7 +4,7 @@ final scl = 14;
 
 String hex(int v) {
   var digits = '0123456789abcdef';
-  return '0x${v ~/ 16}${v % 16}'; // crude until we have String.substring
+  return '0x${v ~/ 16}${v % 16}'; // two nibbles by arithmetic — no String.substring yet
 }
 
 void main() {

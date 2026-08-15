@@ -37,7 +37,8 @@ renderer. No RTOS knowledge, no C, no second language.
 No `async`/networking from Dart yet (and so no `attachInterrupt` — the
 polling idiom is documented), no SPI, no local-variable capture in
 closures, fixed-size bitmap fonts, one verified board (ESP32-S3 +
-Waveshare 1.75" round AMOLED — ESP32-P4 builds, unverified). Push
+Waveshare 1.75" round AMOLED; the renderer alone runs a demo scene
+on an ESP32-P4 dev board, but no second board is verified end to end). Push
 pairing accepts replay of previously-pushed programs (ADR-010 records
 why, and what v0.2 does about it). The API is unstable until 1.0.
 

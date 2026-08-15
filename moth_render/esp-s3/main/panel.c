@@ -128,11 +128,11 @@ esp_err_t panel_init(void)
         /* The CST9217 reports both axes flipped relative to the CO5300's
          * scan on this board — the panel is mounted rotated 180° from the
          * touch sensor's origin. Y showed first (a finger at display y=287
-         * read back as 466-287=179); X only surfaced once the slider
-         * tracked drags, moving opposite the finger. Every earlier UI had
-         * full-screen tap targets, so both mirrors hid for weeks. Touches
-         * near the screen centre cannot reveal a mirror (466-233 == 233),
-         * which is why one axis was misjudged "correct" from tap logs. */
+         * read back as 466-287=179); X only surfaces once something
+         * tracks a drag, moving opposite the finger. A full-screen tap
+         * target hides both mirrors, and touches near the screen centre
+         * cannot reveal one (466-233 == 233) — so verify with edge taps,
+         * not centre taps. */
         .flags = { .mirror_x = 1, .mirror_y = 1 },
     };
     ESP_ERROR_CHECK(esp_lcd_touch_new_i2c_cst9217(tp_io, &tp_cfg, &s_touch));

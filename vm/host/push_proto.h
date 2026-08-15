@@ -2,8 +2,8 @@
  * a 32-bit nonce, then the blob. The reply — sent AFTER the host verified
  * the blob — is 8 bytes: "MPOK" or "MPRJ" followed by the same nonce.
  *
- * The nonce is the whole design. Three review rounds each found a new way a
- * grepped log-line ack could be forged or missed: first by the receivers'
+ * The nonce is the whole design. Text acks kept failing in new ways: a
+ * grepped log-line ack can be forged or missed — first by the receivers'
  * own log tags, then by a program calling print('push: ...') under the same
  * tag. Any text ack on a console shared with user output loses that game
  * eventually. A binary reply echoing a nonce the sender just invented cannot

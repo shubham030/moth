@@ -2,7 +2,7 @@
 
 Every item on this list is something that actually happened in this codebase
 and cost real frames. Review any change to `moth_render/src/`,
-`ui/src/moth_ui.c`, or `moth_render/esp-s3/panel.c` against it. The numbers
+`ui/src/moth_ui.c`, or `moth_render/esp-s3/main/panel.c` against it. The numbers
 that anchor it: 466x466 at 4 bytes/px, writing one 177-row band through PSRAM
 costs ~9.5ms on the ESP32-S3, and a 30fps frame is a 33ms budget — three
 band-writes and it's gone.
@@ -78,12 +78,12 @@ band-writes and it's gone.
   The arc span rewrite and the cover skip were both verified this way.
 - **Precision changes are bounded, not eyeballed.** The integer blend was
   accepted because the diff was ≤2/255 per channel, on blended pixels only,
-  with opaque-stays-opaque exact (alpha widened 0..256). "Looks the same" has
-  been wrong twice in this repo; pixels get compared.
+  with opaque-stays-opaque exact (alpha widened 0..256). "Looks the same" is not
+  evidence; pixels get compared.
 - **Check the probe actually exercises the path.** A probe scene placed a
   full-screen ring under a full-height sibling in a column — the ring
-  laid out off-screen and the "arc verified" claim was hollow until a pixel
-  count said arc > 0. Assert the path ran, then assert what it did.
+  laid out off-screen and a "verified" claim is hollow until a pixel
+  count says arc > 0. Assert the path ran, then assert what it did.
 - **`make render-test` budgets are part of the change.** They are pixel
   counts, deterministic everywhere. A legitimate cost increase moves a budget
   *in the same commit, with the reasoning* — never silently, and never by

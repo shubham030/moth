@@ -14,7 +14,7 @@ Four layers, each independently shippable and independently testable:
 4. **Widget framework** (`packages/moth`, pure Dart) — compiled into the app blob like user code
 
 This page describes the system as built. For a gentler walkthrough of the
-same pipeline, start with [how it works](/docs/how-it-works).
+same pipeline, start with [how it works](how-it-works.md).
 
 ## 1. Host toolchain (`tools/mothc`)
 
@@ -31,10 +31,10 @@ app source ──► package:analyzer (AST) ──► lowering ──► moth by
 - **Lowering:** classes flatten to member tables with single inheritance;
   closures become heap objects capturing `this`; string interpolation becomes
   concatenation. What the subset excludes is rejected at compile time — see
-  [language.md](/docs/language).
+  [language.md](language.md).
 - **Output:** one self-contained blob — constant pool, native-import table,
   bytecode per function. Blink is 138 bytes; a full widget app is ~11KB.
-  Format in [BYTECODE.md](/docs/bytecode).
+  Format in [BYTECODE.md](BYTECODE.md).
 
 Commands: `mothc app.dart` (compile), `mothc app.dart --push <target>`
 (compile and hot-push over serial or WiFi), `mothc create <dir>` (scaffold).
@@ -66,7 +66,7 @@ ESP-IDF and for macOS/Linux (the simulator and CI).
 ## 3. Renderer (`moth_render/`)
 
 moth's own C++ scene graph behind the documented backend contract
-([BACKEND.md](/docs/backend)): semantic nodes (box, label, slider, switch,
+([BACKEND.md](BACKEND.md)): semantic nodes (box, label, slider, switch,
 arc), moth-owned flex layout, an antialiased software rasterizer with
 row-band damage tracking, native animations, and hit-testing with
 finger-sized touch targets. The same code paints a desktop SDL window and
@@ -77,8 +77,8 @@ makes new boards ports rather than rewrites.
 moth owns layout and style semantics (ADR-007), so a tree renders
 identically everywhere — the same renderer code paints both hosts, and
 contract tests plus per-frame paint budgets gate every commit (the fuller
-conformance suite in [BACKEND.md](/docs/backend) §7 is planned). Measured on
-an ESP32-S3 at 466x466: 38 fps ([ROADMAP](/docs/roadmap) has the
+conformance suite in [BACKEND.md](BACKEND.md) §7 is planned). Measured on
+an ESP32-S3 at 466x466: 38 fps ([ROADMAP](ROADMAP.md) has the
 phase-by-phase tables).
 
 The original design routed rendering through LVGL; the shipping renderer is

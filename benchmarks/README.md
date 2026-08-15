@@ -24,7 +24,9 @@ clock, which only advances on `delay()`, and every measurement reads as 1ms.
 | string interpolation | 1.8M |
 | **rebuild + diff, 30 nodes** | **857k** |
 
-**ESP32-S3 @ 240MHz** — the numbers that actually matter:
+**ESP32-S3 @ 240MHz** — the numbers that actually matter (same
+`vm_bench.mothb` embedded as the firmware program, timings from its own
+`millis()` prints on the serial log):
 
 | workload | ops/sec |
 | --- | --- |
@@ -37,11 +39,11 @@ clock, which only advances on `delay()`, and every measurement reads as 1ms.
 | string interpolation | 17k |
 | **rebuild + diff, 30 nodes** | **12k** |
 
-That is roughly 30-70x slower than the host, not the 10x first guessed.
+That is roughly 30-70x slower than the host.
 
 ## Reading the last row
 
-The rebuild+diff case is the one M3 depends on: allocate a tree of
+The rebuild+diff case is the one the widget layer depends on: allocate a tree of
 widget-sized objects, then walk it comparing properties.
 
 **On device a 30-node rebuild costs about 2.3ms** (35µs on the host). Against

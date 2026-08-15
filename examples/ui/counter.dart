@@ -4,8 +4,9 @@
 //   dart run tools/mothc/bin/mothc.dart examples/ui/counter.dart
 //   ./build/mothsim examples/ui/counter.mothb
 //
-// The classes below are a preview of package:moth. They live in the program
-// for now because moth has no imports yet.
+// The classes below are a self-contained copy of package:moth's core —
+// kept inline so this file also exercises the compiler without imports.
+// For the normal way, see counter_app.dart, which imports package:moth.
 
 // ---- the contract's numbering, wrapped so nobody has to remember it ------
 
