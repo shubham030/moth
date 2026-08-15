@@ -430,3 +430,18 @@ void moth_free_objects(moth_vm *vm) {
   }
   vm->objects = NULL;
 }
+
+/* Public aliases for natives (moth_vm.h) — the internal names stay for the
+ * interpreter's own use. */
+moth_value moth_new_list(moth_vm *vm) { return moth_list_new(vm); }
+bool moth_list_append(moth_vm *vm, moth_value list, moth_value item) {
+  return moth_list_push(vm, list, item);
+}
+bool moth_is_list(moth_value v) { return IS_LIST(v); }
+int moth_list_length(moth_value v) { return IS_LIST(v) ? AS_LIST(v)->count : 0; }
+moth_value moth_list_at(moth_value v, int index) {
+  if (!IS_LIST(v)) return moth_null();
+  moth_list *l = AS_LIST(v);
+  if (index < 0 || index >= l->count) return moth_null();
+  return l->items[index];
+}

@@ -47,15 +47,17 @@ void main() {
     }
   });
 
-  test('the load-bearing signatures read exactly as the C implements them',
-      () {
+  test('the load-bearing signatures read exactly as the C implements them', () {
     // Arity alone cannot catch a num->double or int->bool drift, and those
     // are the changes that silently break valid programs: double would
     // reject the integer literals want_num accepts, bool would hide
-    // uartRead's -1 sentinel. Pin the exact lines for the ones with a
+    // uartRead's -1 sentinel. The bulk I2C pair is the same story one level
+    // up: a `List<int>` that drifted to `int` would turn "no answer" from an
+    // empty list into a value, and prefsGetInt returning bool would throw
+    // away the stored number. Pin the exact lines for the ones with a
     // wrong-type failure mode; a deliberate change updates both sides.
-    final text = File('$repoRoot/packages/moth/lib/natives.dart')
-        .readAsStringSync();
+    final text =
+        File('$repoRoot/packages/moth/lib/natives.dart').readAsStringSync();
     for (final line in [
       'external void uiSetNum(int node, int prop, num value);',
       'external int uiAnimate(',
@@ -65,6 +67,9 @@ void main() {
       'external bool digitalRead(int pin);',
       'external bool i2cPing(int addr);',
       'external int i2cReadReg(int addr, int reg);',
+      'external List<int> i2cReadBytes(int addr, int reg, int n);',
+      'external bool i2cWriteBytes(int addr, int reg, List<int> bytes);',
+      'external int prefsGetInt(String key, int fallback);',
       'external double uiEventValue();',
       'external bool uiCommit();',
     ]) {
@@ -105,8 +110,7 @@ void main() {
     ]) {
       final f = File('$repoRoot/$rel');
       if (!f.existsSync()) continue;
-      for (final m
-          in RegExp(r'(\d+) bytes').allMatches(f.readAsStringSync())) {
+      for (final m in RegExp(r'(\d+) bytes').allMatches(f.readAsStringSync())) {
         final quoted = int.parse(m.group(1)!);
         // Only blink-sized claims; other numbers (KB figures, widget app
         // sizes) are not this test's business.
