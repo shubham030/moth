@@ -71,6 +71,33 @@ List<Device> discoverDevices() {
   return devices;
 }
 
+/// Parses an answer to the device prompt: a 1-based index into [devices].
+/// Null for anything that is not a valid choice — the caller re-prompts.
+/// Kept pure so the rule is testable without a terminal.
+Device? parseDeviceChoice(List<Device> devices, String? answer) {
+  if (answer == null) return null;
+  final n = int.tryParse(answer.trim());
+  if (n == null || n < 1 || n > devices.length) return null;
+  return devices[n - 1];
+}
+
+/// Asks interactively which device to use — flutter run's behavior when
+/// more than one is connected. Only called when stdin is a terminal; a
+/// script cannot answer, so the non-interactive path stays an error that
+/// lists the options and asks for -d.
+Device? promptForDevice(List<Device> devices) {
+  stdout.writeln('Multiple devices found:');
+  for (var i = 0; i < devices.length; i++) {
+    stdout.writeln('  [${i + 1}] ${devices[i]}');
+  }
+  for (var attempt = 0; attempt < 3; attempt++) {
+    stdout.write('Which device? [1-${devices.length}]: ');
+    final picked = parseDeviceChoice(devices, stdin.readLineSync());
+    if (picked != null) return picked;
+  }
+  return null;
+}
+
 /// Picks the device to run on, or null when the choice needs the user.
 ///
 /// -d matches an id exactly or as an unambiguous substring, so
