@@ -86,6 +86,22 @@ Uint8List? compileQuietly(String input) {
 class VerdictDisplayFilter {
   final _carry = <int>[];
 
+  /// Nonces this session actually issued. A frame is only stripped when its
+  /// trailing four bytes name one of them — a program that print()s the
+  /// literal text "MPOK" must not lose eight bytes of its own output.
+  final _nonces = <int>{};
+
+  void expectNonce(int nonce) => _nonces.add(nonce);
+
+  /// Releases a held partial match. Call when the wire goes quiet: a held
+  /// "MP" tail would otherwise be withheld forever on a program whose last
+  /// output happens to end on a verdict prefix.
+  Uint8List flush() {
+    final out = Uint8List.fromList(_carry);
+    _carry.clear();
+    return out;
+  }
+
   Uint8List filter(Uint8List chunk) {
     final data = <int>[..._carry, ...chunk];
     _carry.clear();
@@ -104,7 +120,7 @@ class VerdictDisplayFilter {
             _carry.addAll(maybe);
             break;
           }
-        } else if (_isVerdict(data, i)) {
+        } else if (_isVerdict(data, i) && _nonces.contains(_nonceAt(data, i))) {
           i += 8; // drop the whole frame
           continue;
         }
@@ -120,6 +136,9 @@ class VerdictDisplayFilter {
     return cc == 'MPOK' || cc == 'MPRJ';
   }
 
+  static int _nonceAt(List<int> d, int i) =>
+      d[i + 4] | (d[i + 5] << 8) | (d[i + 6] << 16) | (d[i + 7] << 24);
+
   static bool _looksLikeVerdictPrefix(List<int> d) {
     const ok = [0x4D, 0x50, 0x4F, 0x4B]; // MPOK
     const rj = [0x4D, 0x50, 0x52, 0x4A]; // MPRJ
@@ -128,6 +147,19 @@ class VerdictDisplayFilter {
     }
     return d.length < 8;
   }
+}
+
+/// SIGTERM/SIGHUP land outside any finally, which would leave the user's
+/// terminal raw — the one failure a keystroke cannot fix, in a session
+/// built on keystrokes. flutter run installs handlers for exactly this.
+List<StreamSubscription<ProcessSignal>> _onSignals(void Function() cleanup) {
+  return [
+    for (final sig in [ProcessSignal.sigterm, ProcessSignal.sighup])
+      sig.watch().listen((_) {
+        cleanup();
+        exit(143);
+      }),
+  ];
 }
 
 void _banner(String input, String target) {
@@ -148,6 +180,7 @@ void _keysHelp() {
 bool? pushOverOpenPort(
     SerialPort port, Uint8List blob, VerdictDisplayFilter display) {
   final nonce = Random.secure().nextInt(0x100000000);
+  display.expectNonce(nonce);
   final frame = pushFrame(blob, nonce);
   final scanner = VerdictScanner(nonce);
   for (var attempt = 1; attempt <= 2; attempt++) {
@@ -200,6 +233,10 @@ Future<int> runOnBoard(String input, Device device) async {
   final term = _RawTerminal()..enter();
   final keys = <int>[];
   final sub = stdin.listen(keys.addAll);
+  final signals = _onSignals(() {
+    term.leave();
+    port.close();
+  });
 
   var exitCode = 0;
   try {
@@ -208,6 +245,9 @@ Future<int> runOnBoard(String input, Device device) async {
       if (chunk.isNotEmpty) {
         final shown = display.filter(chunk);
         if (shown.isNotEmpty) stdout.add(shown);
+      } else {
+        final held = display.flush();
+        if (held.isNotEmpty) stdout.add(held);
       }
 
       while (keys.isNotEmpty) {
@@ -237,6 +277,9 @@ Future<int> runOnBoard(String input, Device device) async {
       await Future<void>.delayed(const Duration(milliseconds: 20));
     }
   } finally {
+    for (final s in signals) {
+      await s.cancel();
+    }
     await sub.cancel();
     term.leave();
     port.close();
@@ -273,6 +316,10 @@ Future<int> runOnSim(String input, Device device) async {
   final term = _RawTerminal()..enter();
   final keys = <int>[];
   final sub = stdin.listen(keys.addAll);
+  final signals = _onSignals(() {
+    term.leave();
+    proc.kill();
+  });
   var done = false;
   unawaited(proc.exitCode.then((_) => done = true));
 
@@ -307,8 +354,17 @@ Future<int> runOnSim(String input, Device device) async {
     stdout.writeln('the simulator window closed');
     return await proc.exitCode;
   } finally {
+    for (final s in signals) {
+      await s.cancel();
+    }
     await sub.cancel();
     term.leave();
+    if (!done) proc.kill();
+    try {
+      dir.deleteSync(recursive: true);
+    } on FileSystemException {
+      // A leftover temp dir is not worth failing the session over.
+    }
   }
 }
 
