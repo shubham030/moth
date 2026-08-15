@@ -170,6 +170,12 @@ Dart program draws in a desktop window and on the board.
       `mothc create` writes the pubspec and analysis options an editor
       needs, and `mothc check` reports the subset's rejections without
       writing a blob. CI holds both clean
+- [x] `mothc run` — the flutter-run loop: device auto-selection (one board
+      wins, simulator as fallback, `-d` to pick), compile + push + attach
+      with the program's output streaming, `r` = hot restart in ~150ms on
+      hardware (37ms sim, measured), honest about state resetting. The
+      attach session owns the serial port, so restarts never fight the
+      console over it
 - [ ] README demo GIF (simulator + real hardware)
 - [x] `mothc create <dir>` project template: one app.dart (a tap counter in
       Flutter's shape), a README with the run commands, a .gitignore —

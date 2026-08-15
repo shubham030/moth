@@ -97,12 +97,22 @@ const kNatives = <String, int>{
   'i2cPing': 1,
   'i2cWriteReg': 3,
   'i2cReadReg': 2,
+  'i2cReadBytes': 3, // addr, reg, n -> List<int>; empty means no answer
+  'i2cWriteBytes': 3, // addr, reg, List<int>; false means no answer
 
   // UART
   'uartBegin': 4,
   'uartWrite': 2,
   'uartAvailable': 1,
   'uartRead': 1,
+
+  // Persistent storage — NVS on a board, in memory in the simulator
+  'prefsGetInt': 2, // key, fallback -> the stored int or the fallback
+  'prefsSetInt': 2, // key, value -> false on an invalid key or a full store
+
+  // Servo — 50Hz PWM, the shape hobby servos expect
+  'servoAttach': 1, // configures the pin before any pulse is written
+  'servoMicroseconds': 2, // pin, pulse width; the host clamps to 500..2500
 
   // Display — the moth_render backend contract (docs/BACKEND.md). Flat and
   // numeric because it is the VM boundary; package:moth wraps it in classes.

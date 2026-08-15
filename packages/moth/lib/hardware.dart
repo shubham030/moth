@@ -147,6 +147,39 @@ class Buzzer {
   }
 }
 
+/// A hobby servo on one pin.
+///
+/// A servo is not told an angle. It is told a pulse width, repeated at 50Hz,
+/// and it holds whatever position that width means to it — which is why
+/// [writeMicroseconds] is the real control and [write] is a convention on top.
+class Servo {
+  final int pin;
+
+  Servo(this.pin) {
+    servoAttach(pin);
+  }
+
+  /// The pulse width in microseconds. The host clamps to 500..2500, so a
+  /// value from a knob can be fed straight in without stalling the servo
+  /// against its own stop.
+  void writeMicroseconds(int us) {
+    servoMicroseconds(pin, us);
+  }
+
+  /// [degrees] 0..180 mapped onto 1000..2000us — the range nearly every servo
+  /// understands, and out-of-range degrees are clamped rather than refused.
+  ///
+  /// Where 0 and 180 actually point varies by servo: a cheap one may not reach
+  /// either end, a continuous-rotation one ignores the idea of an angle
+  /// entirely. Use [writeMicroseconds] when the exact position matters.
+  void write(int degrees) {
+    var clamped = degrees;
+    if (clamped < 0) clamped = 0;
+    if (clamped > 180) clamped = 180;
+    writeMicroseconds(1000 + clamped * 1000 ~/ 180);
+  }
+}
+
 /// The I2C bus, shared by every sensor and display on those two wires.
 class I2c {
   final int sda;
@@ -164,6 +197,19 @@ class I2c {
 
   bool writeRegister(int address, int register, int value) =>
       i2cWriteReg(address, register, value);
+
+  /// [count] bytes from consecutive registers, read in one transaction. A
+  /// sensor that reports a value across several registers updates between
+  /// reads, so fetching them one at a time can return half of one reading and
+  /// half of the next. Empty when the device did not answer — check that
+  /// before indexing, since there is no -1 to check for here.
+  List<int> readBytes(int address, int register, int count) =>
+      i2cReadBytes(address, register, count);
+
+  /// Writes [bytes] to consecutive registers starting at [register]. Each
+  /// item is truncated to a byte. False when the device did not answer.
+  bool writeBytes(int address, int register, List<int> bytes) =>
+      i2cWriteBytes(address, register, bytes);
 }
 
 /// One device on an I2C bus, so its address is written once rather than at
@@ -180,6 +226,13 @@ class I2cDevice {
 
   bool write(int register, int value) =>
       bus.writeRegister(address, register, value);
+
+  /// Empty when the device did not answer.
+  List<int> readBytes(int register, int count) =>
+      bus.readBytes(address, register, count);
+
+  bool writeBytes(int register, List<int> bytes) =>
+      bus.writeBytes(address, register, bytes);
 }
 
 /// A serial port, for a GPS, a modem, or another board.
@@ -211,4 +264,24 @@ class Uart {
   int get available => uartAvailable(port);
 
   bool get hasData => available > 0;
+}
+
+/// Named integers that outlive the program — a volume setting, a boot count,
+/// which screen was open last.
+///
+/// On a board these live in NVS flash and survive a reboot and a reflash. In
+/// the simulator they live in memory and vanish with the process, so a program
+/// that remembers something still runs on a desk; it just starts fresh.
+///
+/// Keys are 1 to 15 characters. That limit is NVS's, not a choice made here.
+class Prefs {
+  /// The value stored under [key], or [fallback] when nothing is. A key over
+  /// 15 characters cannot have been stored, so it reads back as [fallback]
+  /// too — there is no separate "invalid" answer to handle.
+  int getInt(String key, int fallback) => prefsGetInt(key, fallback);
+
+  /// False when the key is invalid or the store is full. Worth checking on
+  /// the writes you care about: afterwards a save that failed looks exactly
+  /// like one that never happened.
+  bool setInt(String key, int value) => prefsSetInt(key, value);
 }

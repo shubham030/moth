@@ -131,6 +131,28 @@ The starter is a tap counter in Flutter's shape (`Component`, `build()`,
 `setState`); run it in a window with `make ui F=my_app/app.dart`, and every
 push command below works on it unchanged.
 
+## Run it like Flutter
+
+`mothc run` is the loop you know from `flutter run`: it picks the device —
+one connected board auto-selects, several prompt you to choose, no board
+falls back to the simulator — compiles, pushes, and stays attached
+streaming your program's output:
+
+```console
+$ mothc run app.dart
+Launching app.dart on /dev/cu.usbmodem2101
+
+pushed in 162ms
+r  hot restart (recompile + push; state resets)   h  this help   q  quit
+```
+
+Press `r` after an edit and the board is running your new code in about
+150ms. It is a hot *restart* — the program starts fresh from `main` —
+because moth does not preserve state across pushes yet; the prompt says so
+rather than borrowing Flutter's "reload". `mothc devices` lists what run
+can see; `-d` picks explicitly (`-d sim`, or any unique part of a serial
+path).
+
 ## What your editor cannot know
 
 The analyser checks ordinary Dart. It does not know which parts of Dart

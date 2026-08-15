@@ -5,21 +5,28 @@ import 'dart:typed_data';
 import 'package:analyzer/source/line_info.dart';
 import 'package:mothc/src/compiler.dart';
 import 'package:mothc/src/create.dart';
+import 'package:mothc/src/devices.dart';
 import 'package:mothc/src/errors.dart';
 import 'package:mothc/src/push_wire.dart';
+import 'package:mothc/src/run.dart';
 import 'package:mothc/src/serial.dart';
 
 const _usage = '''
-mothc — compile Dart to moth bytecode
+moth — Dart on microcontrollers (also installed as `mothc`)
 
-usage: mothc <input.dart> [-o output.mothb] [--push HOST:PORT | --push SERIAL]
-       mothc create <dir>
-       mothc check <input.dart>
+usage: moth run [app.dart] [-d DEVICE]     run on a board or the simulator,
+                                           stay attached: r restarts, q quits
+       moth devices                        list boards and the simulator
+       moth create <dir>                   scaffold an editor-ready project
+       moth check <input.dart>             report subset errors, write nothing
+       moth <input.dart> [-o out.mothb] [--push HOST:PORT | --push SERIAL]
+                                           compile (and optionally push once)
 
-  create  scaffold a new moth project: app.dart plus the pubspec and editor
-          config that make it resolve in an IDE.
-  check   compile and report errors without writing a blob — what the
-          generated editor build task runs.
+  run picks the device the way flutter run does: -d wins, one connected
+  board auto-selects, several prompt you to choose, and the simulator is
+  the fallback when no board is attached. r is a hot
+  RESTART — the program is recompiled and pushed in ~150ms and starts
+  fresh; state-preserving reload is on the roadmap.
 
   --push  send the compiled program to a running host, which stops what it
           is doing and starts this instead. The display stays up.
@@ -73,6 +80,72 @@ Future<void> main(List<String> args) async {
   // arrive with a source location, fast enough to run on every save, which
   // is what the generated VS Code build task does. The editor's analyzer
   // covers ordinary Dart; only mothc knows what moth refuses.
+  if (args.first == 'devices') {
+    final devices = discoverDevices();
+    if (devices.isEmpty) {
+      stdout.writeln('no devices: no serial boards attached, and mothsim is '
+          'not built (run `make vm` in a moth checkout)');
+      exit(0);
+    }
+    for (final d in devices) {
+      stdout.writeln('  $d');
+    }
+    exit(0);
+  }
+
+  if (args.first == 'run') {
+    String? input;
+    String? deviceFlag;
+    for (var i = 1; i < args.length; i++) {
+      if (args[i] == '-d') {
+        if (i + 1 >= args.length) {
+          stderr.writeln('mothc: -d needs a device id (see: mothc devices)');
+          exit(64);
+        }
+        deviceFlag = args[++i];
+      } else if (input == null) {
+        input = args[i];
+      } else {
+        stderr.writeln('mothc: unexpected argument "${args[i]}"');
+        exit(64);
+      }
+    }
+    // Bare `moth run` in a scaffolded project means the obvious file.
+    input ??= 'app.dart';
+    if (!File(input).existsSync()) {
+      stderr.writeln('mothc: no such file: $input');
+      exit(66);
+    }
+    final devices = discoverDevices();
+    var device = selectDevice(devices, deviceFlag);
+    // Ambiguity with no -d and a human at the keyboard becomes a choice,
+    // not an error — flutter run's behavior. An explicit -d that matches
+    // nothing stays an error: the user asked for something specific.
+    if (device == null &&
+        deviceFlag == null &&
+        devices.length > 1 &&
+        stdin.hasTerminal) {
+      device = promptForDevice(devices);
+    }
+    if (device == null) {
+      if (devices.isEmpty) {
+        stderr.writeln('mothc: nothing to run on — connect a board, or '
+            'build the simulator with `make vm` in a moth checkout');
+      } else {
+        stderr.writeln(deviceFlag == null
+            ? 'mothc: more than one device — pick with -d:'
+            : 'mothc: "-d $deviceFlag" matches none of:');
+        for (final d in devices) {
+          stderr.writeln('  $d');
+        }
+      }
+      exit(64);
+    }
+    exit(device.kind == DeviceKind.simulator
+        ? await runOnSim(input, device)
+        : await runOnBoard(input, device));
+  }
+
   if (args.first == 'check') {
     if (args.length != 2) {
       stderr.writeln('mothc: check needs exactly one argument, the program');

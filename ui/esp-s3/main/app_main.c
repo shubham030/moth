@@ -5,6 +5,7 @@
  * hook inside uiCommit — exactly as mothsim does on the desktop.
  */
 #include "hotpush.h"
+#include "hw_natives.h"
 #include "moth_render.h"
 #include "moth_ui.h"
 #include "moth_vm.h"
@@ -393,20 +394,35 @@ static moth_value n_print(moth_vm *vm, int argc, const moth_value *argv, void *u
 }
 
 static moth_value n_delay(moth_vm *vm, int argc, const moth_value *argv, void *user) {
-  (void)vm; (void)argc; (void)user;
-  if (argv[0].type == MV_INT && argv[0].as.i > 0) vTaskDelay(pdMS_TO_TICKS(argv[0].as.i));
+  (void)argc; (void)user;
+  if (argv[0].type != MV_INT || argv[0].as.i <= 0) return moth_null();
+  /* The push channel is normally serviced on the frame hook — but a
+   * sensor-style program (now possible on this firmware) may loop on
+   * delay() and never pump a frame, which left the board receiving push
+   * frames it never acted on. Long waits are chunked so a push still
+   * lands within ~50ms; both accept_push and request_halt are already
+   * called from inside a native (the frame hook runs in uiCommit), so
+   * this is the same execution context they were designed for. */
+  int64_t remaining = argv[0].as.i;
+  while (remaining > 0) {
+    int64_t slice = remaining < 50 ? remaining : 50;
+    vTaskDelay(pdMS_TO_TICKS(slice));
+    remaining -= slice;
+    if (accept_push() && vm) {
+      moth_request_halt(vm);
+      return moth_null(); /* the program is being replaced; stop waiting */
+    }
+  }
   return moth_null();
-}
-
-static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
-  (void)vm; (void)c; (void)v; (void)u;
-  return moth_int(esp_timer_get_time() / 1000);
 }
 
 static void register_host_natives(moth_vm *vm) {
   moth_register(vm, "print", n_print, NULL);
   moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
+  /* Everything else — timing included — is the shared set, so the two
+   * firmwares can never diverge on what a program may call. Before this,
+   * a program with a screen could not read a sensor (or call micros). */
+  moth_hw_register(vm);
 }
 
 /* What the VM is currently executing, and how to let go of it. Both flash
@@ -635,6 +651,9 @@ static bool swap_to_pending(program_src *cur) {
  * before the run loop. False only when the display itself cannot start. */
 static bool boot_init(program_src *cur) {
   ESP_ERROR_CHECK(panel_init());
+  /* Sensors share the panel's I2C pins on this board; the hardware natives
+   * must talk through the bus the panel already owns. */
+  moth_hw_adopt_i2c_bus(panel_i2c_bus());
 #if MOTH_FRAME_PROFILE
   membench();
 #endif

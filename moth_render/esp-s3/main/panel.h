@@ -20,3 +20,10 @@ esp_err_t panel_present_argb(const uint32_t *argb, int y, int h);
 
 /* Poll touch. Returns true and fills x/y while a finger is down. */
 bool panel_touch_read(int *x, int *y);
+
+/* The I2C master bus the panel opened for its touch controller. On this
+ * board every onboard sensor (IMU, RTC) shares those two pins, so the
+ * hardware natives adopt this handle rather than fighting it with a second
+ * master. Valid after panel_init; the handle type is void* here to keep
+ * this header free of driver includes. */
+void *panel_i2c_bus(void);
