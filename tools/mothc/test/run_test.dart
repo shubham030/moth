@@ -1,0 +1,122 @@
+// The non-interactive halves of `mothc run`: device selection (the choice
+// the tool makes silently must be the obvious one) and the display filter
+// (verdict frames must vanish from the console without eating log bytes).
+import 'dart:typed_data';
+
+import 'package:mothc/src/devices.dart';
+import 'package:mothc/src/run.dart';
+import 'package:test/test.dart';
+
+Device board(String id) => Device(id, DeviceKind.board, 'serial board');
+Device sim() => Device('sim', DeviceKind.simulator, 'desktop simulator');
+
+void main() {
+  group('selectDevice', () {
+    test('one board auto-selects even when the simulator exists', () {
+      final d = selectDevice([board('/dev/cu.usbmodem2101'), sim()], null);
+      expect(d?.id, '/dev/cu.usbmodem2101');
+    });
+
+    test('no board falls back to the simulator', () {
+      expect(selectDevice([sim()], null)?.kind, DeviceKind.simulator);
+    });
+
+    test('two boards refuse to guess', () {
+      final d =
+          selectDevice([board('/dev/cu.usbmodemA'), board('/dev/cu.usbmodemB')], null);
+      expect(d, isNull);
+    });
+
+    test('-d matches a unique substring, so the /dev/cu. spelling is optional',
+        () {
+      final devices = [board('/dev/cu.usbmodem2101'), sim()];
+      expect(selectDevice(devices, 'usbmodem2101')?.id, '/dev/cu.usbmodem2101');
+      expect(selectDevice(devices, 'sim')?.kind, DeviceKind.simulator);
+      expect(selectDevice(devices, 'nope'), isNull);
+    });
+
+    test('-d that matches several is refused rather than guessed', () {
+      final devices = [board('/dev/cu.usbmodemA'), board('/dev/cu.usbmodemB')];
+      expect(selectDevice(devices, 'usbmodem'), isNull);
+    });
+  });
+
+  group('parseDeviceChoice', () {
+    final devices = [board('/dev/a'), board('/dev/b'), sim()];
+
+    test('a 1-based index picks the listed device', () {
+      expect(parseDeviceChoice(devices, '1')?.id, '/dev/a');
+      expect(parseDeviceChoice(devices, ' 3 ')?.kind, DeviceKind.simulator);
+    });
+
+    test('out-of-range, junk and EOF re-prompt rather than crash', () {
+      expect(parseDeviceChoice(devices, '0'), isNull);
+      expect(parseDeviceChoice(devices, '4'), isNull);
+      expect(parseDeviceChoice(devices, 'sim'), isNull);
+      expect(parseDeviceChoice(devices, ''), isNull);
+      expect(parseDeviceChoice(devices, null), isNull);
+    });
+  });
+
+  group('VerdictDisplayFilter', () {
+    Uint8List verdict(String cc, int nonce) => Uint8List.fromList([
+          ...cc.codeUnits,
+          nonce & 0xFF,
+          (nonce >> 8) & 0xFF,
+          (nonce >> 16) & 0xFF,
+          (nonce >> 24) & 0xFF,
+        ]);
+
+    test('a verdict frame vanishes; surrounding log bytes survive', () {
+      final f = VerdictDisplayFilter()..expectNonce(0x12345678);
+      final input = Uint8List.fromList([
+        ...'boot ok\n'.codeUnits,
+        ...verdict('MPOK', 0x12345678),
+        ...'running\n'.codeUnits,
+      ]);
+      expect(String.fromCharCodes(f.filter(input)), 'boot ok\nrunning\n');
+    });
+
+    test('the triple-sent copies all vanish', () {
+      final f = VerdictDisplayFilter()..expectNonce(7);
+      final v = verdict('MPRJ', 7);
+      final input = Uint8List.fromList([...v, ...v, ...v, ...'log'.codeUnits]);
+      expect(String.fromCharCodes(f.filter(input)), 'log');
+    });
+
+    test('a frame split across two chunks still vanishes', () {
+      final f = VerdictDisplayFilter()..expectNonce(0xAABBCCDD);
+      final v = verdict('MPOK', 0xAABBCCDD);
+      final a = f.filter(Uint8List.fromList(v.sublist(0, 3)));
+      final b = f.filter(Uint8List.fromList([...v.sublist(3), ...'x'.codeUnits]));
+      expect(String.fromCharCodes(a) + String.fromCharCodes(b), 'x');
+    });
+
+    test('an innocent MP in text is not eaten', () {
+      final f = VerdictDisplayFilter();
+      final input = Uint8List.fromList('temp MPa reading: 4 MPH!\n'.codeUnits);
+      expect(String.fromCharCodes(f.filter(input)), 'temp MPa reading: 4 MPH!\n');
+    });
+
+    test('a literal MPOK in program output is NOT eaten — the nonce must '
+        'be one this session issued', () {
+      final f = VerdictDisplayFilter()..expectNonce(1);
+      final input = Uint8List.fromList('MPOK ready\n'.codeUnits);
+      expect(String.fromCharCodes(f.filter(input)), 'MPOK ready\n');
+    });
+
+    test('a held prefix is released by flush when the wire goes quiet', () {
+      final f = VerdictDisplayFilter();
+      final shown = f.filter(Uint8List.fromList('speed: MP'.codeUnits));
+      expect(String.fromCharCodes(shown), 'speed: ');
+      expect(String.fromCharCodes(f.flush()), 'MP');
+    });
+
+    test('MP at the end of a chunk is held, then released when innocent', () {
+      final f = VerdictDisplayFilter();
+      final a = f.filter(Uint8List.fromList('speed: MP'.codeUnits));
+      final b = f.filter(Uint8List.fromList('H 88\n'.codeUnits));
+      expect(String.fromCharCodes(a) + String.fromCharCodes(b), 'speed: MPH 88\n');
+    });
+  });
+}
