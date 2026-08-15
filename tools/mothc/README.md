@@ -11,7 +11,7 @@ $ moth create hello && cd hello
 $ moth run
 Launching app.dart on /dev/cu.usbmodem2101
 
-pushed in 162ms
+pushed in 178ms
 r  hot restart (recompile + push; state resets)   h  this help   q  quit
 ```
 
