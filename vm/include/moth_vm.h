@@ -82,9 +82,12 @@ const char *moth_string_chars(moth_value v, int *len_out);
 moth_value moth_new_string(moth_vm *vm, const char *chars, int len);
 
 /* A fresh empty list, and appending to one — the pair a native needs to
- * return List<int> (a bulk I2C read, a UART drain). GC-owned; append the
- * items before anything else can allocate, or hold the list on the stack
- * you were passed. Append returns false on allocation failure. */
+ * return List<int> (a bulk I2C read, a UART drain). The list is GC-owned,
+ * and the hazard is specific: CREATING another GC object while holding an
+ * unrooted list may collect it — appends never collect (list growth is
+ * untracked realloc today, and keeping that promise is part of this API).
+ * Build one list at a time, finish it, return it. Append returns false on
+ * allocation failure. */
 moth_value moth_new_list(moth_vm *vm);
 bool moth_list_append(moth_vm *vm, moth_value list, moth_value item);
 

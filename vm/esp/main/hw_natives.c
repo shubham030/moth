@@ -6,6 +6,8 @@
 #include <string.h>
 
 #include "driver/gpio.h"
+#include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "driver/ledc.h"
 #include "driver/uart.h"
 #include "esp_adc/adc_oneshot.h"
@@ -31,6 +33,25 @@ static int s_pwm_used;
 static int s_servo_pin[SERVO_CHANNELS];
 static int s_servo_used;
 static uint64_t s_rng = 1;
+
+/* ---- timing — everything except delay(), which is host policy: the
+ * display host's delay also services the push channel. ------------------ */
+
+static moth_value n_delay_us(moth_vm *vm, int argc, const moth_value *argv, void *user) {
+  (void)vm; (void)argc; (void)user;
+  if (argv[0].type == MV_INT && argv[0].as.i > 0) esp_rom_delay_us((uint32_t)argv[0].as.i);
+  return moth_null();
+}
+
+static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)v; (void)u;
+  return moth_int(esp_timer_get_time() / 1000);
+}
+
+static moth_value n_micros(moth_vm *vm, int c, const moth_value *v, void *u) {
+  (void)vm; (void)c; (void)v; (void)u;
+  return moth_int(esp_timer_get_time());
+}
 
 /* ---- digital I/O ------------------------------------------------------- */
 
@@ -96,10 +117,16 @@ static moth_value n_analog_read(moth_vm *vm, int argc, const moth_value *argv, v
 }
 
 /* LEDC channel per pin, allocated on first use. */
-static int pwm_channel_for(int pin) {
+static int pwm_channel_lookup(int pin) {
   for (int i = 0; i < s_pwm_used; i++) {
     if (s_pwm_pin[i] == pin) return i;
   }
+  return -1;
+}
+
+static int pwm_channel_for(int pin) {
+  int existing = pwm_channel_lookup(pin);
+  if (existing >= 0) return existing;
   if (s_pwm_used >= PWM_CHANNELS) return -1;
   s_pwm_pin[s_pwm_used] = pin;
   return s_pwm_used++;
@@ -180,7 +207,9 @@ static moth_value n_tone(moth_vm *vm, int argc, const moth_value *argv, void *us
 static moth_value n_no_tone(moth_vm *vm, int argc, const moth_value *argv, void *user) {
   (void)vm; (void)argc; (void)user;
   if (argv[0].type != MV_INT) return moth_null();
-  int ch = pwm_channel_for((int)argv[0].as.i);
+  /* Lookup only: silencing a pin that never played must not consume a
+   * channel from the pool. */
+  int ch = pwm_channel_lookup((int)argv[0].as.i);
   if (ch >= 0) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ch, 0);
     ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)ch);
@@ -307,6 +336,8 @@ static moth_value n_i2c_begin(moth_vm *vm, int argc, const moth_value *argv, voi
   if (s_i2c_bus) {
     if (s_i2c_adopted) {
       ESP_LOGI(TAG, "i2cBegin: using the board's own bus (panel, sensors)");
+    } else {
+      ESP_LOGI(TAG, "i2cBegin: bus already started; new pins ignored");
     }
     return moth_null();
   }
@@ -479,6 +510,9 @@ static moth_value n_uart_read(moth_vm *vm, int argc, const moth_value *argv, voi
 /* ---- registration ------------------------------------------------------- */
 
 void moth_hw_register(moth_vm *vm) {
+  moth_register(vm, "delayMicroseconds", n_delay_us, NULL);
+  moth_register(vm, "millis", n_millis, NULL);
+  moth_register(vm, "micros", n_micros, NULL);
   moth_register(vm, "pinOutput", n_pin_output, NULL);
   moth_register(vm, "pinInput", n_pin_input, NULL);
   moth_register(vm, "pinInputPullup", n_pin_input_pullup, NULL);
