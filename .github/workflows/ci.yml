@@ -118,3 +118,43 @@ jobs:
           node-version: 20
       - name: Build the documentation site
         run: cd website && npm install && npm run build
+
+      # The build was being thrown away, so docs/ served nowhere and the site
+      # in docusaurus.config.ts (shubham030.github.io/moth) 404'd. Upload on
+      # every run — including pull requests, where nothing is published — so
+      # the deploy below can only ever ship bytes this job already checked.
+      - name: Package the site for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: website/build
+
+  # Publishing is separate from building on purpose: a pull request proves the
+  # site still compiles (onBrokenLinks is 'throw', so a dead link fails there
+  # rather than shipping), and only main is allowed to replace what readers see.
+  deploy-docs:
+    needs: docs
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Never let two pushes race the same live site; queue instead of cancelling,
+    # so the last commit on main is the one that ends up published.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # enablement creates the Pages site on the first run, so publishing needs
+      # no click in Settings. It is a no-op once the site exists. Pages on a
+      # private repository needs a paid plan; this repo is public, so it works.
+      - name: Enable Pages if it does not exist yet
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
