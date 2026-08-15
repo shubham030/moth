@@ -348,7 +348,7 @@ class FunctionCompiler {
         throw CompileError(
           'this kind of statement is not supported yet',
           stmt.offset,
-          hint: 'M1a supports var, if, while, for, return, break and continue',
+          hint: 'moth supports var, if, while, for, return, break and continue',
         );
     }
   }
@@ -606,7 +606,7 @@ class FunctionCompiler {
         throw CompileError(
           'this kind of expression is not supported yet',
           expr.offset,
-          hint: 'M1a supports numbers, bools, variables, arithmetic and calls',
+          hint: 'moth supports numbers, bools, strings, lists, arithmetic and calls',
         );
     }
   }

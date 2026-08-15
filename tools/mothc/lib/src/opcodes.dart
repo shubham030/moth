@@ -119,7 +119,7 @@ const kNatives = <String, int>{
   'uiWidth': 0,
   'uiHeight': 0,
   'uiRoot': 0,
-  'uiCreate': 1, // kind: 0 box, 1 label, 2 image, 3 slider, 4 switch
+  'uiCreate': 1, // kind: 0 box, 1 label, 2 image, 3 slider, 4 switch, 5 arc
   'uiDestroy': 1,
   'uiAttach': 3, // parent, child, index (-1 appends)
   'uiDetach': 1,

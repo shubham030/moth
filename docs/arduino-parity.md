@@ -57,7 +57,7 @@ On ESP32 `analogWrite` and `tone` are backed by LEDC hardware PWM, and
 | device probe | `i2cPing(addr)` → `bool` | `i2c_scan` on hardware |
 | register write | `i2cWriteReg(addr, reg, value)` → `bool` | `peripherals` |
 | register read | `i2cReadReg(addr, reg)` → `int` (−1 = no answer) | `peripherals` |
-| `Wire.requestFrom(n)` | `i2cReadBytes(addr, reg, n)` → `List<int>` (empty = no answer) | `hw_parity` |
+| `Wire.requestFrom(addr, n)` | `i2cReadBytes(addr, reg, n)` → `List<int>` (empty = no answer) | `hw_parity` |
 | bulk register write | `i2cWriteBytes(addr, reg, bytes)` → `bool` | `hw_parity` |
 | `Serial1.begin(baud)` | `uartBegin(port, tx, rx, baud)` | `peripherals` |
 | `Serial1.write(b)` | `uartWrite(port, byte)` | `peripherals` |
@@ -160,7 +160,7 @@ final led = OutputPin(38);
 led.toggle();
 
 final knob = AnalogPin(4);
-print(knob.read());
+print(knob.value);
 
 final bus = I2c(15, 14);           // sda, scl
 final sensor = I2cDevice(bus, 0x5a);

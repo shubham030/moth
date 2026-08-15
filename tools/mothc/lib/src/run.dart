@@ -2,7 +2,7 @@
 ///
 /// The shape is flutter run's: launch, stream the program's output, and a
 /// keystroke re-deploys. The honest difference is named honestly: `r` is a
-/// hot RESTART — the program is recompiled, pushed (~150ms over serial),
+/// hot RESTART — the program is recompiled, pushed (~173ms over serial),
 /// and starts from `main` with fresh state. State-preserving reload is on
 /// the roadmap; calling this "reload" would promise it early.
 ///

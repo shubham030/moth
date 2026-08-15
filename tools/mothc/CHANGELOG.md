@@ -5,7 +5,7 @@ First public release. One tool, two installed names: `moth` and `mothc`.
 - `moth run [app.dart] [-d DEVICE]` — the flutter-run loop: device
   auto-selection (one board wins, several prompt, simulator fallback),
   compile + push + attach with the program's output streaming, `r` = hot
-  restart (~150ms over the cable, measured), `q` = quit. Compile errors
+  restart (~173ms over the cable, measured), `q` = quit. Compile errors
   during `r` keep the old program running.
 - `moth devices` — boards and the simulator, without probing (probing
   resets most dev boards).

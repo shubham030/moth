@@ -6,12 +6,12 @@ slug: /builtins
 
 # Built-in functions
 
-{: .warning }
-These are the **low-level native boundary**, not the API you are meant to write
-long-term. They are flat functions because M1a has no classes yet. Once classes
-land, `package:moth` wraps all of this in idiomatic Dart —
-`DigitalPin(38, mode: PinMode.output).toggle()` — and these become an
-implementation detail. See [ADR-009](/docs/decisions).
+:::warning
+These are the **low-level native boundary** — flat and C-shaped because that
+is what a bytecode VM calls efficiently. `package:moth` already wraps them in
+ordinary Dart — `OutputPin(38).toggle()` — and [hardware.md](/docs/hardware) is
+the layer you should write against. See [ADR-009](/docs/decisions).
+:::
 
 Every function below is available to any moth program without an import.
 
@@ -23,8 +23,8 @@ of a crash halfway through.
 ## Output
 
 ### `print(value)`
-Prints a number, boolean or null, followed by a newline. On a board this goes
-to the serial log. Strings arrive in M1b.
+Prints a number, boolean, string, list or null, followed by a newline. On a
+board this goes to the serial log.
 
 ## Timing
 
@@ -64,7 +64,10 @@ Reads the ADC on `pin`. Returns −1 if that pin has no ADC. On ESP32 this is
 ADC1 one-shot at 12 dB attenuation.
 
 ### `analogWrite(pin, duty)`
-PWM output, `duty` from 0 to 255 — hardware LEDC on ESP32, at 5 kHz.
+PWM output, `duty` from 0 to 255 — hardware LEDC on ESP32, at 5 kHz. The
+LEDC block gives moth six PWM channels, shared between `analogWrite` and
+`tone`, allocated per pin on first use; a seventh pin is ignored with a
+warning in the board log.
 
 ### `tone(pin, hz)` / `noTone(pin)`
 Square wave at `hz` on `pin`, and off again.
@@ -141,10 +144,39 @@ Configures `pin` for 50Hz servo PWM. Call once before writing a pulse.
 ### `servoMicroseconds(pin, us)`
 The pulse width that positions the horn. Clamped to 500..2500, so a value from
 a knob can be fed in directly instead of grinding the servo against its stop.
+Two servo channels exist on ESP32; a third `servoAttach` is ignored with a
+warning in the board log.
 
 A servo is never told an angle — it is told a pulse width and holds whatever
 that means to it. `package:moth`'s `Servo(pin).write(degrees)` maps 0..180 onto
 1000..2000us, which is a convention, not a measurement.
+
+## Display
+
+The display natives are the [backend contract](/docs/backend) — the flat,
+numeric boundary the widget layer in `package:moth` is built on. You will
+normally never call them: write widgets (`Container`, `Text`, `Slider`, …)
+and let `runApp`/`pumpFrame` drive this layer for you. They are listed here
+because "every function below is available" should stay true.
+
+| Function | What it does |
+| --- | --- |
+| `uiWidth()` / `uiHeight()` | display size in pixels |
+| `uiRoot()` | the root node, owned by the backend |
+| `uiCreate(kind)` | new node — 0 box, 1 label, 2 image, 3 slider, 4 switch, 5 arc |
+| `uiDestroy(node)` | frees a node |
+| `uiAttach(parent, child, index)` | inserts a child; index −1 appends |
+| `uiDetach(node)` | removes a node from its parent |
+| `uiSetNum(node, prop, value)` | sets a float property |
+| `uiSetInt(node, prop, value)` | sets an integer property — colours, enums |
+| `uiSetText(node, prop, text)` | sets a text property |
+| `uiAnimate(node, prop, from, to, ms, easing)` | starts a native animation; returns its id, 0 on failure |
+| `uiTick(dtMs)` | advances animations |
+| `uiCommit()` | lays out, paints, presents; true when the frame repainted |
+| `uiPoll()` | next event as `node * 8 + kind`, −1 when empty |
+| `uiEventValue()` | the value carried by the last polled event |
+| `uiFrameOf(node, which)` | a node's laid-out frame; `which` 0..3 = x, y, w, h |
+| `uiSafeArea(which)` | the always-visible rectangle — the inscribed square on a round panel |
 
 ## Writing your own helpers
 

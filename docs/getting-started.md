@@ -26,7 +26,8 @@ renderer are C and build in a minute. You also need CMake plus a C
 compiler for that:
 
 ```console
-$ brew install dart-sdk cmake      # macOS; use your package manager elsewhere
+$ brew install dart-sdk cmake sdl2 # macOS; use your package manager elsewhere
+                                   # (sdl2 is what the windowed simulator draws with)
 $ git clone https://github.com/shubham030/moth.git
 $ cd moth
 ```
@@ -34,10 +35,12 @@ $ cd moth
 Build the VM and the desktop runner:
 
 ```console
-$ cmake -B vm/build vm && cmake --build vm/build
+$ cmake -B build . && cmake --build build
 ```
 
-That produces `vm/build/mothrun`. Fetch the compiler's dependencies once:
+That produces `build/vm/mothrun` (the headless runner) and `build/mothsim`
+(the windowed simulator — skipped with a warning if SDL2 is missing). Fetch
+the compiler's dependencies once:
 
 ```console
 $ dart pub get --directory tools/mothc
@@ -49,7 +52,7 @@ $ dart pub get --directory tools/mothc
 $ dart run tools/mothc/bin/mothc.dart examples/blink.dart
 wrote examples/blink.mothb (138 bytes)
 
-$ ./vm/build/mothrun examples/blink.mothb --stop-after 3000
+$ ./build/vm/mothrun examples/blink.mothb --stop-after 3000
 [     0ms] pin 38 -> output
 [     0ms] pin 38 = HIGH
 [   500ms] pin 38 = low
@@ -72,6 +75,7 @@ Useful flags:
 | `--quiet` | suppress the pin/bus trace, leaving only `print()` |
 | `--analog PIN=VAL` | what `analogRead(PIN)` should return |
 | `--i2c-device ADDR` | pretend a device answers at that address |
+| `--i2c-reg A:R=V` | preload a fake device register (`0x48:0=25`) |
 | `--seed N` | seed `random()` |
 
 ## 3. Write your own
@@ -91,7 +95,7 @@ void main() {
 ```
 
 ```console
-$ dart run tools/mothc/bin/mothc.dart hello.dart && ./vm/build/mothrun hello.mothb
+$ dart run tools/mothc/bin/mothc.dart hello.dart && ./build/vm/mothrun hello.mothb
 2
 4
 6
@@ -102,10 +106,10 @@ $ dart run tools/mothc/bin/mothc.dart hello.dart && ./vm/build/mothrun hello.mot
 If you make a mistake, the compiler points at it:
 
 ```
-hello.dart:3:10: 'x' is not defined
+hello.dart:2:10: 'x' is not defined
     return x * 2;
            ^
-  hint: only local variables exist in M1a — declare it with "var x = ...;"
+  hint: declare it with "var x = ...;" — at the top of the file, or inside the function that uses it
 ```
 
 For an app with a screen, scaffold a project instead:
@@ -119,6 +123,8 @@ created my_app/
   analysis_options.yaml — standard Dart lints
   .vscode/tasks.json    — build task runs "mothc check"
   .gitignore            — keeps build output out of git
+
+next: cd my_app && moth run
 ```
 
 You only ever edit `app.dart`. The rest is for your editor: mothc resolves
@@ -142,12 +148,12 @@ streaming your program's output:
 $ mothc run app.dart
 Launching app.dart on /dev/cu.usbmodem2101
 
-pushed in 178ms
+pushed in 174ms
 r  hot restart (recompile + push; state resets)   h  this help   q  quit
 ```
 
 Press `r` after an edit and the board is running your new code in about
-150ms. It is a hot *restart* — the program starts fresh from `main` —
+173ms. It is a hot *restart* — the program starts fresh from `main` —
 because moth does not preserve state across pushes yet; the prompt says so
 rather than borrowing Flutter's "reload". `mothc devices` lists what run
 can see; `-d` picks explicitly (`-d sim`, or any unique part of a serial
@@ -196,28 +202,31 @@ I (1280) moth: 1
 I (1280) moth: pin 21 = low
 ```
 
-{: .note }
+:::note
 If flashing fails with "serial data stream stopped", drop the baud rate
 (`-b 115200`). If the port is missing, check `ls /dev/cu.*` — it changes when
 the board re-enumerates.
+:::
 
 ## 5. The fast loop: push, don't reflash
 
-Flashing is for the first install. After that, the UI firmware
-(`ui/esp-s3`) accepts a new program over the same USB cable in well under a
-second — your app is bytecode, not a firmware image, so there is nothing to
-reflash:
+One thing first: §4 flashed the headless firmware (`vm/esp`), which has no
+push receiver. The push loop lives in the UI firmware — flash it once the
+same way (`cd ui/esp-s3 && idf.py set-target esp32s3 && idf.py -p <port>
+flash`), and every command below works against it. After that, the board
+accepts a new program over the same USB cable in well under a second — your
+app is bytecode, not a firmware image, so there is nothing to reflash:
 
 ```console
 $ dart run tools/mothc/bin/mothc.dart examples/ui/counter.dart \
     --push /dev/cu.usbmodem2101
-wrote examples/ui/counter.mothb (2209 bytes)
-pushed over /dev/cu.usbmodem2101 in 128ms
+wrote examples/ui/counter.mothb (2211 bytes)
+pushed over /dev/cu.usbmodem2101 in 174ms
 ```
 
-(128ms measured on an ESP32-S3: compile-to-verdict for a 2.2KB program,
-where "pushed" means the board verified the program and confirmed with a
-nonce-carrying reply.)
+("pushed" means the board verified the program and confirmed with a
+nonce-carrying reply before the running one was disturbed; the time counts
+from opening the port, not from compilation.)
 
 The display never blanks — the running program stops, the new one draws over
 it. The pushed program is verified before the running one is disturbed, it
@@ -229,7 +238,8 @@ table this repo now uses, and a generated `sdkconfig` from before it wins
 over the new defaults. If the boot log says `no mothb partition`, run
 `rm ui/esp-s3/sdkconfig && idf.py reconfigure` and flash again.
 
-To drop the cable entirely, give the board your WiFi once:
+To drop the cable for one-shot pushes — the attached `mothc run` loop
+still needs it — give the board your WiFi once:
 
 ```console
 $ python3 tools/provision/provision.py --ssid your-network
@@ -258,21 +268,24 @@ a good first test that your wiring works:
 
 ```dart
 void main() {
-  i2cBegin(15, 14); // sda, scl — use your board's pins
+  var sda = 15; // Waveshare 1.75C defaults; change for your board
+  var scl = 14;
+  i2cBegin(sda, scl);
+
   var found = 0;
   for (var addr = 8; addr < 120; addr++) {
     if (i2cPing(addr)) {
-      print(addr);
+      print(addr); // decimal; 0x18 shows as 24
       found++;
     }
   }
-  print(-1);
+  print(-1); // marker: scan complete
   print(found);
 }
 ```
 
-On a Waveshare ESP32-S3-Touch-AMOLED this reports eight devices, including the
-touch controller at 0x5A.
+On a Waveshare ESP32-S3-Touch-AMOLED this reports eight devices; the touch
+controller at 0x5A shows as 90, because `print` writes decimal.
 
 ## Next
 

@@ -11,14 +11,14 @@ $ moth create hello && cd hello
 $ moth run
 Launching app.dart on /dev/cu.usbmodem2101
 
-pushed in 178ms
+pushed in 174ms
 r  hot restart (recompile + push; state resets)   h  this help   q  quit
 ```
 
 - **Run**: `moth run` picks the device the way flutter run does — one
   connected board auto-selects, several prompt you, the simulator is the
   fallback — then stays attached streaming your program's output. Press
-  `r` after an edit and the board runs your new code in ~150ms. It is a
+  `r` after an edit and the board runs your new code in ~173ms. It is a
   hot *restart* (state resets); state-preserving reload is on the roadmap.
 - **Devices**: `moth devices` lists boards and the simulator. Listing
   never probes a port — probing resets most dev boards.

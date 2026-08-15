@@ -40,7 +40,7 @@ class — which a bare `38` is not.
 |---|---|
 | `OutputPin(number)` | `value` (get/set), `toggle()` |
 | `InputPin(number, pullUp)` | `value`, `isPressed` |
-| `AnalogPin(number)` | `value` (0–4095), `fraction` (0.0–1.0), `scaled(low, high)` |
+| `AnalogPin(number)` | `value` (0–4095, or −1 if the pin has no ADC), `fraction` (0.0–1.0), `scaled(low, high)` |
 | `PwmPin(number)` | `duty` (0–255), `level` (0.0–1.0) |
 
 `pullUp` holds an input high until something pulls it down — the usual wiring
@@ -78,10 +78,42 @@ final sensor = I2cDevice(bus, 0x48);
 if (sensor.isPresent) print(sensor.read(0));
 ```
 
+For multi-byte registers, `readBytes(reg, n)` returns a list of up to 64
+bytes (empty when the device does not answer) and `writeBytes(reg, bytes)`
+writes one — both exist on `I2c` (with an address argument) and on
+`I2cDevice`.
+
 `Uart(port, tx, rx, baud)` has `write(text)`, `read()`, `available` and
 `hasData`.
 
 `Buzzer(pin)` has `play(hz)`, `stop()`, and `beep(hz, ms)`.
+
+## Servo
+
+```dart
+final horn = Servo(18);
+horn.write(90);              // degrees, 0..180
+horn.writeMicroseconds(1500); // or the pulse width directly
+```
+
+`write(degrees)` maps 0..180 onto 1000..2000us — a convention most hobby
+servos follow, not a measurement; `writeMicroseconds` (clamped 500..2500) is
+the escape hatch when yours doesn't. Two servo channels exist on ESP32; the
+six PWM channels behind `PwmPin` and `Buzzer` are a separate, shared pool,
+and one more of either is ignored with a warning in the board log.
+
+## Settings that survive a reboot
+
+```dart
+final prefs = Prefs();
+var boots = prefs.getInt('boots', 0) + 1;
+prefs.setInt('boots', boots);
+```
+
+Backed by NVS flash on a board and by memory in the simulator. Keys are 1–15
+characters; `setInt` returns false when the key is invalid or the store is
+full — worth checking on writes you care about, because afterwards a failed
+save looks exactly like one that never happened.
 
 ## A whole program
 
@@ -107,14 +139,20 @@ void main() {
 }
 ```
 
-That is `examples/lamp.dart`. Run it without hardware:
+That is `examples/lamp.dart`, minus an indicator LED on pin 38. Run it
+without hardware:
 
 ```
 $ dart run tools/mothc/bin/mothc.dart examples/lamp.dart
 $ ./build/vm/mothrun examples/lamp.mothb --analog 4=2048 --stop-after 200
 [     0ms] pin 11 -> input (pull-up)
 [     0ms] pin 5 -> output
+[     0ms] pin 38 -> output
 [     0ms] pin 5 PWM duty 0/255
+[    50ms] pin 5 PWM duty 0/255
+[   100ms] pin 5 PWM duty 0/255
+[   150ms] pin 5 PWM duty 0/255
+-- stopped after 200ms (simulated) --
 ```
 
 ## Writing your own

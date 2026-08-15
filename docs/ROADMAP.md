@@ -172,7 +172,7 @@ Dart program draws in a desktop window and on the board.
       writing a blob. CI holds both clean
 - [x] `mothc run` — the flutter-run loop: device auto-selection (one board
       wins, simulator as fallback, `-d` to pick), compile + push + attach
-      with the program's output streaming, `r` = hot restart in ~150ms on
+      with the program's output streaming, `r` = hot restart in ~173ms on
       hardware (37ms sim, measured), honest about state resetting. The
       attach session owns the serial port, so restarts never fight the
       console over it

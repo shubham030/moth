@@ -70,5 +70,5 @@ render:
 	cmake -B moth_render/build moth_render && cmake --build moth_render/build
 
 clean:
-	rm -rf vm/build moth_render/build website/build website/.docusaurus
+	rm -rf build vm/build moth_render/build website/build website/.docusaurus
 	rm -f examples/*.mothb test/cases/*.mothb

@@ -25,7 +25,7 @@ usage: moth run [app.dart] [-d DEVICE]     run on a board or the simulator,
   run picks the device the way flutter run does: -d wins, one connected
   board auto-selects, several prompt you to choose, and the simulator is
   the fallback when no board is attached. r is a hot
-  RESTART — the program is recompiled and pushed in ~150ms and starts
+  RESTART — the program is recompiled and pushed in ~173ms and starts
   fresh; state-preserving reload is on the roadmap.
 
   --push  send the compiled program to a running host, which stops what it
@@ -72,7 +72,7 @@ Future<void> main(List<String> args) async {
     }
     stdout
       ..writeln()
-      ..writeln('next: make ui F=${args[1]}/app.dart');
+      ..writeln('next: cd ${args[1]} && moth run');
     exit(0);
   }
 
