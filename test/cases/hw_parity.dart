@@ -22,6 +22,12 @@ void main() {
   print(prefs.getInt('boots', -1) + 1);
   print(prefs.setInt('a-key-far-too-long-for-nvs', 1)); // invalid: false
 
+  // On the simulator's virtual clock these start at zero — the assertion
+  // is that the natives exist and answer in integers, on every host.
+  delayMicroseconds(50);
+  print(millis() >= 0);
+  print(micros() >= 0);
+
   final servo = Servo(4);
   servo.writeMicroseconds(1500);
   servo.write(90); // the class maps degrees to pulse width

@@ -416,17 +416,12 @@ static moth_value n_delay(moth_vm *vm, int argc, const moth_value *argv, void *u
   return moth_null();
 }
 
-static moth_value n_millis(moth_vm *vm, int c, const moth_value *v, void *u) {
-  (void)vm; (void)c; (void)v; (void)u;
-  return moth_int(esp_timer_get_time() / 1000);
-}
-
 static void register_host_natives(moth_vm *vm) {
   moth_register(vm, "print", n_print, NULL);
   moth_register(vm, "delay", n_delay, NULL);
-  moth_register(vm, "millis", n_millis, NULL);
-  /* The full hardware set, shared with the headless host — before this,
-   * a program with a screen could not read a sensor. */
+  /* Everything else — timing included — is the shared set, so the two
+   * firmwares can never diverge on what a program may call. Before this,
+   * a program with a screen could not read a sensor (or call micros). */
   moth_hw_register(vm);
 }
 
