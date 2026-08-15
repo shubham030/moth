@@ -51,7 +51,7 @@ void main() {
         ]);
 
     test('a verdict frame vanishes; surrounding log bytes survive', () {
-      final f = VerdictDisplayFilter();
+      final f = VerdictDisplayFilter()..expectNonce(0x12345678);
       final input = Uint8List.fromList([
         ...'boot ok\n'.codeUnits,
         ...verdict('MPOK', 0x12345678),
@@ -61,14 +61,14 @@ void main() {
     });
 
     test('the triple-sent copies all vanish', () {
-      final f = VerdictDisplayFilter();
+      final f = VerdictDisplayFilter()..expectNonce(7);
       final v = verdict('MPRJ', 7);
       final input = Uint8List.fromList([...v, ...v, ...v, ...'log'.codeUnits]);
       expect(String.fromCharCodes(f.filter(input)), 'log');
     });
 
     test('a frame split across two chunks still vanishes', () {
-      final f = VerdictDisplayFilter();
+      final f = VerdictDisplayFilter()..expectNonce(0xAABBCCDD);
       final v = verdict('MPOK', 0xAABBCCDD);
       final a = f.filter(Uint8List.fromList(v.sublist(0, 3)));
       final b = f.filter(Uint8List.fromList([...v.sublist(3), ...'x'.codeUnits]));
@@ -79,6 +79,20 @@ void main() {
       final f = VerdictDisplayFilter();
       final input = Uint8List.fromList('temp MPa reading: 4 MPH!\n'.codeUnits);
       expect(String.fromCharCodes(f.filter(input)), 'temp MPa reading: 4 MPH!\n');
+    });
+
+    test('a literal MPOK in program output is NOT eaten — the nonce must '
+        'be one this session issued', () {
+      final f = VerdictDisplayFilter()..expectNonce(1);
+      final input = Uint8List.fromList('MPOK ready\n'.codeUnits);
+      expect(String.fromCharCodes(f.filter(input)), 'MPOK ready\n');
+    });
+
+    test('a held prefix is released by flush when the wire goes quiet', () {
+      final f = VerdictDisplayFilter();
+      final shown = f.filter(Uint8List.fromList('speed: MP'.codeUnits));
+      expect(String.fromCharCodes(shown), 'speed: ');
+      expect(String.fromCharCodes(f.flush()), 'MP');
     });
 
     test('MP at the end of a chunk is held, then released when innocent', () {
