@@ -81,6 +81,19 @@ const char *moth_string_chars(moth_value v, int *len_out);
 /* Allocates a string the collector owns. Safe to call from a native. */
 moth_value moth_new_string(moth_vm *vm, const char *chars, int len);
 
+/* A fresh empty list, and appending to one — the pair a native needs to
+ * return List<int> (a bulk I2C read, a UART drain). GC-owned; append the
+ * items before anything else can allocate, or hold the list on the stack
+ * you were passed. Append returns false on allocation failure. */
+moth_value moth_new_list(moth_vm *vm);
+bool moth_list_append(moth_vm *vm, moth_value list, moth_value item);
+
+/* Reading a list a program passed in (a bulk I2C write's bytes). at()
+ * returns null when out of range. */
+bool moth_is_list(moth_value v);
+int moth_list_length(moth_value v);
+moth_value moth_list_at(moth_value v, int index);
+
 /* Renders any value the way Dart's print() would — including lists and
  * shortest-round-trip doubles. Hosts should use this so print(x) and '$x'
  * can never disagree. */

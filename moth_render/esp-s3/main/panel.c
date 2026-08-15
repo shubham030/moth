@@ -186,6 +186,8 @@ esp_err_t panel_present_argb(const uint32_t *argb, int band_y, int band_h)
     return ESP_OK;
 }
 
+void *panel_i2c_bus(void) { return s_i2c_bus; }
+
 bool panel_touch_read(int *x, int *y)
 {
     esp_lcd_touch_read_data(s_touch);
