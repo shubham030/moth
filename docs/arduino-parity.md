@@ -199,5 +199,9 @@ because they are what Arduino tutorials translate into line for line.
   not a firmware image.
 - **Test peripherals in CI.** Fake analog values and fake I2C devices are
   command-line flags, so hardware behavior is a golden test.
-- **Catch mistakes in the language.** `digitalWrite(pin, 1)` and a missing
-  variable are compile errors with a source location and a hint.
+- **Catch mistakes earlier, and in plainer words.** A missing variable is a
+  one-line compile error with a hint (Arduino's compiler catches it too — as
+  a page of C++ diagnostics). `digitalWrite(pin, 1)` — valid Arduino, since
+  `HIGH` is literally 1 — is a type error in your editor here, because every
+  built-in is declared with real Dart types; and a board asked to write a
+  non-bool refuses at runtime instead of guessing.
