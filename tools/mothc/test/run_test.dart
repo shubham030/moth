@@ -22,8 +22,8 @@ void main() {
     });
 
     test('two boards refuse to guess', () {
-      final d =
-          selectDevice([board('/dev/cu.usbmodemA'), board('/dev/cu.usbmodemB')], null);
+      final d = selectDevice(
+          [board('/dev/cu.usbmodemA'), board('/dev/cu.usbmodemB')], null);
       expect(d, isNull);
     });
 
@@ -88,17 +88,20 @@ void main() {
       final f = VerdictDisplayFilter()..expectNonce(0xAABBCCDD);
       final v = verdict('MPOK', 0xAABBCCDD);
       final a = f.filter(Uint8List.fromList(v.sublist(0, 3)));
-      final b = f.filter(Uint8List.fromList([...v.sublist(3), ...'x'.codeUnits]));
+      final b =
+          f.filter(Uint8List.fromList([...v.sublist(3), ...'x'.codeUnits]));
       expect(String.fromCharCodes(a) + String.fromCharCodes(b), 'x');
     });
 
     test('an innocent MP in text is not eaten', () {
       final f = VerdictDisplayFilter();
       final input = Uint8List.fromList('temp MPa reading: 4 MPH!\n'.codeUnits);
-      expect(String.fromCharCodes(f.filter(input)), 'temp MPa reading: 4 MPH!\n');
+      expect(
+          String.fromCharCodes(f.filter(input)), 'temp MPa reading: 4 MPH!\n');
     });
 
-    test('a literal MPOK in program output is NOT eaten — the nonce must '
+    test(
+        'a literal MPOK in program output is NOT eaten — the nonce must '
         'be one this session issued', () {
       final f = VerdictDisplayFilter()..expectNonce(1);
       final input = Uint8List.fromList('MPOK ready\n'.codeUnits);
@@ -116,7 +119,8 @@ void main() {
       final f = VerdictDisplayFilter();
       final a = f.filter(Uint8List.fromList('speed: MP'.codeUnits));
       final b = f.filter(Uint8List.fromList('H 88\n'.codeUnits));
-      expect(String.fromCharCodes(a) + String.fromCharCodes(b), 'speed: MPH 88\n');
+      expect(
+          String.fromCharCodes(a) + String.fromCharCodes(b), 'speed: MPH 88\n');
     });
   });
 }

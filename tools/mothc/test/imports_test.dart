@@ -30,11 +30,11 @@ void main() {
 
   test('a file imported through a symlink is loaded once', () {
     Link('${dir.path}/alias.dart').createSync('${dir.path}/helper.dart');
-    File('${dir.path}/via_link.dart')
-        .writeAsStringSync("import 'alias.dart';\nint plus() => shared() + 10;\n");
-    File('${dir.path}/main.dart').writeAsStringSync(
-        "import 'helper.dart';\nimport 'via_link.dart';\n"
-        "void main() { print(shared()); print(plus()); }\n");
+    File('${dir.path}/via_link.dart').writeAsStringSync(
+        "import 'alias.dart';\nint plus() => shared() + 10;\n");
+    File('${dir.path}/main.dart')
+        .writeAsStringSync("import 'helper.dart';\nimport 'via_link.dart';\n"
+            "void main() { print(shared()); print(plus()); }\n");
 
     final r = compile('${dir.path}/main.dart');
     expect(r.exitCode, 0,
@@ -44,9 +44,9 @@ void main() {
 
   test('genuinely duplicated declarations are still rejected', () {
     File('${dir.path}/other.dart').writeAsStringSync('int shared() => 2;\n');
-    File('${dir.path}/main.dart').writeAsStringSync(
-        "import 'helper.dart';\nimport 'other.dart';\n"
-        "void main() { print(shared()); }\n");
+    File('${dir.path}/main.dart')
+        .writeAsStringSync("import 'helper.dart';\nimport 'other.dart';\n"
+            "void main() { print(shared()); }\n");
 
     final r = compile('${dir.path}/main.dart');
     expect(r.exitCode, isNot(0));

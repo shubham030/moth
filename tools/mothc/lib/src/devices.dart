@@ -66,7 +66,8 @@ List<Device> discoverDevices() {
   final devices = discoverBoards();
   final sim = findMothsim();
   if (sim != null) {
-    devices.add(Device('sim', DeviceKind.simulator, 'desktop simulator ($sim)'));
+    devices
+        .add(Device('sim', DeviceKind.simulator, 'desktop simulator ($sim)'));
   }
   return devices;
 }

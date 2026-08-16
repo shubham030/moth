@@ -13,13 +13,13 @@
 // really does drive the pin. Every class configures its hardware in its
 // constructor, so there is no separate setup step to forget.
 
-/// A pin the program drives.
 // The host functions underneath. Imported for this file's own use and
 // re-exported so a program importing this library sees them too — the Dart
 // analyzer's imports are not transitive, even though moth's global scope is.
 import 'natives.dart';
 export 'natives.dart';
 
+/// A pin the program drives.
 class OutputPin {
   final int number;
 

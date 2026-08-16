@@ -3,7 +3,7 @@ description: >-
   Flutter's programming model for microcontrollers: widgets, setState and
   pins-as-objects for Dart programs compiled by mothc and run on-device by
   the moth VM.
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/shubham030/moth
 repository: https://github.com/shubham030/moth
 issue_tracker: https://github.com/shubham030/moth/issues

@@ -1,3 +1,10 @@
+## 0.1.1
+
+- An `example/` with the counter every `moth create` scaffolds.
+- Doc comment placement and explicit field types, for a clean pub.dev
+  analysis. `length == 0` stays (the VM implements `.length`, not
+  `.isEmpty`), now with the reason recorded in the source.
+
 ## 0.1.0
 
 First public release.

@@ -23,8 +23,10 @@ commit or reply:
   wrong. The "duplicated scanner" was semantic divergence (connections drop,
   serial resyncs), so the constants were shared and the difference documented
   instead of falsely unified.
-- **Deferred** — scoped consciously, with the reasoning recorded (the LAN
-  pairing token before v0.1).
+- **Deferred** — scoped consciously, with the reasoning recorded (push replay
+  in ADR-010: the pairing HMAC shipped, but a captured frame can still be
+  replayed, and that is written down as an attacker-timed rollback primitive
+  rather than left implied).
 
 Never loosen a guarantee, a budget, or a documented behavior just to make a
 finding go away — and never accept a finding's framing without checking it

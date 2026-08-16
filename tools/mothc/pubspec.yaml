@@ -2,7 +2,7 @@ name: mothc
 description: >-
   Compiles a Dart subset to moth bytecode for microcontrollers, scaffolds
   projects, and hot-pushes programs to a running board over USB or WiFi.
-version: 0.1.0
+version: 0.1.1
 homepage: https://github.com/shubham030/moth
 repository: https://github.com/shubham030/moth
 issue_tracker: https://github.com/shubham030/moth/issues
@@ -18,7 +18,7 @@ executables:
   mothc:
 
 dependencies:
-  analyzer: ^7.0.0
+  analyzer: ^14.0.0
   crypto: ^3.0.0
   image: ^4.0.0
   path: ^1.9.1

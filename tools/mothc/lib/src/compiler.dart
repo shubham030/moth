@@ -346,6 +346,7 @@ class Compiler {
       final superIdx = classSuper[i];
       if (superIdx == null) continue;
       final superCtor = classDeclarations[superIdx]
+          .body
           .members
           .whereType<ConstructorDeclaration>()
           .firstOrNull;
@@ -581,12 +582,12 @@ class Compiler {
       // inherited ones count: a subclass with no fields of its own still has
       // to run its superclass's, which is why this asks for the effective
       // list rather than the class's own.
-      final hasCtor = decl.members.any((m) => m is ConstructorDeclaration);
+      final hasCtor = decl.body.members.any((m) => m is ConstructorDeclaration);
       if (hasCtor || effectiveFieldInits(i).isNotEmpty) {
         classCtorIndex[i] = next++;
       }
       final slots = <(String, int)>[];
-      for (final member in decl.members) {
+      for (final member in decl.body.members) {
         // Only top-level functions may be external (that is where the
         // built-ins are declared). An external MEMBER of any kind — method,
         // getter, setter, field, constructor — has no built-in to resolve
@@ -597,6 +598,9 @@ class Compiler {
           MethodDeclaration m => m.externalKeyword,
           FieldDeclaration f => f.externalKeyword,
           ConstructorDeclaration c => c.externalKeyword,
+          // Primary-constructor bodies (new in the grammar) cannot carry
+          // `external`; the construct itself is refused elsewhere.
+          PrimaryConstructorBody _ => null,
         };
         if (externalKw != null) {
           throw CompileError(
@@ -637,7 +641,7 @@ class Compiler {
     var ctor = noCtor;
     final fieldInits = effectiveFieldInits(index);
     final declaredCtor =
-        decl.members.whereType<ConstructorDeclaration>().firstOrNull;
+        decl.body.members.whereType<ConstructorDeclaration>().firstOrNull;
 
     // The constructor is emitted first so its index is independent of where
     // it appears among the members (and exists even when synthesized).
@@ -647,7 +651,7 @@ class Compiler {
               this, fields, methodNames, setterNames,
               isConstructor: true)
           .compileMember(
-        name: '${decl.name.lexeme}()',
+        name: '${decl.namePart.typeName.lexeme}()',
         params: declaredCtor?.parameters.parameters ?? <FormalParameter>[],
         body: declaredCtor?.body,
         offset: declaredCtor?.offset ?? decl.offset,
@@ -655,7 +659,7 @@ class Compiler {
       ));
     }
 
-    for (final member in decl.members) {
+    for (final member in decl.body.members) {
       if (member is FieldDeclaration) continue; // collected already
 
       if (member is ConstructorDeclaration) {
@@ -702,7 +706,7 @@ class Compiler {
                 this, fields, methodNames, setterNames,
                 isConstructor: false)
             .compileMember(
-          name: '${decl.name.lexeme}.${member.name.lexeme}',
+          name: '${decl.namePart.typeName.lexeme}.${member.name.lexeme}',
           params: member.parameters?.parameters ?? const [],
           body: member.body,
           offset: member.offset,
@@ -716,7 +720,7 @@ class Compiler {
     }
 
     return ClassBlob(
-      constants.addString(decl.name.lexeme),
+      constants.addString(decl.namePart.typeName.lexeme),
       [for (final f in fields) constants.addString(f)],
       // Inherited entries included, own ones already replacing them by name.
       [
@@ -732,7 +736,7 @@ class Compiler {
   }
 
   void _collectClass(ClassDeclaration decl) {
-    final name = decl.name.lexeme;
+    final name = decl.namePart.typeName.lexeme;
     if (classIndex.containsKey(name) ||
         functionIndex.containsKey(name) ||
         globalIndex.containsKey(name)) {
@@ -748,7 +752,7 @@ class Compiler {
 
     final fields = <String>[];
     final inits = <(String, Expression)>[];
-    for (final member in decl.members) {
+    for (final member in decl.body.members) {
       if (member is FieldDeclaration) {
         if (member.isStatic) {
           throw CompileError(
@@ -773,7 +777,7 @@ class Compiler {
     // resolves fields first — so a setter with a field's name is silently
     // dead code, which in a hardware API is the line that drives the pin.
     final fieldNames = fields.toSet();
-    for (final member in decl.members) {
+    for (final member in decl.body.members) {
       if (member is MethodDeclaration &&
           fieldNames.contains(member.name.lexeme)) {
         throw CompileError(
@@ -786,7 +790,7 @@ class Compiler {
     }
 
     final seen = <String>{};
-    for (final member in decl.members) {
+    for (final member in decl.body.members) {
       if (member is MethodDeclaration) {
         if (!seen.add(_memberKey(member))) {
           throw CompileError(
@@ -803,7 +807,7 @@ class Compiler {
     classFields.add(fields);
     classFieldInits.add(inits);
     classSuper.add(null);
-    _pendingSuperNames.add(decl.extendsClause?.superclass.name2.lexeme);
+    _pendingSuperNames.add(decl.extendsClause?.superclass.name.lexeme);
   }
 
   void _collectGlobals(TopLevelVariableDeclaration decl) {
@@ -829,7 +833,7 @@ class Compiler {
   /// Parameter count of a class's constructor, excluding the receiver.
   /// Null when the class declares none.
   int? classCtorArity(int classIdx) {
-    for (final member in classDeclarations[classIdx].members) {
+    for (final member in classDeclarations[classIdx].body.members) {
       if (member is ConstructorDeclaration) {
         return member.parameters.parameters.length;
       }
@@ -847,6 +851,7 @@ class Compiler {
   /// The same for a class's constructor, which is what a widget call is.
   List<FormalParameter> classCtorParams(int classIdx) {
     final ctor = classDeclarations[classIdx]
+        .body
         .members
         .whereType<ConstructorDeclaration>()
         .firstOrNull;

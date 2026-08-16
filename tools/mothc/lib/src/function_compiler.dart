@@ -120,9 +120,8 @@ class FunctionCompiler {
 
     // `Pin(this.number)` assigns straight into the field before the body runs.
     for (final p in params) {
-      final inner = p is DefaultFormalParameter ? p.parameter : p;
-      if (inner is FieldFormalParameter) {
-        final fieldName = inner.name.lexeme;
+      if (p is FieldFormalParameter) {
+        final fieldName = p.name.lexeme;
         _emit(Op.load);
         _emit(0); // this
         _emit(Op.load);
@@ -155,11 +154,10 @@ class FunctionCompiler {
 
   int _declareParams(List<FormalParameter> params) {
     for (final p in params) {
-      final inner = p is DefaultFormalParameter ? p.parameter : p;
-      if (inner is SimpleFormalParameter) {
-        _declare(inner.name!.lexeme, inner.offset);
-      } else if (inner is FieldFormalParameter) {
-        _declare(inner.name.lexeme, inner.offset);
+      if (p is RegularFormalParameter && p.name != null) {
+        _declare(p.name!.lexeme, p.offset);
+      } else if (p is FieldFormalParameter) {
+        _declare(p.name.lexeme, p.offset);
       } else {
         throw CompileError(
           'only plain positional parameters are supported yet',
@@ -592,7 +590,7 @@ class FunctionCompiler {
         // `handlers[0]()` — the callee is an expression, not a name
         _expression(expr.function);
         for (final a in expr.argumentList.arguments) {
-          _expression(a);
+          _argument(a);
         }
         _emit(Op.callValue);
         _emit(expr.argumentList.arguments.length);
@@ -606,7 +604,8 @@ class FunctionCompiler {
         throw CompileError(
           'this kind of expression is not supported yet',
           expr.offset,
-          hint: 'moth supports numbers, bools, strings, lists, arithmetic and calls',
+          hint:
+              'moth supports numbers, bools, strings, lists, arithmetic and calls',
         );
     }
   }
@@ -1168,10 +1167,10 @@ class FunctionCompiler {
       }
       final args = section.argumentList.arguments;
       for (final a in args) {
-        if (a is NamedExpression) {
+        if (a is NamedArgument) {
           throw CompileError('named arguments are not supported yet', a.offset);
         }
-        _expression(a);
+        _argument(a);
       }
       _emit(Op.invoke);
       _emitU16(unit.constants.addString(section.methodName.name));
@@ -1186,6 +1185,15 @@ class FunctionCompiler {
     );
   }
 
+  /// Emits a positional argument. Callers reject or match [NamedArgument]s
+  /// first; by then every remaining argument is a plain expression.
+  void _argument(Argument a) {
+    if (a is NamedArgument) {
+      throw CompileError('named arguments are not supported here', a.offset);
+    }
+    _expression(a as Expression);
+  }
+
   /// Emits one value per declared parameter, in slot order.
   ///
   /// Named arguments are matched to parameters here rather than at run time,
@@ -1194,16 +1202,16 @@ class FunctionCompiler {
   /// Only works where the callee is known statically — a constructor or a
   /// top-level function — which is exactly where a widget tree needs it.
   void _emitArgsInSlotOrder(String what, List<FormalParameter> params,
-      List<Expression> args, int offset) {
+      List<Argument> args, int offset) {
     final positional = <Expression>[];
     final named = <String, Expression>{};
     for (final a in args) {
-      if (a is NamedExpression) {
-        final label = a.name.label.name;
+      if (a is NamedArgument) {
+        final label = a.name.lexeme;
         if (named.containsKey(label)) {
           throw CompileError("'$label' is given twice", a.offset);
         }
-        named[label] = a.expression;
+        named[label] = a.argumentExpression;
       } else {
         if (named.isNotEmpty) {
           throw CompileError(
@@ -1211,23 +1219,20 @@ class FunctionCompiler {
             a.offset,
           );
         }
-        positional.add(a);
+        positional.add(a as Expression);
       }
     }
 
     var next = 0;
     for (final p in params) {
-      final inner = p is DefaultFormalParameter ? p.parameter : p;
-      final name = inner is SimpleFormalParameter
-          ? inner.name?.lexeme
-          : (inner is FieldFormalParameter ? inner.name.lexeme : null);
+      final name = p.name?.lexeme;
 
       if (p.isNamed) {
         final supplied = name == null ? null : named.remove(name);
         if (supplied != null) {
           _expression(supplied);
-        } else if (p is DefaultFormalParameter && p.defaultValue != null) {
-          _expression(p.defaultValue!);
+        } else if (p.defaultClause != null) {
+          _expression(p.defaultClause!.value);
         } else {
           _emit(Op.pushNull);
         }
@@ -1236,8 +1241,8 @@ class FunctionCompiler {
 
       if (next < positional.length) {
         _expression(positional[next++]);
-      } else if (p is DefaultFormalParameter && p.defaultValue != null) {
-        _expression(p.defaultValue!);
+      } else if (p.defaultClause != null) {
+        _expression(p.defaultClause!.value);
       } else {
         throw CompileError(
           "'$what' is missing a value for '${name ?? "a parameter"}'",
@@ -1263,9 +1268,9 @@ class FunctionCompiler {
   /// True when the callee declares any named or defaulted parameter, or the
   /// caller passes a named argument — the cases slot matching exists for.
   static bool _needsSlotMatching(
-          List<FormalParameter> params, List<Expression> args) =>
-      params.any((p) => p.isNamed || p is DefaultFormalParameter) ||
-      args.any((a) => a is NamedExpression);
+          List<FormalParameter> params, List<Argument> args) =>
+      params.any((p) => p.isNamed || p.defaultClause != null) ||
+      args.any((a) => a is NamedArgument);
 
   void _call(MethodInvocation call) {
     _rejectNullAware(call.operator, call.offset);
@@ -1280,7 +1285,7 @@ class FunctionCompiler {
       final first = args.first;
       if (first is SimpleStringLiteral) {
         unit.imageRefs.putIfAbsent(first.value, () => first.offset);
-      } else if (first is! NamedExpression) {
+      } else if (first is! NamedArgument) {
         throw CompileError(
           "Image needs a literal path (like Image('logo.png')) so the "
           'compiler can embed the file in the program',
@@ -1296,7 +1301,7 @@ class FunctionCompiler {
     // top-level functions are resolved here and handle named arguments below.
     if (call.target != null) {
       for (final a in args) {
-        if (a is NamedExpression) {
+        if (a is NamedArgument) {
           throw CompileError(
             'named arguments only work where the callee is known: a '
             'constructor or a top-level function',
@@ -1308,7 +1313,7 @@ class FunctionCompiler {
       }
       _expression(call.target!);
       for (final a in args) {
-        _expression(a);
+        _argument(a);
       }
       _emit(Op.invoke);
       _emitU16(unit.constants.addString(name));
@@ -1324,7 +1329,7 @@ class FunctionCompiler {
           _enclosingMethods.contains(name)) {
         _emitThis();
         for (final a in args) {
-          _expression(a);
+          _argument(a);
         }
         _emit(Op.invoke);
         _emitU16(unit.constants.addString(name));
@@ -1340,7 +1345,7 @@ class FunctionCompiler {
     if (asValue != null) {
       _emitLoadSlot(asValue);
       for (final a in args) {
-        _expression(a);
+        _argument(a);
       }
       _emit(Op.callValue);
       _emit(args.length);
@@ -1351,7 +1356,7 @@ class FunctionCompiler {
       _emit(Op.getProp);
       _emitU16(unit.constants.addString(name));
       for (final a in args) {
-        _expression(a);
+        _argument(a);
       }
       _emit(Op.callValue);
       _emit(args.length);
@@ -1380,7 +1385,7 @@ class FunctionCompiler {
         _checkArgc(
             name, args.length, unit.classCtorArity(classIdx) ?? 0, call.offset);
         for (final a in args) {
-          _expression(a);
+          _argument(a);
         }
       }
       _emit(Op.call);
@@ -1392,7 +1397,7 @@ class FunctionCompiler {
     final nativeArgc = kNatives[name];
     if (nativeArgc != null) {
       for (final a in args) {
-        if (a is NamedExpression) {
+        if (a is NamedArgument) {
           throw CompileError(
             "'$name' is a built-in and takes its arguments positionally",
             a.offset,
@@ -1403,7 +1408,7 @@ class FunctionCompiler {
     if (nativeArgc != null) {
       _checkArgc(name, args.length, nativeArgc, call.offset);
       for (final a in args) {
-        _expression(a);
+        _argument(a);
       }
       _emit(Op.native);
       _emitU16(unit.nativeRef(name));
@@ -1425,7 +1430,7 @@ class FunctionCompiler {
     } else {
       _checkArgc(name, args.length, unit.functionArity(index), call.offset);
       for (final a in args) {
-        _expression(a);
+        _argument(a);
       }
     }
     _emit(Op.call);

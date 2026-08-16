@@ -6,6 +6,10 @@
 //
 // This is package:moth's widget layer — what `import
 // 'package:moth/widgets.dart'` gives a program.
+//
+// `length == 0` stays as written: the moth VM implements `.length` and not
+// `.isEmpty`, and this file is compiled by mothc as well as analyzed.
+// ignore_for_file: prefer_is_empty, prefer_is_not_empty
 
 // The host functions underneath. Imported for this file's own use and
 // re-exported so a program importing this library sees them too — the Dart
@@ -134,7 +138,7 @@ class Box extends Widget {
   int crossAlign;
   int borderWidth;
   int borderColor;
-  var kids;
+  dynamic kids;
   Function? onTap;
 
   /// Everything is named and defaulted, so a tree reads as a tree:
@@ -349,7 +353,7 @@ class Container extends Widget {
 ///       children: [Text('one'), Text('two')],
 ///     )
 class Column extends Widget {
-  var children;
+  dynamic children;
   int mainAxisAlignment;
   int crossAxisAlignment;
 
@@ -385,7 +389,7 @@ class Column extends Widget {
 
 /// Lays its children out horizontally.
 class Row extends Widget {
-  var children;
+  dynamic children;
   int mainAxisAlignment;
   int crossAxisAlignment;
   int spacing;
@@ -426,7 +430,7 @@ class Row extends Widget {
 /// A child with no size of its own fills the stack, which is what makes a
 /// background layer work without being told how big to be.
 class Stack extends Widget {
-  var children;
+  dynamic children;
 
   /// Fills the space its parent gives it. A stack with an explicit size does
   /// not grow, or it would fight its siblings for room.
