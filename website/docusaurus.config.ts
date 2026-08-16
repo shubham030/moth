@@ -5,7 +5,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 const config: Config = {
   title: 'moth',
   tagline: 'Write Dart. Run it on a microcontroller.',
-  favicon: 'img/favicon.svg',
+  favicon: 'img/favicon.png',
 
   url: 'https://shubham030.github.io',
   baseUrl: '/moth/',
@@ -49,7 +49,7 @@ const config: Config = {
     colorMode: {defaultMode: 'dark', respectPrefersColorScheme: true},
     navbar: {
       title: 'moth',
-      logo: {alt: 'moth', src: 'img/moth.svg'},
+      logo: {alt: 'moth', src: 'img/moth.png'},
       items: [
         {type: 'docSidebar', sidebarId: 'docs', position: 'left', label: 'Docs'},
         {to: '/docs/getting-started', label: 'Get started', position: 'left'},

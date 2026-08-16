@@ -1,13 +1,13 @@
-/* moth — a night palette with a lamp-amber accent. */
+/* moth — a night palette keyed to the logo's green-to-cyan gradient. */
 
 :root {
-  --ifm-color-primary: #8a5a00;
-  --ifm-color-primary-dark: #7c5100;
-  --ifm-color-primary-darker: #754c00;
-  --ifm-color-primary-darkest: #603f00;
-  --ifm-color-primary-light: #98630a;
-  --ifm-color-primary-lighter: #a06914;
-  --ifm-color-primary-lightest: #b87a1e;
+  --ifm-color-primary: #0d7f78;
+  --ifm-color-primary-dark: #0b726c;
+  --ifm-color-primary-darker: #0a6b65;
+  --ifm-color-primary-darkest: #085953;
+  --ifm-color-primary-light: #178c84;
+  --ifm-color-primary-lighter: #1e938b;
+  --ifm-color-primary-lightest: #2fa89f;
 
   --ifm-font-family-base: system-ui, -apple-system, 'Segoe UI', Inter, Roboto,
     'Helvetica Neue', sans-serif;
@@ -19,21 +19,22 @@
   --ifm-navbar-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
 
-  --moth-accent: #b87a1e;
-  --moth-violet: #7c4dcc;
+  --moth-accent: #0d7f78;
+  --moth-accent-2: #0672b0;
+  --moth-green: #4f9e43;
   --moth-surface: #ffffff;
   --moth-border: rgba(0, 0, 0, 0.1);
   --moth-muted: #5a6070;
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #e0af68;
-  --ifm-color-primary-dark: #d9a04d;
-  --ifm-color-primary-darker: #d59840;
-  --ifm-color-primary-darkest: #b87d2b;
-  --ifm-color-primary-light: #e7be83;
-  --ifm-color-primary-lighter: #ebc690;
-  --ifm-color-primary-lightest: #f3dcb6;
+  --ifm-color-primary: #45cdc4;
+  --ifm-color-primary-dark: #2fc5bb;
+  --ifm-color-primary-darker: #28beb4;
+  --ifm-color-primary-darkest: #1da399;
+  --ifm-color-primary-light: #5cd3ca;
+  --ifm-color-primary-lighter: #6bd7cf;
+  --ifm-color-primary-lightest: #8fe2db;
 
   --ifm-background-color: #16161e;
   --ifm-background-surface-color: #1a1b26;
@@ -41,8 +42,9 @@
   --ifm-footer-background-color: #13131a;
   --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.08);
 
-  --moth-accent: #e0af68;
-  --moth-violet: #bb9af7;
+  --moth-accent: #45cdc4;
+  --moth-accent-2: #38bdf0;
+  --moth-green: #91d284;
   --moth-surface: #1a1b26;
   --moth-border: rgba(255, 255, 255, 0.09);
   --moth-muted: #9aa2b8;
@@ -91,7 +93,7 @@
   text-align: center;
 }
 
-/* the lamp the moth is drawn to */
+/* the glow the moth is drawn to */
 .heroBanner::before {
   content: '';
   position: absolute;
@@ -129,7 +131,7 @@
 }
 
 .heroAccent {
-  background: linear-gradient(100deg, var(--moth-accent), var(--moth-violet));
+  background: linear-gradient(100deg, var(--moth-green), var(--moth-accent), var(--moth-accent-2));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

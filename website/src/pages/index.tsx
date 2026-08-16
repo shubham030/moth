@@ -48,7 +48,7 @@ function Pane({
 }
 
 function Hero() {
-  const logo = useBaseUrl('img/moth.svg');
+  const logo = useBaseUrl('img/moth.png');
   return (
     <header className="heroBanner">
       <div className="heroInner">
